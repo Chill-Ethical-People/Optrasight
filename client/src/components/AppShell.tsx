@@ -13,6 +13,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { AiJobsTray } from "@/components/AiJobsTray";
 import { ActiveScansBanner } from "@/components/ActiveScansBanner";
 import { GlobalCommandPalette } from "@/components/GlobalCommandPalette";
+import { BATCH_ONE_RELEASE } from "@/lib/release";
 
 /** Sentinel id used in the tenant switcher to represent "all clients". */
 export const GLOBAL_TENANT_ID = "__global__";
@@ -34,56 +35,77 @@ type NavItem = { href: string; label: string; icon: typeof LayoutDashboard };
 type NavGroup = { id: string; label: string; items: NavItem[] };
 
 const navGroups: NavGroup[] = [
-  {
-    id: "command",
-    label: "Command Center",
-    items: [
-      { href: "/", label: "Overview", icon: LayoutDashboard },
-      { href: "/findings", label: "Exposure Findings", icon: ShieldAlert },
-      { href: "/osint", label: "Intel Inbox", icon: RadioTower },
-    ],
-  },
-  {
-    id: "intel",
-    label: "Intel Operations",
-    items: [
-      { href: "/investigations", label: "Investigations", icon: BriefcaseBusiness },
-      { href: "/threat-actors", label: "Actor Observatory", icon: Fingerprint },
-      { href: "/threat-landscape", label: "Threat Landscape", icon: Compass },
-      { href: "/sources-analytics", label: "Source Health", icon: BarChart3 },
-    ],
-  },
-  {
-    id: "domain",
-    label: "Domain Abuse",
-    items: [
-      { href: "/malicious-site-scanner", label: "Malicious Site Scanner", icon: Globe2 },
-      { href: "/lookalikes", label: "Lookalikes", icon: Search },
-      { href: "/assets", label: "Assets", icon: Globe },
-      { href: "/scans", label: "Scans", icon: Activity },
-      { href: "/evidence", label: "Evidence", icon: Camera },
-    ],
-  },
-  {
-    id: "readiness",
-    label: "Detection & Readiness",
-    items: [
-      { href: "/coverage-radar", label: "Coverage Radar", icon: ScanSearch },
-      { href: "/detection-rules", label: "Detection Rules", icon: ShieldCheck },
-      { href: "/exercises", label: "Tabletop Exercises", icon: ClipboardList },
-    ],
-  },
-  {
-    id: "admin",
-    label: "Administration",
-    items: [
-      { href: "/ai-setup", label: "AI Setup", icon: BrainCircuit },
-      { href: "/integrations", label: "Integrations", icon: Plug },
-      { href: "/operations-audit", label: "Job Control", icon: ListChecks },
-      { href: "/settings", label: "Client Settings", icon: SettingsIcon },
-      { href: "/reports", label: "Reports", icon: FileText },
-    ],
-  },
+  ...(BATCH_ONE_RELEASE
+    ? [
+        {
+          id: "intel",
+          label: "Threat Intel",
+          items: [
+            { href: "/osint", label: "Intel Inbox", icon: RadioTower },
+            { href: "/threat-actors", label: "Actor Observatory", icon: Fingerprint },
+          ],
+        },
+        {
+          id: "admin",
+          label: "Operations",
+          items: [
+            { href: "/ai-setup", label: "AI Setup", icon: BrainCircuit },
+            { href: "/operations-audit", label: "Job Control", icon: ListChecks },
+          ],
+        },
+      ]
+    : [
+        {
+          id: "command",
+          label: "Command Center",
+          items: [
+            { href: "/", label: "Overview", icon: LayoutDashboard },
+            { href: "/findings", label: "Exposure Findings", icon: ShieldAlert },
+            { href: "/osint", label: "Intel Inbox", icon: RadioTower },
+          ],
+        },
+        {
+          id: "intel",
+          label: "Intel Operations",
+          items: [
+            { href: "/investigations", label: "Investigations", icon: BriefcaseBusiness },
+            { href: "/threat-actors", label: "Actor Observatory", icon: Fingerprint },
+            { href: "/threat-landscape", label: "Threat Landscape", icon: Compass },
+            { href: "/sources-analytics", label: "Source Health", icon: BarChart3 },
+          ],
+        },
+        {
+          id: "domain",
+          label: "Domain Abuse",
+          items: [
+            { href: "/malicious-site-scanner", label: "Malicious Site Scanner", icon: Globe2 },
+            { href: "/lookalikes", label: "Lookalikes", icon: Search },
+            { href: "/assets", label: "Assets", icon: Globe },
+            { href: "/scans", label: "Scans", icon: Activity },
+            { href: "/evidence", label: "Evidence", icon: Camera },
+          ],
+        },
+        {
+          id: "readiness",
+          label: "Detection & Readiness",
+          items: [
+            { href: "/coverage-radar", label: "Coverage Radar", icon: ScanSearch },
+            { href: "/detection-rules", label: "Detection Rules", icon: ShieldCheck },
+            { href: "/exercises", label: "Tabletop Exercises", icon: ClipboardList },
+          ],
+        },
+        {
+          id: "admin",
+          label: "Administration",
+          items: [
+            { href: "/ai-setup", label: "AI Setup", icon: BrainCircuit },
+            { href: "/integrations", label: "Integrations", icon: Plug },
+            { href: "/operations-audit", label: "Job Control", icon: ListChecks },
+            { href: "/settings", label: "Client Settings", icon: SettingsIcon },
+            { href: "/reports", label: "Reports", icon: FileText },
+          ],
+        },
+      ]),
 ];
 
 function TenantSwitcher() {
@@ -96,6 +118,22 @@ function TenantSwitcher() {
   });
 
   if (!user) return null;
+  if (BATCH_ONE_RELEASE) {
+    return (
+      <div
+        className="flex items-center gap-2 px-3 h-9 rounded-md border bg-muted/30 text-sm"
+        data-testid="badge-release-scope"
+      >
+        <Building2 size={14} className="text-muted-foreground" />
+        <span className="font-medium truncate max-w-[180px]">
+          {user.tenant.name}
+        </span>
+        <Badge variant="secondary" className="text-[10px] uppercase tracking-wide">
+          Batch 1
+        </Badge>
+      </div>
+    );
+  }
   const current = tenants.find((t) => t.id === activeTenantId);
 
   if (!isAdmin) {
@@ -510,7 +548,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         {/* Global active-scans banner — visible on every page so long
             background scans (Malicious Site Scanner) stay tracked while the
             user navigates elsewhere. */}
-        <ActiveScansBanner />
+        {!BATCH_ONE_RELEASE && <ActiveScansBanner />}
         <div className="flex-1 min-w-0">{children}</div>
       </main>
     </div>

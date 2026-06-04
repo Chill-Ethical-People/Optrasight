@@ -21,6 +21,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient, resolveAssetUrl } from "@/lib/queryClient";
 import { startBackgroundJob, type BackgroundJobStart } from "@/lib/aiJobs";
 import { useAiAvailability } from "@/lib/aiAvailability";
+import { BATCH_ONE_RELEASE } from "@/lib/release";
 import {
   DndContext, DragOverlay, useDraggable, useDroppable,
   PointerSensor, TouchSensor, KeyboardSensor, useSensor, useSensors,
@@ -256,6 +257,7 @@ export default function ThreatActors() {
     relevances: TenantRelevance[];
   }>({
     queryKey: ["/api/v1/threat-actors-tenant-tags"],
+    enabled: !BATCH_ONE_RELEASE,
     queryFn: async () => {
       const r = await apiRequest("GET", "/api/v1/threat-actors-tenant-tags");
       return r.json();
@@ -286,7 +288,7 @@ export default function ThreatActors() {
         a.profileId.toLowerCase().includes(q),
       );
     }
-    if (clientFilter !== "all") {
+    if (!BATCH_ONE_RELEASE && clientFilter !== "all") {
       arr = arr.filter((a) => {
         const tags = tagsByActor.get(a.id) ?? [];
         if (clientFilter === "__untagged__") return tags.length === 0;
@@ -352,18 +354,20 @@ export default function ThreatActors() {
             <SelectItem value="archived">Archived</SelectItem>
           </SelectContent>
         </Select>
-        <Select value={clientFilter} onValueChange={(v) => setClientFilter(v as any)}>
-          <SelectTrigger className="h-9 w-44" data-testid="select-client-filter">
-            <SelectValue placeholder="Client relevance" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All clients</SelectItem>
-            <SelectItem value="__untagged__">No client tagged</SelectItem>
-            {availableTenants.map((t) => (
-              <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {!BATCH_ONE_RELEASE && (
+          <Select value={clientFilter} onValueChange={(v) => setClientFilter(v as any)}>
+            <SelectTrigger className="h-9 w-44" data-testid="select-client-filter">
+              <SelectValue placeholder="Client relevance" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All clients</SelectItem>
+              <SelectItem value="__untagged__">No client tagged</SelectItem>
+              {availableTenants.map((t) => (
+                <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
         {view === "kanban" && (
           <div className="flex items-center gap-1 rounded-md border bg-muted/30 p-0.5">
             <Button
@@ -374,14 +378,16 @@ export default function ThreatActors() {
             >
               By status
             </Button>
-            <Button
-              size="sm" variant={kanbanGroupBy === "client" ? "default" : "ghost"}
-              onClick={() => setKanbanGroupBy("client")}
-              data-testid="button-groupby-client"
-              className="h-7 px-2 text-xs"
-            >
-              By client
-            </Button>
+            {!BATCH_ONE_RELEASE && (
+              <Button
+                size="sm" variant={kanbanGroupBy === "client" ? "default" : "ghost"}
+                onClick={() => setKanbanGroupBy("client")}
+                data-testid="button-groupby-client"
+                className="h-7 px-2 text-xs"
+              >
+                By client
+              </Button>
+            )}
           </div>
         )}
         <div className="ml-auto text-xs text-muted-foreground">
@@ -411,7 +417,7 @@ export default function ThreatActors() {
           actors={filtered}
           tagsByActor={tagsByActor}
           availableTenants={availableTenants}
-          groupBy={kanbanGroupBy}
+          groupBy={BATCH_ONE_RELEASE ? "status" : kanbanGroupBy}
           onOpen={setSelectedId}
         />
       )}
@@ -442,6 +448,7 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
 // Tenant chip row — small pills for each tagged tenant. Falls back to a hint
 // when the actor has no tags so analysts know to enrich or tag manually.
 function TenantTagsRow({ tags, compact = false }: { tags: ThreatActorTenantDTO[]; compact?: boolean }) {
+  if (BATCH_ONE_RELEASE) return null;
   if (tags.length === 0) {
     return (
       <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
@@ -911,11 +918,11 @@ const TapCard = memo(function TapCard({
         </div>
       )}
 
-      {/* Tenant relevance chips — surfaced prominently so analysts see at a
-          glance which clients each actor is relevant to. */}
-      <div className="mb-3">
-        <TenantTagsRow tags={tags} />
-      </div>
+      {!BATCH_ONE_RELEASE && (
+        <div className="mb-3">
+          <TenantTagsRow tags={tags} />
+        </div>
+      )}
 
       <div className="grid grid-cols-3 gap-2 text-xs">
         <div>
@@ -944,16 +951,18 @@ const TapCard = memo(function TapCard({
           </span>
         )}
       </div>
-      <div className="mt-2" onClick={(e) => e.stopPropagation()}>
-        <StartInvestigationButton
-          entityType="threat_actor"
-          entityId={actor.id}
-          title={actor.primaryName}
-          severity={actor.threatLevel}
-          summary={actor.execWhat}
-          className="h-7 px-2 text-[11px]"
-        />
-      </div>
+      {!BATCH_ONE_RELEASE && (
+        <div className="mt-2" onClick={(e) => e.stopPropagation()}>
+          <StartInvestigationButton
+            entityType="threat_actor"
+            entityId={actor.id}
+            title={actor.primaryName}
+            severity={actor.threatLevel}
+            summary={actor.execWhat}
+            className="h-7 px-2 text-[11px]"
+          />
+        </div>
+      )}
     </Card>
   );
 });
@@ -1418,7 +1427,14 @@ const TAB_GROUPS: TabGroupDef[] = [
   ]},
 ];
 
-const ALL_TAB_IDS: string[] = TAB_GROUPS.flatMap((g) => g.tabs.map((t) => t.id));
+const ACTIVE_TAB_GROUPS: TabGroupDef[] = BATCH_ONE_RELEASE
+  ? TAB_GROUPS.map((g) => ({
+      ...g,
+      tabs: g.tabs.filter((t) => t.id !== "relevance"),
+    })).filter((g) => g.tabs.length > 0)
+  : TAB_GROUPS;
+
+const ALL_TAB_IDS: string[] = ACTIVE_TAB_GROUPS.flatMap((g) => g.tabs.map((t) => t.id));
 
 const TAB_CONTEXT: Record<string, { title: string; purpose: string; principle: string }> = {
   exec: {
@@ -1519,7 +1535,7 @@ function TabRail({
 }: { activeTab: string; onSelect: (id: string) => void }) {
   return (
     <nav className="py-3 px-2" aria-label="Sections" data-testid="tap-tab-rail">
-      {TAB_GROUPS.map((g) => (
+      {ACTIVE_TAB_GROUPS.map((g) => (
         <div key={g.id} className="mb-3">
           <div className="flex items-center gap-1.5 px-2 mb-1 text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
             <span className={cn("w-1.5 h-1.5 rounded-full", g.dot)} aria-hidden />
@@ -1695,11 +1711,11 @@ function TapTabContextHeader({ activeTab, a }: { activeTab: string; a: ThreatAct
 function TabRailCompact({
   activeTab, onSelect,
 }: { activeTab: string; onSelect: (id: string) => void }) {
-  const activeGroup = TAB_GROUPS.find((g) => g.tabs.some((t) => t.id === activeTab)) ?? TAB_GROUPS[0];
+  const activeGroup = ACTIVE_TAB_GROUPS.find((g) => g.tabs.some((t) => t.id === activeTab)) ?? ACTIVE_TAB_GROUPS[0];
   return (
     <div className="border-b bg-background" data-testid="tap-tab-rail-compact">
       <div className="px-3 pt-2 flex flex-wrap gap-1">
-        {TAB_GROUPS.map((g) => {
+        {ACTIVE_TAB_GROUPS.map((g) => {
           const on = g.id === activeGroup.id;
           return (
             <button
@@ -2016,29 +2032,33 @@ function DetailSheet({ actorId, onClose }: { actorId: string | null; onClose: ()
                             >
                               <FileDown size={14} className="mr-2" /> Export DOCX
                             </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                              data-testid="menuitem-generate-exercise"
-                              onClick={async () => {
-                                try {
-                                  const r = await apiRequest("POST", "/api/v1/exercises", {
-                                    title: `TTX — ${full.primaryName}`,
-                                    framework: "hkma",
-                                    scenarioType: "ransomware-affiliate",
-                                    severity: full.threatLevel === "low" ? "MODERATE" : "HIGH",
-                                    durationMin: 120,
-                                    sourceTapIds: [full.id],
-                                  });
-                                  const ex = await r.json();
-                                  toast({ title: "Exercise created", description: `${ex.code} — open the Generator tab to populate with ${exerciseProvider}.` });
-                                  window.location.hash = "#/exercises";
-                                } catch (e: any) {
-                                  toast({ title: "Could not create exercise", description: String(e?.message ?? e), variant: "destructive" });
-                                }
-                              }}
-                            >
-                              <Sparkles size={14} className="mr-2" /> Generate exercise
-                            </DropdownMenuItem>
+                            {!BATCH_ONE_RELEASE && (
+                              <>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  data-testid="menuitem-generate-exercise"
+                                  onClick={async () => {
+                                    try {
+                                      const r = await apiRequest("POST", "/api/v1/exercises", {
+                                        title: `TTX — ${full.primaryName}`,
+                                        framework: "hkma",
+                                        scenarioType: "ransomware-affiliate",
+                                        severity: full.threatLevel === "low" ? "MODERATE" : "HIGH",
+                                        durationMin: 120,
+                                        sourceTapIds: [full.id],
+                                      });
+                                      const ex = await r.json();
+                                      toast({ title: "Exercise created", description: `${ex.code} — open the Generator tab to populate with ${exerciseProvider}.` });
+                                      window.location.hash = "#/exercises";
+                                    } catch (e: any) {
+                                      toast({ title: "Could not create exercise", description: String(e?.message ?? e), variant: "destructive" });
+                                    }
+                                  }}
+                                >
+                                  <Sparkles size={14} className="mr-2" /> Generate exercise
+                                </DropdownMenuItem>
+                              </>
+                            )}
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
                               className="text-destructive focus:text-destructive"
@@ -2129,7 +2149,7 @@ function DetailSheet({ actorId, onClose }: { actorId: string | null; onClose: ()
                     <TabsContent value="identity"><IdentityTab a={full} /></TabsContent>
                     <TabsContent value="victim"><VictimTab a={full} /></TabsContent>
                     <TabsContent value="capability"><CapabilityTab a={full} /></TabsContent>
-                    <TabsContent value="relevance"><RelevanceTab a={full} /></TabsContent>
+                    {!BATCH_ONE_RELEASE && <TabsContent value="relevance"><RelevanceTab a={full} /></TabsContent>}
                     <TabsContent value="ttps"><TtpsTab a={full} /></TabsContent>
                     <TabsContent value="diamond"><DiamondTab a={full} /></TabsContent>
                     <TabsContent value="campaigns"><CampaignsTab a={full} /></TabsContent>

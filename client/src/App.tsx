@@ -4,6 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { queryClient } from "@/lib/queryClient";
 import { warmExistingIntelCache, type WarmExistingIntelScope } from "@/lib/warmCache";
+import { BATCH_ONE_RELEASE, BATCH_ONE_ALLOWED_PATHS } from "@/lib/release";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/lib/auth";
@@ -53,6 +54,15 @@ function ProtectedRoutes() {
     if (hash.startsWith("#/exercise/")) return <ExercisePortal />;
   }
   if (!user) return <Login />;
+  if (BATCH_ONE_RELEASE && typeof window !== "undefined") {
+    const hash = window.location.hash || "#/";
+    const rawPath = hash.startsWith("#") ? hash.slice(1) : hash;
+    const hashPath = stripHashQuery(rawPath);
+    if (!BATCH_ONE_ALLOWED_PATHS.has(hashPath)) {
+      window.location.hash = "#/osint";
+      return <OsintMonitoring />;
+    }
+  }
   // Keep hash-query deep links route-safe. Wouter's hash hook behavior can vary
   // across dev/prod builds, so known app routes with query params are rendered
   // directly before the catch-all NotFound route can see them.
@@ -89,31 +99,30 @@ function ProtectedRoutes() {
   }
   return (
     <Switch>
-      <Route path="/" component={Overview} />
-      <Route path="/findings" component={Findings} />
-      <Route path="/lookalikes" component={Lookalikes} />
-      <Route path="/assets" component={Assets} />
-      <Route path="/scans" component={Scans} />
-      <Route path="/evidence" component={Evidence} />
-      <Route path="/integrations" component={Integrations} />
-      <Route path="/reports" component={Reports} />
-      <Route path="/malicious-site-scanner" component={MaliciousSiteScanner} />
-      {/* Legacy alias — keep for one wave so bookmarked URLs still resolve. */}
-      <Route path="/young-domains" component={MaliciousSiteScanner} />
+      <Route path="/" component={BATCH_ONE_RELEASE ? OsintMonitoring : Overview} />
       <Route path="/osint" component={OsintMonitoring} />
-      <Route path="/detection-rules/:technique" component={DetectionRules} />
-      <Route path="/detection-rules" component={DetectionRules} />
-      <Route path="/sources-analytics" component={SourcesAnalytics} />
-      <Route path="/threat-landscape" component={ThreatLandscape} />
-      <Route path="/investigations/:caseId" component={Investigations} />
-      <Route path="/investigations" component={Investigations} />
       <Route path="/threat-actors" component={ThreatActors} />
-      <Route path="/coverage-radar" component={CoverageRadar} />
-      <Route path="/exercises" component={Exercises} />
-      <Route path="/exercise/:token" component={ExercisePortal} />
       <Route path="/ai-setup" component={AISetup} />
       <Route path="/operations-audit" component={OperationsAudit} />
-      <Route path="/settings" component={Settings} />
+      {!BATCH_ONE_RELEASE && <Route path="/findings" component={Findings} />}
+      {!BATCH_ONE_RELEASE && <Route path="/lookalikes" component={Lookalikes} />}
+      {!BATCH_ONE_RELEASE && <Route path="/assets" component={Assets} />}
+      {!BATCH_ONE_RELEASE && <Route path="/scans" component={Scans} />}
+      {!BATCH_ONE_RELEASE && <Route path="/evidence" component={Evidence} />}
+      {!BATCH_ONE_RELEASE && <Route path="/integrations" component={Integrations} />}
+      {!BATCH_ONE_RELEASE && <Route path="/reports" component={Reports} />}
+      {!BATCH_ONE_RELEASE && <Route path="/malicious-site-scanner" component={MaliciousSiteScanner} />}
+      {!BATCH_ONE_RELEASE && <Route path="/young-domains" component={MaliciousSiteScanner} />}
+      {!BATCH_ONE_RELEASE && <Route path="/detection-rules/:technique" component={DetectionRules} />}
+      {!BATCH_ONE_RELEASE && <Route path="/detection-rules" component={DetectionRules} />}
+      {!BATCH_ONE_RELEASE && <Route path="/sources-analytics" component={SourcesAnalytics} />}
+      {!BATCH_ONE_RELEASE && <Route path="/threat-landscape" component={ThreatLandscape} />}
+      {!BATCH_ONE_RELEASE && <Route path="/investigations/:caseId" component={Investigations} />}
+      {!BATCH_ONE_RELEASE && <Route path="/investigations" component={Investigations} />}
+      {!BATCH_ONE_RELEASE && <Route path="/coverage-radar" component={CoverageRadar} />}
+      {!BATCH_ONE_RELEASE && <Route path="/exercises" component={Exercises} />}
+      {!BATCH_ONE_RELEASE && <Route path="/exercise/:token" component={ExercisePortal} />}
+      {!BATCH_ONE_RELEASE && <Route path="/settings" component={Settings} />}
       <Route component={NotFound} />
     </Switch>
   );

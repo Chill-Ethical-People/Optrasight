@@ -3,6 +3,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { AppShell, GLOBAL_TENANT_ID } from "@/components/AppShell";
 import { ScopeBar, type ScopeDimension } from "@/components/ScopeBar";
+import { BATCH_ONE_RELEASE } from "@/lib/release";
 import { useAuth } from "@/lib/auth";
 import { PageHeader } from "@/components/PageHeader";
 import { StartInvestigationButton } from "@/components/StartInvestigationButton";
@@ -2756,12 +2757,13 @@ export default function OsintMonitoring() {
   // on page mount unless they have already pivoted somewhere else. Analysts
   // (single-tenant role) keep their own tenant.
   useEffect(() => {
+    if (BATCH_ONE_RELEASE) return;
     if (user?.role === "admin" && activeTenantId !== GLOBAL_TENANT_ID) {
       setActiveTenant(GLOBAL_TENANT_ID);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.role]);
-  const isGlobal = activeTenantId === GLOBAL_TENANT_ID;
+  const isGlobal = !BATCH_ONE_RELEASE && activeTenantId === GLOBAL_TENANT_ID;
   const [dimension, setDimension] = useState<ScopeDimension>("client");
   const [scopeIds, setScopeIds] = useState<string[]>([]);
   return (

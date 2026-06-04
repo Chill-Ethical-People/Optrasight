@@ -1,32 +1,25 @@
 # OptraSight
 
-OptraSight, also known as 全向預警台, is an evidence-led blue-team platform for exposure monitoring, OSINT triage, threat actor profiling, detection readiness, investigations, and executive-ready reporting.
+OptraSight, also known as 全向預警台, is an evidence-led blue-team platform for OSINT triage, threat actor profiling, and threat-hunting query generation.
 
-It is built for MSSP and internal security teams that need one operational console connecting external signal to analyst action: findings, actors, ATT&CK techniques, rules, investigations, jobs, and reports.
+This `main` branch is the **Batch 1 release line**: a single-tenant threat-intel workstation focused on Intel Inbox, Threat Actor Profiles, AI Setup, and Job Control. The full multi-module platform is preserved on `backup/full-platform-before-batch1`.
 
 ## What It Does
 
 | Area | Capability |
 | --- | --- |
-| Overview | Tenant-aware dashboard for findings, scans, exposure, AI jobs, and operational status. |
-| OSINT monitoring | Source inventory, finding ingestion, scoped ATT&CK views, AI triage, deep-dive analysis, STIX preview, and investigation handoff. |
-| Source analytics | OSINT source scorecards, health, overlap, quadrant, tactic/sector heatmaps, and source quality signals. |
-| Threat Actor Profiles | TAP dossiers with identity, TTPs, Diamond Model, IOCs, campaigns, references, detection coverage, confidence drivers, collection gaps, portraits, DOCX/STIX export, and async AI re-analysis. |
-| Coverage Radar | ATT&CK coverage ranking across observed intel, actor profile relevance, mapped rules, and capability-aware next actions. |
-| Detection Rules | Sigma, Splunk SPL, Elastic, Chronicle YARA-L, KQL, Cortex XQL, QRadar AQL, CrowdStrike CQL, Sumo Logic, Snort, and YARA-oriented rule workflows. |
-| Investigations | Standalone case cockpit with editable case metadata, linked evidence, timeline, notes, STIX preview/export, detections, actors, and IOCs. |
-| Integrations | Truthful connector catalogue with implemented/configured/enabled/live-tested/backlog states and disabled unavailable actions. |
+| OSINT monitoring | Source inventory, finding ingestion, ATT&CK scoping, AI triage, deep-dive analysis, email drafts, and STIX preview. |
+| Threat-hunting queries | AI-generated Splunk/KQL/Sigma-style hunting queries from selected OSINT findings. |
+| Threat Actor Profiles | TAP dossiers with identity, TTPs, Diamond Model, IOCs, campaigns, references, detection coverage, confidence drivers, portraits, DOCX/STIX export, and async AI re-analysis. |
 | AI Setup | Per-tenant AI provider configuration, task assignment, provider tests, Gemini compatibility routing, and provider-aware job visibility. |
-| Exercises | Tabletop exercise design, inject timelines, participant portal, scenario state, and PPTX export. |
-| Reports | Threat landscape, investigation, TAP, and operational reporting flows. |
-| Settings | Client profile, contacts, brand assets, keyword expansion, tenant onboarding, and OSINT technology watchlist. |
+| Job Control | Background AI/OSINT job visibility and cancellation controls for Batch 1 workflows. |
 
 ## Design Principles
 
 - **Truthful capability states:** unavailable actions are disabled and explain why.
 - **No silent mock fallback in production:** strict mode surfaces real provider/configuration errors.
-- **Traceability first:** Coverage Radar and TAP workflows link back to observed intel, TTPs, rules, investigations, and reports.
-- **Tenant-aware by design:** all analyst workflows are scoped to the active tenant unless explicitly in global view.
+- **Traceability first:** OSINT, TAP, ATT&CK techniques, and generated hunt queries remain linked.
+- **Single tenant in Batch 1:** backend tenant scoping remains intact, but tenant switching and global views are hidden from this release line.
 - **In-memory UI state:** the browser app avoids localStorage, sessionStorage, indexedDB, and cookies for application state.
 - **Operational density:** UI favors restrained enterprise controls over marketing-style layouts.
 
@@ -39,6 +32,7 @@ contribution credits, including OpenAI Codex and Anthropic Claude.
 
 Recent platform updates include:
 
+- Batch 1 release gating narrows `main` to OSINT, TAP, threat-hunting queries, AI Setup, and Job Control.
 - Route-aware and idle-aware cache warming so initial load is faster while preserving warm TAP/OSINT navigation.
 - Gemini compatibility routing for saved `gemini-3.5-flash` rows to Gemini 2.5 where supported.
 - TAP re-analysis as async `threat_actor_enrichment` jobs visible in Job Control and the background jobs tray.
