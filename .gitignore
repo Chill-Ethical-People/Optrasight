@@ -1,0 +1,50 @@
+node_modules/
+dist/
+.vite/
+
+# SQLite database files — never commit; exposes demo data at rest
+data.db
+data.db-shm
+data.db-wal
+data.db-journal
+data*.db
+data*.db-shm
+data*.db-wal
+data*.db-journal
+*.db.backup*
+
+# Portrait uploads + any other runtime data
+data/*
+!data/README.md
+data/*.db
+data/*.db-shm
+data/*.db-wal
+data/*.db-journal
+data/portraits/
+data/dnstwist_screenshots/
+data/.optrasight-kek
+
+# Generated local analysis output
+output/
+opensquat-nrd-latest.txt
+
+# Locally installed scanner checkouts / binaries
+tools/dnstwist/
+bin/
+
+.env
+.env.*
+!.env.example
+
+*.log
+.DS_Store
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+
+# OS
+Thumbs.db
+# Added by code-review-graph
+.code-review-graph/

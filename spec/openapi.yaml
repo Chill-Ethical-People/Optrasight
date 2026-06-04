@@ -1,0 +1,264 @@
+openapi: 3.1.0
+info:
+  title: OptraSight Express API
+  version: 2.2.0
+  summary: Minimal accurate contract for the active Express 5 + SQLite API.
+  description: |
+    OptraSight is served by one Express process on `/api/v1`. Authenticated
+    routes use an opaque bearer session from `/auth/login`; MSSP admins may
+    pivot tenant context with `X-Tenant-Id`. This file intentionally documents
+    the currently supported public interface rather than old FastAPI/Celery
+    claims.
+servers:
+  - url: http://localhost:5000/api/v1
+    description: Local Express server
+security:
+  - bearerAuth: []
+tags:
+  - name: health
+  - name: auth
+  - name: ai
+  - name: integrations
+  - name: evidence
+  - name: osint
+  - name: threat-actors
+  - name: detection-rules
+  - name: exercises
+paths:
+  /health:
+    get:
+      tags: [health]
+      security: []
+      summary: Health and strict-mode banner
+      responses:
+        "200":
+          description: OK
+  /auth/login:
+    post:
+      tags: [auth]
+      security: []
+      summary: Issue an opaque bearer session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        "200":
+          description: Session issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Revoke the current bearer session
+      responses:
+        "200": { description: Revoked }
+  /me:
+    get:
+      tags: [auth]
+      summary: Current user and tenant
+      responses:
+        "200": { description: OK }
+  /ai/providers:
+    get:
+      tags: [ai]
+      summary: List tenant AI providers and global availability
+      responses:
+        "200":
+          description: Includes `hasUsableProvider`; AI actions should be disabled when false.
+    post:
+      tags: [ai]
+      summary: Create or update an encrypted tenant AI provider key
+      responses:
+        "200": { description: Saved }
+  /integrations:
+    get:
+      tags: [integrations]
+      summary: List integration catalogue entries for the tenant
+      responses:
+        "200":
+          description: Includes implemented/configured/liveTested truth gates.
+  /integrations/{tool}:
+    get:
+      tags: [integrations]
+      summary: Read one integration
+      parameters:
+        - $ref: "#/components/parameters/Tool"
+      responses:
+        "200": { description: OK }
+    put:
+      tags: [integrations]
+      summary: Enable/disable a connector or update encrypted credentials
+      parameters:
+        - $ref: "#/components/parameters/Tool"
+      responses:
+        "200": { description: Saved }
+  /integrations/{tool}/test:
+    post:
+      tags: [integrations]
+      summary: Deterministic connector test
+      description: Unsupported connectors must not return green simulated success.
+      parameters:
+        - $ref: "#/components/parameters/Tool"
+      responses:
+        "200":
+          description: Test result with implemented/configured/liveTested details.
+  /evidence/urlscan:
+    post:
+      tags: [evidence]
+      summary: Submit a URL to URLScan.io for real evidence capture
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, format: uri }
+                findingId: { type: string }
+      responses:
+        "202": { description: Queued or failed real URLScan evidence row }
+        "409": { description: URLScan.io key is not configured }
+        "502": { description: URLScan.io request failed }
+  /osint/findings:
+    get:
+      tags: [osint]
+      summary: List OSINT findings for the current tenant
+      responses:
+        "200": { description: OK }
+  /osint/scan:
+    post:
+      tags: [osint]
+      summary: Start OSINT fetch/scan workflow
+      responses:
+        "202": { description: Started or truthfully blocked }
+  /threat-actors:
+    get:
+      tags: [threat-actors]
+      summary: List TAP dossiers
+      responses:
+        "200": { description: OK }
+    post:
+      tags: [threat-actors]
+      summary: Create a TAP dossier
+      responses:
+        "201": { description: Created }
+  /threat-actors/{id}/portrait:
+    post:
+      tags: [threat-actors]
+      summary: Trigger AI portrait generation
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "202": { description: AI job started }
+  /threat-actors/{id}/portrait/upload:
+    post:
+      tags: [threat-actors]
+      summary: Upload a validated base64 portrait image
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200": { description: Uploaded }
+  /detection-rules:
+    get:
+      tags: [detection-rules]
+      summary: List detection rules
+      responses:
+        "200": { description: OK }
+    post:
+      tags: [detection-rules]
+      summary: Create a detection rule
+      responses:
+        "201": { description: Created }
+  /detection-rules/{id}/deploy:
+    post:
+      tags: [detection-rules]
+      summary: Record manual deployment or truthfully reject push mode
+      description: Push mode does not simulate SIEM success.
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200": { description: Deployment row updated }
+  /exercises:
+    get:
+      tags: [exercises]
+      summary: List tabletop exercises
+      responses:
+        "200": { description: OK }
+    post:
+      tags: [exercises]
+      summary: Create a tabletop exercise shell
+      responses:
+        "201": { description: Created }
+  /exercises/{id}/generate:
+    post:
+      tags: [exercises]
+      summary: Start async exercise generation
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "202": { description: AI job started }
+  /exercise-portal/{token}:
+    get:
+      tags: [exercises]
+      security: []
+      summary: Public participant portal bootstrap
+      parameters:
+        - $ref: "#/components/parameters/PortalToken"
+      responses:
+        "200": { description: Portal state }
+        "404": { description: Invalid token }
+  /exercise-portal/{token}/respond:
+    post:
+      tags: [exercises]
+      security: []
+      summary: Submit a participant response
+      parameters:
+        - $ref: "#/components/parameters/PortalToken"
+      responses:
+        "200": { description: Response recorded }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+  parameters:
+    Id:
+      in: path
+      name: id
+      required: true
+      schema: { type: string }
+    Tool:
+      in: path
+      name: tool
+      required: true
+      schema: { type: string }
+    PortalToken:
+      in: path
+      name: token
+      required: true
+      schema: { type: string, minLength: 32 }
+  responses:
+    Unauthorized:
+      description: Missing or invalid bearer token
+  schemas:
+    AuthResponse:
+      type: object
+      required: [access_token, token_type, tenant_id, role, email]
+      properties:
+        access_token: { type: string }
+        token_type: { type: string, const: bearer }
+        tenant_id: { type: string }
+        role: { type: string }
+        email: { type: string, format: email }

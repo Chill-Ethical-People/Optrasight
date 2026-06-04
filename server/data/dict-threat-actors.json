@@ -1,0 +1,1475 @@
+[
+  {
+    "name": "8Base",
+    "aliases": [
+      "8BASE",
+      "8base ransomware"
+    ],
+    "category": "Ransomware",
+    "country": "Unknown",
+    "active": true,
+    "notes": "Prolific double-extortion RaaS group active since mid-2022, surging in 2023-2024 with hundreds of victims across SMBs in multiple sectors; uses Phobos ransomware variant."
+  },
+  {
+    "name": "Agrius",
+    "aliases": [
+      "Pink Sandstorm",
+      "AMERICIUM",
+      "Agonizing Serpens",
+      "BlackShadow",
+      "DEV-0227"
+    ],
+    "category": "Wiper/Destructive",
+    "country": "Iran",
+    "active": true,
+    "notes": "Iranian state-sponsored group conducting destructive wiper attacks and data-leak operations against Israeli and Middle Eastern targets; linked to Ministry of Intelligence and Security (MOIS)."
+  },
+  {
+    "name": "Akira",
+    "aliases": [
+      "GOLD SAHARA",
+      "PUNK SPIDER",
+      "Howling Scorpius"
+    ],
+    "category": "Ransomware",
+    "country": "Unknown",
+    "active": true,
+    "notes": "Rapidly growing RaaS operation launched in 2023 that became second most-active group in 2025 with 717+ victims; targets Windows and Linux/ESXi environments using double extortion."
+  },
+  {
+    "name": "Andariel",
+    "aliases": [
+      "Silent Chollima",
+      "PLUTONIUM",
+      "Onyx Sleet",
+      "DarkSeoul",
+      "Stonefly",
+      "TDrop2"
+    ],
+    "category": "Nation-State APT",
+    "country": "North Korea",
+    "active": true,
+    "notes": "North Korean Lazarus sub-group (Reconnaissance General Bureau) specializing in ransomware deployment and financial theft against defense, healthcare, and financial institutions."
+  },
+  {
+    "name": "Anonymous Sudan",
+    "aliases": [
+      "AnonymousSudan",
+      "Storm-1359",
+      "DCAT"
+    ],
+    "category": "Hacktivist",
+    "country": "Unknown",
+    "active": false,
+    "notes": "Pro-Russian/pro-Islamic DDoS-for-hire group that conducted high-volume Layer 7 attacks against Western and Israeli targets in 2023-2024; two Sudanese brothers indicted by US DOJ in October 2024."
+  },
+  {
+    "name": "APT-C-36",
+    "aliases": [
+      "Blind Eagle",
+      "TAG-144",
+      "AguilaCiega",
+      "APT-Q-98"
+    ],
+    "category": "Nation-State APT",
+    "country": "Unknown",
+    "active": true,
+    "notes": "Latin America-focused cyberespionage group primarily targeting Colombian and Ecuadorian government, finance, and law enforcement entities using commodity RATs delivered via phishing."
+  },
+  {
+    "name": "APT1",
+    "aliases": [
+      "Comment Crew",
+      "Comment Group",
+      "Comment Panda",
+      "Unit 61398",
+      "Shanghai Group"
+    ],
+    "category": "Nation-State APT",
+    "country": "China",
+    "active": false,
+    "notes": "PLA Unit 61398 group infamous for large-scale intellectual property theft from US defense, aerospace, and energy firms; publicly indicted in 2014; largely dormant since exposure."
+  },
+  {
+    "name": "APT28",
+    "aliases": [
+      "Fancy Bear",
+      "Sofacy",
+      "Sednit",
+      "Pawn Storm",
+      "STRONTIUM",
+      "Forest Blizzard",
+      "FROZENLAKE",
+      "GruesomeLarch",
+      "IRON TWILIGHT",
+      "SNAKEMACKEREL",
+      "Swallowtail",
+      "Group 74",
+      "Tsar Team",
+      "Threat Group-4127",
+      "TG-4127",
+      "Fighting Ursa",
+      "ITG05",
+      "BlueDelta",
+      "UAC-0028",
+      "TA422",
+      "ATK5"
+    ],
+    "category": "Nation-State APT",
+    "country": "Russia",
+    "active": true,
+    "notes": "Russian GRU Unit 26165 conducting aggressive espionage and influence operations against NATO governments, defense, and political targets; linked to 2016 US election interference and ongoing European operations."
+  },
+  {
+    "name": "APT29",
+    "aliases": [
+      "Cozy Bear",
+      "CozyDuke",
+      "The Dukes",
+      "NOBELIUM",
+      "Midnight Blizzard",
+      "UNC2452",
+      "YTTRIUM",
+      "Dark Halo",
+      "NobleBaron",
+      "IRON RITUAL",
+      "IRON HEMLOCK",
+      "SolarStorm",
+      "Blue Kitsune",
+      "UNC3524",
+      "ITG11",
+      "StellarParticle",
+      "Minidionis",
+      "TA421",
+      "TEMP.Monkeys",
+      "UAC-0029",
+      "Cloaked Ursa",
+      "Cranefly",
+      "Fritillary",
+      "Grizzly Steppe"
+    ],
+    "category": "Nation-State APT",
+    "country": "Russia",
+    "active": true,
+    "notes": "Russian SVR (Foreign Intelligence Service) conducting high-sophistication supply chain and cloud identity attacks; responsible for SolarWinds compromise, Microsoft Exchange breach in 2024, and ongoing credential theft targeting Western governments."
+  },
+  {
+    "name": "APT32",
+    "aliases": [
+      "OceanLotus",
+      "SeaLotus",
+      "APT-C-00",
+      "Canvas Cyclone",
+      "BISMUTH",
+      "Cobalt Kitty"
+    ],
+    "category": "Nation-State APT",
+    "country": "Vietnam",
+    "active": true,
+    "notes": "Vietnamese state-linked group conducting espionage against foreign governments, dissidents, and corporations with interests in Southeast Asia; uses custom malware and living-off-the-land techniques."
+  },
+  {
+    "name": "APT33",
+    "aliases": [
+      "HOLMIUM",
+      "Elfin",
+      "Peach Sandstorm",
+      "Refined Kitten",
+      "Magnallium",
+      "RASPITE"
+    ],
+    "category": "Nation-State APT",
+    "country": "Iran",
+    "active": true,
+    "notes": "Iranian IRGC-linked group targeting aerospace, defense, and energy sectors in the US, Saudi Arabia, and South Korea with spear-phishing and password spray attacks."
+  },
+  {
+    "name": "APT37",
+    "aliases": [
+      "ScarCruft",
+      "InkySquid",
+      "Reaper",
+      "Group123",
+      "TEMP.Reaper",
+      "Ricochet Chollima",
+      "POORAIM",
+      "Freezer",
+      "Kalamthan"
+    ],
+    "category": "Nation-State APT",
+    "country": "North Korea",
+    "active": true,
+    "notes": "North Korean RGB-linked group focused on espionage against South Korean defectors, media, and government using zero-days and mobile malware including RokRAT."
+  },
+  {
+    "name": "APT38",
+    "aliases": [
+      "Bluenoroff",
+      "BeagleBoyz",
+      "NICKEL GLADSTONE",
+      "Stardust Chollima",
+      "Sapphire Sleet",
+      "COPERNICIUM",
+      "Alluring Pisces"
+    ],
+    "category": "Nation-State APT",
+    "country": "North Korea",
+    "active": true,
+    "notes": "North Korean Lazarus financial crime sub-unit responsible for billions in SWIFT fraud, cryptocurrency heists (including $625M Ronin Network hack), and targeting of banks and crypto exchanges globally."
+  },
+  {
+    "name": "APT40",
+    "aliases": [
+      "Leviathan",
+      "MUDCARP",
+      "Kryptonite Panda",
+      "Gadolinium",
+      "BRONZE MOHAWK",
+      "TEMP.Jumper",
+      "TEMP.Periscope",
+      "Gingham Typhoon",
+      "TA423",
+      "Red Ladon",
+      "BRONZE MOHAWK",
+      "G0065"
+    ],
+    "category": "Nation-State APT",
+    "country": "China",
+    "active": true,
+    "notes": "PLA-linked group conducting maritime and naval espionage targeting defense contractors, research universities, and governments in the Indo-Pacific; exploits edge devices and VPNs for initial access."
+  },
+  {
+    "name": "APT41",
+    "aliases": [
+      "Wicked Panda",
+      "Brass Typhoon",
+      "BARIUM",
+      "Double Dragon",
+      "Winnti Group",
+      "Bronze Atlas",
+      "Bronze Export",
+      "Earth Baku",
+      "Grayfly",
+      "HOODOO",
+      "TA415",
+      "TG-2633",
+      "LEAD",
+      "Amoeba",
+      "Blackfly",
+      "Red Kelpie"
+    ],
+    "category": "Nation-State APT",
+    "country": "China",
+    "active": true,
+    "notes": "Dual-purpose PRC group uniquely conducting both state-sponsored espionage and financially motivated attacks including supply chain compromises; linked to MSS-contracted operators."
+  },
+  {
+    "name": "APT42",
+    "aliases": [
+      "Charming Kitten (subset)",
+      "UNC788",
+      "Damselfly",
+      "CALANQUE",
+      "YT Group",
+      "TA455"
+    ],
+    "category": "Nation-State APT",
+    "country": "Iran",
+    "active": true,
+    "notes": "IRGC Intelligence Organization sub-group specializing in targeted credential theft and surveillance against political targets, journalists, and dissidents using elaborate social engineering."
+  },
+  {
+    "name": "AvosLocker",
+    "aliases": [
+      "GOLD DENALI",
+      "Avos"
+    ],
+    "category": "Ransomware",
+    "country": "Unknown",
+    "active": false,
+    "notes": "RaaS operation active 2021-2023 targeting critical infrastructure including US financial and healthcare sectors; known for using legitimate remote tools like AnyDesk and disabling security software."
+  },
+  {
+    "name": "BianLian",
+    "aliases": [
+      "GOLD CIVET"
+    ],
+    "category": "Ransomware",
+    "country": "Unknown",
+    "active": true,
+    "notes": "Extortion-only group (shifted from encryption in 2023) targeting professional services, healthcare, and construction via ProxyShell exploitation and custom Go-based tools; sanctioned by CISA."
+  },
+  {
+    "name": "BlackBasta",
+    "aliases": [
+      "Black Basta",
+      "GOLD REBEL",
+      "DEV-0865",
+      "Blizzard Basta"
+    ],
+    "category": "Ransomware",
+    "country": "Russia",
+    "active": true,
+    "notes": "Sophisticated RaaS group believed to be Conti successor; achieved 500+ victims in two years using Qakbot/QBot for initial access, Cobalt Strike for lateral movement, and double extortion."
+  },
+  {
+    "name": "BlackByte",
+    "aliases": [
+      "Hecamede",
+      "BlackByte ransomware group"
+    ],
+    "category": "Ransomware",
+    "country": "Unknown",
+    "active": true,
+    "notes": "RaaS group active since 2021 targeting critical US infrastructure including schools and hospitals; deploys custom .NET ransomware and sells victim data tiered by access level."
+  },
+  {
+    "name": "BlackCat",
+    "aliases": [
+      "ALPHV",
+      "Noberus",
+      "Alpha Spider",
+      "UNC4466"
+    ],
+    "category": "Ransomware",
+    "country": "Russia",
+    "active": false,
+    "notes": "Sophisticated Rust-based RaaS that evolved from DarkSide/BlackMatter; dismantled after FBI operation in December 2023; responsible for Change Healthcare ($22M ransom), MGM, and Caesars attacks."
+  },
+  {
+    "name": "BlackSuit",
+    "aliases": [
+      "Royal ransomware",
+      "Zeon",
+      "DEV-0569"
+    ],
+    "category": "Ransomware",
+    "country": "Russia",
+    "active": true,
+    "notes": "Rebranded Royal ransomware (itself a Conti successor); active since 2023 targeting healthcare, education, and government with Conti-derived code and high ransom demands ($1M-$10M)."
+  },
+  {
+    "name": "Cactus",
+    "aliases": [
+      "GOLD SWALLOW"
+    ],
+    "category": "Ransomware",
+    "country": "Unknown",
+    "active": true,
+    "notes": "RaaS group active since 2023 that self-encrypts its binary to evade AV detection; exploits VPN vulnerabilities for initial access and uses double extortion against enterprise targets."
+  },
+  {
+    "name": "Candiru",
+    "aliases": [
+      "SOURGUM",
+      "Saito Tech",
+      "Abraham's Ax"
+    ],
+    "category": "Spyware Vendor",
+    "country": "Israel",
+    "active": true,
+    "notes": "Israeli mercenary spyware vendor selling DevilsTongue/Sherlock surveillance implants targeting Windows, iOS, and Android; sanctioned by US Commerce Department in November 2021."
+  },
+  {
+    "name": "Cl0p",
+    "aliases": [
+      "CLOP",
+      "Clop",
+      "TA505",
+      "FIN11",
+      "Lace Tempest",
+      "DEV-0950",
+      "GRACEFUL SPIDER",
+      "Spandex Tempest",
+      "CHIMBORAZO",
+      "Hive0065",
+      "GOLD TAHOE",
+      "TEMP.Warlock",
+      "UNC902"
+    ],
+    "category": "Ransomware",
+    "country": "Russia",
+    "active": true,
+    "notes": "Russian-speaking RaaS group known for mass zero-day exploitation campaigns targeting file transfer tools (GoAnywhere, MOVEit, Accellion); hundreds of simultaneous victims per campaign wave."
+  },
+  {
+    "name": "Cobalt Group",
+    "aliases": [
+      "GOLD KINGSWOOD",
+      "Cobalt Gang",
+      "Cobalt Spider"
+    ],
+    "category": "Financially Motivated",
+    "country": "Russia",
+    "active": false,
+    "notes": "Russian-speaking group responsible for $1B+ in losses to financial institutions via ATM jackpotting, SWIFT fraud, and card-processing compromise; core members arrested in 2018."
+  },
+  {
+    "name": "Conti",
+    "aliases": [
+      "Wizard Spider (operator)",
+      "GOLD ULRICK",
+      "GOLD BLACKBURN (subset)",
+      "ITG23",
+      "DEV-0193",
+      "Periwinkle Tempest",
+      "Storm-0193"
+    ],
+    "category": "Ransomware",
+    "country": "Russia",
+    "active": false,
+    "notes": "Highly organized Russian RaaS operation and Ryuk successor that attacked 1,000+ organizations; disbanded in May 2022 after internal chat leaks and infighting over Russia-Ukraine war stance; members dispersed to BlackBasta, Hive, and others."
+  },
+  {
+    "name": "CURIUM",
+    "aliases": [
+      "Crimson Sandstorm",
+      "TA456",
+      "Tortoise Shell",
+      "Yellow Liderc",
+      "Imperial Kitten"
+    ],
+    "category": "Nation-State APT",
+    "country": "Iran",
+    "active": true,
+    "notes": "IRGC-linked group targeting Middle Eastern defense contractors and US military personnel via elaborate fake social media personas and romance lures to deliver malware."
+  },
+  {
+    "name": "CyberAv3ngers",
+    "aliases": [
+      "Soldiers of Solomon",
+      "IRGC CyberAv3ngers",
+      "VOID MANTICORE (partial overlap)"
+    ],
+    "category": "Hacktivist",
+    "country": "Iran",
+    "active": true,
+    "notes": "IRGC-linked group conducting disruptive attacks on Israeli and US water/industrial control systems (Unitronics PLCs); sanctioned by OFAC in 2024."
+  },
+  {
+    "name": "Dark Angels",
+    "aliases": [
+      "Dunghill Leak"
+    ],
+    "category": "Ransomware",
+    "country": "Unknown",
+    "active": true,
+    "notes": "Big-game hunting ransomware group known for single high-value targets; received a record $75M ransom payment from pharmaceutical firm Cencora in 2024."
+  },
+  {
+    "name": "Darkhotel",
+    "aliases": [
+      "DUBNIUM",
+      "Zigzag Hail",
+      "Karba",
+      "Shadow Crane",
+      "APT-C-06",
+      "Fallout Team",
+      "Luder"
+    ],
+    "category": "Nation-State APT",
+    "country": "South Korea",
+    "active": true,
+    "notes": "South Korean-linked espionage group targeting senior executives and government officials via hotel WiFi networks, spear-phishing, and watering holes across Asia-Pacific."
+  },
+  {
+    "name": "DarkSide",
+    "aliases": [
+      "Carbon Spider (operator)",
+      "ELBRUS (operator)",
+      "Sangria Tempest (operator)"
+    ],
+    "category": "Ransomware",
+    "country": "Russia",
+    "active": false,
+    "notes": "RaaS operated by FIN7/Carbon Spider behind the May 2021 Colonial Pipeline attack; shut down under law enforcement pressure shortly after; evolved into BlackMatter, then BlackCat/ALPHV."
+  },
+  {
+    "name": "Dragonfly",
+    "aliases": [
+      "Berserk Bear",
+      "TEMP.Isotope",
+      "DYMALLOY",
+      "TG-4192",
+      "Crouching Yeti",
+      "IRON LIBERTY",
+      "Energetic Bear",
+      "Ghost Blizzard",
+      "BROMINE"
+    ],
+    "category": "Nation-State APT",
+    "country": "Russia",
+    "active": true,
+    "notes": "FSB-linked group conducting persistent espionage and pre-positioning operations against Western energy, water, and critical infrastructure; linked to 2017 US power grid compromise campaigns."
+  },
+  {
+    "name": "DragonForce",
+    "aliases": [
+      "DragonForce ransomware cartel"
+    ],
+    "category": "Ransomware",
+    "country": "Unknown",
+    "active": true,
+    "notes": "Ransomware cartel that in 2025 absorbed RansomHub and LockBit affiliates, forming a 'DragonForce Cartel' allowing affiliates to use custom branding; active against global critical infrastructure."
+  },
+  {
+    "name": "Earth Lusca",
+    "aliases": [
+      "TAG-22",
+      "Charcoal Typhoon",
+      "CHROMIUM",
+      "ControlX"
+    ],
+    "category": "Nation-State APT",
+    "country": "China",
+    "active": true,
+    "notes": "China-linked group conducting espionage against governments and energy firms in Asia, Africa, and the Middle East using ProxyShell exploits and Cobalt Strike; tracked as a separate cluster from APT41."
+  },
+  {
+    "name": "Embargo",
+    "aliases": [
+      "Storm-0501 (deployer)",
+      "Embargo ransomware group"
+    ],
+    "category": "Ransomware",
+    "country": "Unknown",
+    "active": true,
+    "notes": "Relatively new RaaS operation (2024) using custom Rust-based encryptor and 'MDeployer' EDR killer tool; primarily delivered by Storm-0501 against US government and critical infrastructure."
+  },
+  {
+    "name": "Ember Bear",
+    "aliases": [
+      "UNC2589",
+      "Bleeding Bear",
+      "DEV-0586",
+      "Cadet Blizzard",
+      "Frozenvista",
+      "UAC-0056",
+      "TA471",
+      "Saint Bear (related)",
+      "Lorec53"
+    ],
+    "category": "Nation-State APT",
+    "country": "Russia",
+    "active": true,
+    "notes": "GRU-linked unit responsible for WhisperGate wiper attacks against Ukrainian government targets in January 2022; attributed to GRU Unit 161 (formerly known as Sandworm sub-element)."
+  },
+  {
+    "name": "Equation Group",
+    "aliases": [
+      "EQUATION",
+      "Tilded Team",
+      "Lamberts (partial)",
+      "G0020"
+    ],
+    "category": "Nation-State APT",
+    "country": "United States",
+    "active": false,
+    "notes": "NSA-linked elite threat actor behind the Stuxnet co-development, DoubleFantasy/TripleFantasy implants, and EternalBlue exploit; Shadow Brokers leaked toolset in 2017 enabling global ransomware waves."
+  },
+  {
+    "name": "Evil Corp",
+    "aliases": [
+      "Indrik Spider",
+      "Manatee Tempest",
+      "DEV-0243",
+      "UNC2165",
+      "GOLD DRAKE",
+      "Dridex Gang",
+      "BitPaymer operators",
+      "WastedLocker operators"
+    ],
+    "category": "Financially Motivated",
+    "country": "Russia",
+    "active": true,
+    "notes": "Sanctioned Russian cybercriminal group led by Maksim Yakubets responsible for Dridex banking trojan, BitPaymer, WastedLocker, Hades, and PhoenixLocker ransomware operations; $100M+ in financial damage."
+  },
+  {
+    "name": "FIN6",
+    "aliases": [
+      "Magecart Group 6",
+      "ITG08",
+      "Skeleton Spider",
+      "TAAL",
+      "Camouflage Tempest",
+      "GOLD FRANKLIN",
+      "Storm-0538",
+      "White Giant",
+      "ATK88"
+    ],
+    "category": "Financially Motivated",
+    "country": "Russia",
+    "active": true,
+    "notes": "Eastern European group specializing in PoS intrusions and Magecart-style e-commerce skimming; pivoted to ransomware deployment using Ryuk and LockerGoga as an affiliate."
+  },
+  {
+    "name": "FIN7",
+    "aliases": [
+      "Carbon Spider",
+      "GOLD NIAGARA",
+      "ITG14",
+      "ELBRUS",
+      "Sangria Tempest",
+      "Carbanak (partial overlap)",
+      "Coreid"
+    ],
+    "category": "Financially Motivated",
+    "country": "Russia",
+    "active": true,
+    "notes": "Prolific Russian/Ukrainian e-crime group that stole $1B+ from US hospitality and retail via PoS malware; evolved into ransomware operations as DarkSide/BlackMatter operator and AvNeutralizer tool vendor."
+  },
+  {
+    "name": "FIN8",
+    "aliases": [
+      "Syssphinx",
+      "Hive0118",
+      "GOLD CABIN (associated)"
+    ],
+    "category": "Financially Motivated",
+    "country": "Unknown",
+    "active": true,
+    "notes": "Financially motivated group targeting payment card data from hospitality, retail, and entertainment sectors; known for long dwell times and selective high-value targeting; recently linked to White Rabbit ransomware."
+  },
+  {
+    "name": "Flax Typhoon",
+    "aliases": [
+      "Ethereal Panda",
+      "RedJuliett",
+      "ETHEREAL PANDA"
+    ],
+    "category": "Nation-State APT",
+    "country": "China",
+    "active": true,
+    "notes": "Chinese state-sponsored group targeting Taiwanese government, defense, and technology organizations; operates a large IoT botnet (Raptor Train, 260,000+ devices) for covert data exfiltration."
+  },
+  {
+    "name": "FOG",
+    "aliases": [
+      "Fog ransomware group",
+      "GOLD PUFF"
+    ],
+    "category": "Ransomware",
+    "country": "Unknown",
+    "active": true,
+    "notes": "Ransomware group emerging in 2024 targeting US education and recreation sectors by abusing compromised VPN credentials; deploys customized Fog encryptor against Windows and Linux."
+  },
+  {
+    "name": "Fox Kitten",
+    "aliases": [
+      "UNC757",
+      "Pioneer Kitten",
+      "RUBIDIUM",
+      "Lemon Sandstorm",
+      "Parisite",
+      "TEMP.Typhoon (partial)"
+    ],
+    "category": "Access Broker",
+    "country": "Iran",
+    "active": true,
+    "notes": "Iranian IRGC-linked group selling initial access to compromised US and Israeli organizations to ransomware affiliates; exploits VPN and firewall vulnerabilities (Fortinet, Pulse, Citrix) at scale."
+  },
+  {
+    "name": "Gamaredon Group",
+    "aliases": [
+      "IRON TILDEN",
+      "Primitive Bear",
+      "ACTINIUM",
+      "Armageddon",
+      "Shuckworm",
+      "DEV-0157",
+      "Aqua Blizzard",
+      "NastyShrew",
+      "Trident Ursa",
+      "UAC-0010"
+    ],
+    "category": "Nation-State APT",
+    "country": "Russia",
+    "active": true,
+    "notes": "FSB-affiliated group conducting high-volume spear-phishing campaigns almost exclusively against Ukrainian military, government, and critical infrastructure since 2013."
+  },
+  {
+    "name": "HAFNIUM",
+    "aliases": [
+      "Silk Typhoon",
+      "Operation Exchange Marauder",
+      "HAFNIUM China",
+      "UNC2658"
+    ],
+    "category": "Nation-State APT",
+    "country": "China",
+    "active": true,
+    "notes": "Chinese state-sponsored group responsible for the March 2021 Microsoft Exchange Server zero-day exploitation (ProxyLogon) that compromised 250,000+ servers globally."
+  },
+  {
+    "name": "Handala",
+    "aliases": [
+      "VOID MANTICORE (overlap)",
+      "Handala Hack",
+      "Homeland Justice"
+    ],
+    "category": "Hacktivist",
+    "country": "Iran",
+    "active": true,
+    "notes": "Pro-Palestinian/Iranian-linked hacktivist group conducting destructive wiper attacks and data-leak extortion against Israeli organizations; MITRE links VOID MANTICORE as the related state-actor component."
+  },
+  {
+    "name": "Helldown",
+    "aliases": [
+      "Helldown ransomware group"
+    ],
+    "category": "Ransomware",
+    "country": "Unknown",
+    "active": true,
+    "notes": "Emerging RaaS group active in 2024-2025 that exploits Zyxel firewall vulnerabilities for initial access; targets SMBs and mid-market companies across Europe and North America."
+  },
+  {
+    "name": "Hunters International",
+    "aliases": [
+      "World Leaks (rebrand)",
+      "HUNTERS"
+    ],
+    "category": "Ransomware",
+    "country": "Unknown",
+    "active": true,
+    "notes": "RaaS group that acquired and rebranded Hive ransomware code; shifted in 2025 to extortion-only 'World Leaks' model; maintains aggressive data-theft focus against healthcare and critical sectors."
+  },
+  {
+    "name": "INC Ransom",
+    "aliases": [
+      "GOLD IONIC",
+      "INC ransomware"
+    ],
+    "category": "Ransomware",
+    "country": "Unknown",
+    "active": true,
+    "notes": "Active since 2023 targeting healthcare (including NHS Scotland) and public sector organizations with multi-TB data theft and high ransom demands; recently publicly leaked stolen NHS patient data."
+  },
+  {
+    "name": "IntelBroker",
+    "aliases": [
+      "CyberNiggers (group affiliation)",
+      "BreachForum operator"
+    ],
+    "category": "Access Broker",
+    "country": "Unknown",
+    "active": true,
+    "notes": "Prolific access broker and data extortionist who became BreachForum admin in 2024; responsible for high-profile breaches of Cisco, Europol, Apple, AMD, and US military contractors."
+  },
+  {
+    "name": "Intellexa",
+    "aliases": [
+      "Cytrox",
+      "Quadream (associated)",
+      "PREDATOR spyware operators",
+      "Alien spyware"
+    ],
+    "category": "Spyware Vendor",
+    "country": "Multiple",
+    "active": true,
+    "notes": "EU-headquartered commercial spyware consortium selling Predator/Alien zero-click mobile surveillance platform to repressive governments; sanctioned by US State Department in 2024."
+  },
+  {
+    "name": "Interlock",
+    "aliases": [
+      "Interlock ransomware group"
+    ],
+    "category": "Ransomware",
+    "country": "Unknown",
+    "active": true,
+    "notes": "RaaS group active since late 2024 using ClickFix social engineering to deploy Interlock RAT and ransomware payload; targets healthcare, IT, and government organizations across North America and Europe."
+  },
+  {
+    "name": "Ke3chang",
+    "aliases": [
+      "APT15",
+      "Mirage",
+      "Vixen Panda",
+      "GREF",
+      "Playful Dragon",
+      "RoyalAPT",
+      "NICKEL",
+      "Nylon Typhoon"
+    ],
+    "category": "Nation-State APT",
+    "country": "China",
+    "active": true,
+    "notes": "Long-running Chinese MSS-linked group targeting European and Latin American foreign ministries and defense ministries with custom malware families including Okrum and Ketrum."
+  },
+  {
+    "name": "KillNet",
+    "aliases": [
+      "Killnet",
+      "KillNet collective",
+      "Legion (affiliated)"
+    ],
+    "category": "Hacktivist",
+    "country": "Russia",
+    "active": true,
+    "notes": "Pro-Russian hacktivist collective conducting DDoS attacks against NATO member governments, hospitals, and financial institutions since early 2022 Russia-Ukraine invasion; recruits via Telegram."
+  },
+  {
+    "name": "Kimsuky",
+    "aliases": [
+      "APT43",
+      "Black Banshee",
+      "Velvet Chollima",
+      "Emerald Sleet",
+      "THALLIUM",
+      "TA427",
+      "Springtail",
+      "Earth Kumiho",
+      "PatheticSlug",
+      "Sparkling Pisces",
+      "UAT-5394"
+    ],
+    "category": "Nation-State APT",
+    "country": "North Korea",
+    "active": true,
+    "notes": "North Korean RGB intelligence-collection unit targeting South Korean think tanks, nuclear operators, policy institutions, and Western governments with social engineering and spear-phishing."
+  },
+  {
+    "name": "LAPSUS$",
+    "aliases": [
+      "DEV-0537",
+      "Strawberry Tempest",
+      "Scattered LAPSUS Hunters (2025 alliance)"
+    ],
+    "category": "Access Broker",
+    "country": "Multiple",
+    "active": true,
+    "notes": "Loosely organized extortion group (primarily UK/Brazilian teen hackers) that breached Microsoft, Okta, Nvidia, Samsung, and Uber via SIM-swapping, social engineering, and insider recruitment; multiple members arrested."
+  },
+  {
+    "name": "Lazarus Group",
+    "aliases": [
+      "Labyrinth Chollima",
+      "HIDDEN COBRA",
+      "Guardians of Peace",
+      "ZINC",
+      "NICKEL ACADEMY",
+      "Diamond Sleet",
+      "Group 77",
+      "Hastati Group",
+      "Whois Hacking Team",
+      "NewRomanic Cyber Army Team",
+      "Appleworm",
+      "APT-C-26",
+      "Bureau 121",
+      "Dark Seoul",
+      "Genie Spider",
+      "DEV-0139"
+    ],
+    "category": "Nation-State APT",
+    "country": "North Korea",
+    "active": true,
+    "notes": "North Korean Reconnaissance General Bureau umbrella group responsible for $3B+ in cryptocurrency theft, the Sony Pictures hack, WannaCry ransomware, and ongoing supply chain attacks against crypto and DeFi platforms."
+  },
+  {
+    "name": "LockBit",
+    "aliases": [
+      "GOLD MYSTIC",
+      "Bitwise Spider",
+      "ABCD ransomware (original name)",
+      "LockBit 2.0",
+      "LockBit 3.0",
+      "LockBit Black",
+      "LockBit Green"
+    ],
+    "category": "Ransomware",
+    "country": "Russia",
+    "active": true,
+    "notes": "World's most prolific RaaS operation 2021-2024 with 2,000+ known victims; disrupted by Operation Cronos (Feb 2024) but resumed operations; administrator Dmitry Khoroshev indicted by US DOJ."
+  },
+  {
+    "name": "Lynx",
+    "aliases": [
+      "INC Ransom (related codebase)",
+      "Lynx ransomware group"
+    ],
+    "category": "Ransomware",
+    "country": "Unknown",
+    "active": true,
+    "notes": "Emerged in 2024 with code similarities to INC Ransom; rapidly grew to top-10 status in 2025 with 161+ attacks; targets broad sectors including utilities, retail, and professional services."
+  },
+  {
+    "name": "Magic Hound",
+    "aliases": [
+      "APT35",
+      "Charming Kitten",
+      "Phosphorus",
+      "Mint Sandstorm",
+      "COBALT ILLUSION",
+      "TA453",
+      "ITG18",
+      "Newscaster",
+      "NewsBeef",
+      "iKittens",
+      "CharmingCypress",
+      "Yellow Dev13",
+      "BOHRIUM",
+      "Parastoo"
+    ],
+    "category": "Nation-State APT",
+    "country": "Iran",
+    "active": true,
+    "notes": "Iranian IRGC-linked group conducting long-running spear-phishing and social engineering campaigns against academics, policy researchers, journalists, and Jewish/Israeli individuals globally."
+  },
+  {
+    "name": "Medusa",
+    "aliases": [
+      "GOLD FROZEN",
+      "Frozen Spider",
+      "Medusa Blog",
+      "Medusa ransomware group"
+    ],
+    "category": "Ransomware",
+    "country": "Unknown",
+    "active": true,
+    "notes": "RaaS operation active since 2021 that surged into top-10 status in 2024-2025; uses Telegram and a public blog for victim pressure; targets healthcare, education, and government globally."
+  },
+  {
+    "name": "menuPass",
+    "aliases": [
+      "APT10",
+      "Stone Panda",
+      "Cicada",
+      "POTASSIUM",
+      "Red Apollo",
+      "CVNX",
+      "HOGFISH",
+      "BRONZE RIVERSIDE",
+      "CloudHopper",
+      "KRYPTONITE PANDA"
+    ],
+    "category": "Nation-State APT",
+    "country": "China",
+    "active": true,
+    "notes": "MSS-linked group conducting Cloud Hopper managed service provider (MSP) compromise campaigns against Western defense, healthcare, finance, and government clients through supply chain pivot."
+  },
+  {
+    "name": "Money Message",
+    "aliases": [
+      "Money Message ransomware"
+    ],
+    "category": "Ransomware",
+    "country": "Unknown",
+    "active": true,
+    "notes": "RaaS operation emerging in early 2023 demanding multi-million dollar ransoms and deploying a cross-platform Go encryptor; claimed attacks on PC maker MSI and Philippine Airlines."
+  },
+  {
+    "name": "Moonstone Sleet",
+    "aliases": [
+      "Storm-1789",
+      "TEMP.Hermit (partial)"
+    ],
+    "category": "Nation-State APT",
+    "country": "North Korea",
+    "active": true,
+    "notes": "North Korean group mixing espionage and ransomware using elaborate fake companies, malicious npm packages, and custom malware; targets defense contractors and software developers."
+  },
+  {
+    "name": "MuddyWater",
+    "aliases": [
+      "MERCURY",
+      "Earth Vetala",
+      "Static Kitten",
+      "Seedworm",
+      "TEMP.Zagros",
+      "Mango Sandstorm",
+      "TA450",
+      "MuddyKrill",
+      "Cobalt Ulster",
+      "ITG17",
+      "ATK51",
+      "Boggy Serpens",
+      "Yellow Nix",
+      "DEV-1084 (sub-cluster)",
+      "Storm-1084 (sub-cluster)"
+    ],
+    "category": "Nation-State APT",
+    "country": "Iran",
+    "active": true,
+    "notes": "Iranian MOIS-affiliated group conducting espionage and destructive attacks against Middle Eastern governments, telecoms, and defense organizations; uses legitimate RMM tools (Atera, SimpleHelp) as C2."
+  },
+  {
+    "name": "Mustang Panda",
+    "aliases": [
+      "TA416",
+      "RedDelta",
+      "BRONZE PRESIDENT",
+      "STATELY TAURUS",
+      "FIREANT",
+      "CAMARO DRAGON",
+      "EARTH PRETA",
+      "HIVE0154",
+      "TWILL TYPHOON",
+      "TANTALUM",
+      "TEMP.Hex",
+      "Red Lich",
+      "ClumsyToad",
+      "HoneyMyte",
+      "LuminousMoth",
+      "Polaris",
+      "PKPLUG",
+      "BASIN"
+    ],
+    "category": "Nation-State APT",
+    "country": "China",
+    "active": true,
+    "notes": "PRC-linked group conducting prolific spear-phishing campaigns using PlugX malware against European governments, Vatican, NGOs, and Southeast Asian government targets."
+  },
+  {
+    "name": "Mustard Tempest",
+    "aliases": [
+      "DEV-0206",
+      "TA569",
+      "GOLD PRELUDE",
+      "UNC1543",
+      "Evil Corp affiliate (EvilNum)"
+    ],
+    "category": "Access Broker",
+    "country": "Unknown",
+    "active": true,
+    "notes": "Initial access broker operating SocGholish/FakeUpdates malware distribution network; sells access to Evil Corp and other ransomware affiliates via drive-by download campaigns on compromised websites."
+  },
+  {
+    "name": "NoName057(16)",
+    "aliases": [
+      "NoName05716",
+      "NoName 057(16)",
+      "CyberArmyofRussia_Reborn (affiliated)"
+    ],
+    "category": "Hacktivist",
+    "country": "Russia",
+    "active": true,
+    "notes": "Pro-Russian hacktivist group conducting coordinated DDoS attacks against NATO government, financial, and transportation targets since March 2022 using DDoSia volunteer botnet toolkit."
+  },
+  {
+    "name": "NSO Group",
+    "aliases": [
+      "Q Cyber Technologies",
+      "Westbridge Tech",
+      "Novalpina (investor)",
+      "Pegasus operators"
+    ],
+    "category": "Spyware Vendor",
+    "country": "Israel",
+    "active": true,
+    "notes": "Israeli mercenary spyware company whose Pegasus platform uses zero-click exploits to surveil journalists, activists, and heads of state on behalf of government clients; US Commerce Dept entity-listed November 2021."
+  },
+  {
+    "name": "OilRig",
+    "aliases": [
+      "APT34",
+      "COBALT GYPSY",
+      "IRN2",
+      "Helix Kitten",
+      "Evasive Serpens",
+      "Hazel Sandstorm",
+      "EUROPIUM",
+      "ITG13",
+      "Earth Simnavaz",
+      "Crambus",
+      "TA452"
+    ],
+    "category": "Nation-State APT",
+    "country": "Iran",
+    "active": true,
+    "notes": "Iranian MOIS-linked group (alias-shared with APT34 designation) targeting Middle East governments, energy, and financial institutions with DNS tunneling and custom web shells for persistent access."
+  },
+  {
+    "name": "Play",
+    "aliases": [
+      "PlayCrypt",
+      "Playcrypt",
+      "FROG SPIDER (partial)",
+      "Balloonfly"
+    ],
+    "category": "Ransomware",
+    "country": "Unknown",
+    "active": true,
+    "notes": "RaaS group active since 2022 deploying PlayCrypt ransomware; notable for targeting VMware ESXi, exploiting Fortinet and RDP vulnerabilities; 300+ victims in North America, Latin America, and Europe."
+  },
+  {
+    "name": "Predatory Sparrow",
+    "aliases": [
+      "Gonjeshke Darande"
+    ],
+    "category": "Wiper/Destructive",
+    "country": "Unknown",
+    "active": true,
+    "notes": "Anti-Iran group (possibly Israeli-linked) responsible for destructive attacks on Iranian steel plants (2022), gas stations (2023), and rail infrastructure; uses custom wiper malware."
+  },
+  {
+    "name": "Qilin",
+    "aliases": [
+      "Agenda ransomware",
+      "Agenda",
+      "GOLD FEATHER (partial)",
+      "Howling Scorpius (partial)"
+    ],
+    "category": "Ransomware",
+    "country": "Unknown",
+    "active": true,
+    "notes": "Top-ranked RaaS group in 2025 with 946+ disclosed victims; targets VMware ESXi and Windows with Rust-based ransomware; absorbed many RansomHub affiliates after April 2025 outage."
+  },
+  {
+    "name": "Quadream",
+    "aliases": [
+      "InReach (parent company)",
+      "Reign spyware operators"
+    ],
+    "category": "Spyware Vendor",
+    "country": "Israel",
+    "active": false,
+    "notes": "Israeli mercenary spyware vendor selling Reign zero-click iPhone surveillance platform; shut down operations in May 2023 after Citizen Lab/Microsoft exposure of exploitation of journalists and opposition figures."
+  },
+  {
+    "name": "RansomHub",
+    "aliases": [
+      "Cyclops (predecessor)",
+      "Knight (predecessor)",
+      "Water Bakunawa",
+      "GOLD BLAZER"
+    ],
+    "category": "Ransomware",
+    "country": "Unknown",
+    "active": false,
+    "notes": "Former top-ranked RaaS (736 victims in 2024) that went dark in April 2025; largely absorbed into DragonForce cartel infrastructure; recruited heavily from disbanded LockBit and ALPHV affiliates."
+  },
+  {
+    "name": "REvil",
+    "aliases": [
+      "Sodinokibi",
+      "Pinchy Spider",
+      "GOLD SOUTHFIELD",
+      "GOLD GARDEN",
+      "GandCrab operators (predecessor)"
+    ],
+    "category": "Ransomware",
+    "country": "Russia",
+    "active": false,
+    "notes": "Russian RaaS responsible for Kaseya VSA supply chain ransomware attack (1,500 organizations), JBS Foods ($11M ransom), and Quanta Computer/Apple extortion; dismantled by Russian FSB arrests in January 2022."
+  },
+  {
+    "name": "Rhysida",
+    "aliases": [
+      "Vice Society (linked operators)",
+      "DEV-0832 (linked)"
+    ],
+    "category": "Ransomware",
+    "country": "Unknown",
+    "active": true,
+    "notes": "RaaS group launched mid-2023 with strong operational ties to Vice Society; targets healthcare, education, and government with double extortion; responsible for Prospect Medical, British Library, and Army of Chile breaches."
+  },
+  {
+    "name": "Salt Typhoon",
+    "aliases": [
+      "FamousSparrow",
+      "GhostEmperor",
+      "Earth Estries",
+      "UNC2286"
+    ],
+    "category": "Nation-State APT",
+    "country": "China",
+    "active": true,
+    "notes": "Chinese MSS-linked group responsible for the most significant telecom espionage campaign in US history (2024-2025), breaching AT&T, Verizon, T-Mobile, and nine other carriers to intercept government communications and CALEA surveillance data."
+  },
+  {
+    "name": "Sandworm Team",
+    "aliases": [
+      "APT44",
+      "Voodoo Bear",
+      "IRIDIUM",
+      "Seashell Blizzard",
+      "FROZENBARENTS",
+      "ELECTRUM",
+      "Telebots",
+      "IRON VIKING",
+      "BlackEnergy Group",
+      "Quedagh",
+      "BE2",
+      "UAC-0113",
+      "Blue Echidna"
+    ],
+    "category": "Nation-State APT",
+    "country": "Russia",
+    "active": true,
+    "notes": "GRU Unit 74455 conducting the most destructive cyberattacks in history including Ukraine power grid attacks (2015-2016), NotPetya ($10B+ damage), and ongoing wiper/sabotage campaigns against Ukrainian infrastructure."
+  },
+  {
+    "name": "Scattered Spider",
+    "aliases": [
+      "UNC3944",
+      "Octo Tempest",
+      "Storm-0875",
+      "Roasted 0ktapus",
+      "Scatter Swine",
+      "Muddled Libra",
+      "0ktapus"
+    ],
+    "category": "Access Broker",
+    "country": "Multiple",
+    "active": true,
+    "notes": "English-speaking (US/UK) social engineering collective known for help-desk impersonation, SIM swapping, and MFA bypass targeting cloud identity platforms; responsible for MGM Resorts, Caesars, and Coinbase breaches."
+  },
+  {
+    "name": "Sea Turtle",
+    "aliases": [
+      "Teal Kurma",
+      "Marbled Dust",
+      "Cosmic Wolf",
+      "SILICON",
+      "UNC1326",
+      "TEMP.Sea"
+    ],
+    "category": "Nation-State APT",
+    "country": "Turkey",
+    "active": true,
+    "notes": "Turkish state-linked group conducting DNS hijacking and supply chain attacks against Kurdish entities, telecom providers, and ISPs in the Middle East and North Africa."
+  },
+  {
+    "name": "ShinyHunters",
+    "aliases": [
+      "ShinyHunters group",
+      "LAPSUS$ (allied)",
+      "Scattered Lapsus Hunters (2025 alliance)"
+    ],
+    "category": "Access Broker",
+    "country": "Unknown",
+    "active": true,
+    "notes": "Data theft and extortion group responsible for breaches at Snowflake customer environments (2024), Ticketmaster, AT&T, and 70+ other organizations; operated BreachForums before IntelBroker takeover."
+  },
+  {
+    "name": "Silence Group",
+    "aliases": [
+      "Whisper Spider",
+      "GOLD FRANKLIN (partial)"
+    ],
+    "category": "Financially Motivated",
+    "country": "Russia",
+    "active": true,
+    "notes": "Russian-speaking financially motivated group targeting banks in Eastern Europe and Asia using customized Delphi-based tools; known for conducting reconnaissance over weeks before launching card fraud operations."
+  },
+  {
+    "name": "Star Blizzard",
+    "aliases": [
+      "SEABORGIUM",
+      "Callisto Group",
+      "TA446",
+      "COLDRIVER",
+      "Reuse Ice Blizzard"
+    ],
+    "category": "Nation-State APT",
+    "country": "Russia",
+    "active": true,
+    "notes": "FSB Centre 18-linked group conducting spear-phishing and credential theft campaigns against NATO governments, NGOs, journalists, and former intelligence officers; disrupted by Microsoft/DOJ domain seizures in 2024."
+  },
+  {
+    "name": "Storm-0501",
+    "aliases": [
+      "DEV-0501",
+      "Sabbath (related)",
+      "Hive0090"
+    ],
+    "category": "Access Broker",
+    "country": "Unknown",
+    "active": true,
+    "notes": "Ransomware affiliate and access broker that pivots from initial access to multi-stage attacks, deploying Embargo ransomware; known for targeting US hospitals and critical infrastructure."
+  },
+  {
+    "name": "Storm-1811",
+    "aliases": [
+      "DEV-1811"
+    ],
+    "category": "Access Broker",
+    "country": "Unknown",
+    "active": true,
+    "notes": "Threat actor conducting vishing attacks impersonating IT help desks via Microsoft Teams to deploy Black Basta ransomware; exploits legitimate remote management tools for lateral movement."
+  },
+  {
+    "name": "TA505",
+    "aliases": [
+      "Cl0p operators",
+      "FIN11",
+      "Lace Tempest",
+      "DEV-0950",
+      "GRACEFUL SPIDER",
+      "Spandex Tempest",
+      "CHIMBORAZO",
+      "Hive0065",
+      "GOLD TAHOE",
+      "TEMP.Warlock",
+      "UNC902"
+    ],
+    "category": "Financially Motivated",
+    "country": "Russia",
+    "active": true,
+    "notes": "Prolific Russian-speaking group operating Cl0p ransomware and historically the Dridex botnet; responsible for mass zero-day exploitation campaigns targeting file transfer software affecting thousands of organizations."
+  },
+  {
+    "name": "Threat Group-3390",
+    "aliases": [
+      "APT27",
+      "Emissary Panda",
+      "LuckyMouse",
+      "Iron Tiger",
+      "BRONZE UNION",
+      "TG-3390",
+      "Earth Smilodon",
+      "Linen Typhoon",
+      "TEMP.Hippo"
+    ],
+    "category": "Nation-State APT",
+    "country": "China",
+    "active": true,
+    "notes": "Chinese MSS-affiliated group conducting long-dwell espionage against defense contractors, government agencies, and financial institutions; known for HyperBro RAT and SysUpdate backdoor."
+  },
+  {
+    "name": "ToddyCat",
+    "aliases": [
+      "ToddyCat APT"
+    ],
+    "category": "Nation-State APT",
+    "country": "China",
+    "active": true,
+    "notes": "China-linked group targeting European and Asian government and defense organizations with Ninja backdoor and Samurai passive backdoor via Exchange server exploitation."
+  },
+  {
+    "name": "Transparent Tribe",
+    "aliases": [
+      "APT36",
+      "COPPER FIELDSTONE",
+      "Mythic Leopard",
+      "ProjectM",
+      "Operation C-Major",
+      "TEMP.Lapis",
+      "Crimson RAT operators"
+    ],
+    "category": "Nation-State APT",
+    "country": "Pakistan",
+    "active": true,
+    "notes": "Pakistan-linked group conducting espionage against Indian military, government, and education targets using CrimsonRAT and ObliqueRAT delivered via phishing and watering holes."
+  },
+  {
+    "name": "Trigona",
+    "aliases": [
+      "GOLD SEAHORSE",
+      "Trigona ransomware group"
+    ],
+    "category": "Ransomware",
+    "country": "Unknown",
+    "active": false,
+    "notes": "RaaS operation active 2022-2023 targeting healthcare, finance, and legal sectors; infrastructure seized by Ukrainian police in October 2023; associated CNC servers and forums taken offline."
+  },
+  {
+    "name": "Turla",
+    "aliases": [
+      "Snake",
+      "Waterbug",
+      "IRON HUNTER",
+      "Venomous Bear",
+      "Krypton",
+      "WhiteBear",
+      "Secret Blizzard",
+      "BELUGASTURGEON",
+      "Group 88",
+      "Uroburos",
+      "MAKERSMARK",
+      "UAC-0003",
+      "UNC4210",
+      "ITG12",
+      "ATK13",
+      "Pacifier APT",
+      "Blue Python"
+    ],
+    "category": "Nation-State APT",
+    "country": "Russia",
+    "active": true,
+    "notes": "FSB-linked elite espionage group active for 25+ years targeting diplomatic, government, and military organizations globally using highly sophisticated Snake/Uroburos implant network; dismantled by FBI in 2023."
+  },
+  {
+    "name": "UNC3886",
+    "aliases": [
+      "UNC3886 Mandiant",
+      "ChinaChopper operators (contextual)"
+    ],
+    "category": "Nation-State APT",
+    "country": "China",
+    "active": true,
+    "notes": "Chinese espionage actor specializing in compromising VMware ESXi hypervisors and network edge devices (Fortinet, Ivanti) to deploy persistent backdoors in hard-to-scan environments."
+  },
+  {
+    "name": "Velvet Ant",
+    "aliases": [
+      "UNC4596 (possible overlap)"
+    ],
+    "category": "Nation-State APT",
+    "country": "China",
+    "active": true,
+    "notes": "China-nexus threat actor conducting multi-year stealthy persistence in large organization networks using legacy on-premises infrastructure and F5 BIG-IP exploits; discovered maintaining 3-year footholds."
+  },
+  {
+    "name": "Vice Society",
+    "aliases": [
+      "DEV-0832",
+      "Vanilla Tempest",
+      "Rhysida operators (successor)"
+    ],
+    "category": "Ransomware",
+    "country": "Unknown",
+    "active": false,
+    "notes": "Ransomware group active 2021-2023 that disproportionately targeted education and healthcare sectors; evolved into Rhysida ransomware operation; known for deploying HelloKitty and Zeppelin variants."
+  },
+  {
+    "name": "Volt Typhoon",
+    "aliases": [
+      "BRONZE SILHOUETTE",
+      "Vanguard Panda",
+      "DEV-0391",
+      "Storm-0391",
+      "UNC3236",
+      "Voltzite",
+      "Insidious Taurus",
+      "DazedToad",
+      "Redfly"
+    ],
+    "category": "Nation-State APT",
+    "country": "China",
+    "active": true,
+    "notes": "PRC-linked group pre-positioning on US critical infrastructure (energy, water, communications, transportation) for potential disruptive operations; uses living-off-the-land techniques to avoid detection."
+  },
+  {
+    "name": "Winter Vivern",
+    "aliases": [
+      "TA473",
+      "UAC-0114"
+    ],
+    "category": "Nation-State APT",
+    "country": "Russia",
+    "active": true,
+    "notes": "Russia/Belarus-aligned group targeting European government email portals and NATO think tanks; exploits Zimbra and Roundcube webmail vulnerabilities to steal diplomatic communications."
+  },
+  {
+    "name": "Wizard Spider",
+    "aliases": [
+      "GOLD BLACKBURN",
+      "FIN12",
+      "ITG23",
+      "DEV-0193",
+      "Periwinkle Tempest",
+      "Pistachio Tempest",
+      "Storm-0193",
+      "Storm-0230",
+      "TEMP.MixMaster",
+      "Grim Spider",
+      "Trickbot LLC",
+      "UNC2053",
+      "UNC1878"
+    ],
+    "category": "Financially Motivated",
+    "country": "Russia",
+    "active": true,
+    "notes": "Russian cybercriminal organization responsible for TrickBot, Ryuk, and Conti ransomware operations; estimated $2.7B in damages; evolved into Black Basta operations after Conti shutdown."
+  }
+]

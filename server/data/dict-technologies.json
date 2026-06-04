@@ -1,0 +1,1109 @@
+[
+  {
+    "name": "3CX Desktop App",
+    "aliases": [
+      "3CX",
+      "3CX Phone System",
+      "3CX VoIP"
+    ],
+    "category": "Supply Chain / Build",
+    "vendor": "3CX",
+    "notes": "The 2023 3CX supply chain attack (Lazarus Group/AppleJeus) was the first documented cascading supply chain compromise; trojanized Windows and macOS installers distributed to 600,000+ customers."
+  },
+  {
+    "name": "Active Directory",
+    "aliases": [
+      "AD",
+      "LDAP",
+      "AD DS",
+      "Domain Services"
+    ],
+    "category": "Identity / Directory",
+    "vendor": "Microsoft",
+    "notes": "Primary target for lateral movement, privilege escalation, and persistence; exploited via Kerberoasting, Pass-the-Hash, and DCSync attacks across virtually all ransomware campaigns."
+  },
+  {
+    "name": "Adobe Acrobat / Reader",
+    "aliases": [
+      "Acrobat Reader",
+      "Adobe PDF",
+      "Reader DC"
+    ],
+    "category": "Browsers / Plugins",
+    "vendor": "Adobe",
+    "notes": "Frequently exploited via malicious PDF payloads for initial access; multiple CVEs added to CISA KEV; common phishing lure delivery mechanism."
+  },
+  {
+    "name": "Android",
+    "aliases": [
+      "Android OS",
+      "Android AOSP",
+      "Android Mobile"
+    ],
+    "category": "Mobile",
+    "vendor": "Google / AOSP",
+    "notes": "6 Android CVEs added to CISA KEV in 2024; targeted by spyware vendors (Pegasus, Predator), APT-C-23 mobile RATs, and commercial surveillance tools; Android Pixel Privilege escalation heavily exploited."
+  },
+  {
+    "name": "AnyDesk",
+    "aliases": [
+      "AnyDesk RMM"
+    ],
+    "category": "Security Tools abused by attackers",
+    "vendor": "AnyDesk Software",
+    "notes": "Widely abused by ransomware operators and BEC actors as a legitimate remote access tool to maintain persistent access and evade detection; seen in DARKGATE and LockBit campaigns."
+  },
+  {
+    "name": "Apache HTTP Server",
+    "aliases": [
+      "Apache HTTPD",
+      "Apache Web Server",
+      "httpd"
+    ],
+    "category": "Web Servers / Reverse Proxies",
+    "vendor": "Apache Software Foundation",
+    "notes": "Persistently targeted via path traversal, mod_cgi, and RCE vulnerabilities; high KEV representation from Apache Foundation; broadly deployed as internet-facing web server."
+  },
+  {
+    "name": "Apache Struts",
+    "aliases": [
+      "Struts2",
+      "Apache Struts 2"
+    ],
+    "category": "App Servers / Frameworks",
+    "vendor": "Apache Software Foundation",
+    "notes": "CVE-2017-5638 (Equifax breach) and CVE-2023-50164 remain hallmarks of Java framework exploitation; frequently leveraged for unauthenticated RCE via OGNL injection."
+  },
+  {
+    "name": "Apache Tomcat",
+    "aliases": [
+      "Tomcat",
+      "Jakarta EE Servlet Container"
+    ],
+    "category": "App Servers / Frameworks",
+    "vendor": "Apache Software Foundation",
+    "notes": "Widely exploited via deserialization, AJP (Ghostcat CVE-2020-1938), and JSP upload vulnerabilities; common in enterprise Java environments targeted by APTs."
+  },
+  {
+    "name": "Apple iOS / iPadOS",
+    "aliases": [
+      "iOS",
+      "iPadOS",
+      "iPhone OS"
+    ],
+    "category": "Mobile",
+    "vendor": "Apple",
+    "notes": "5 Apple iOS CVEs in 2024 CISA KEV; repeatedly targeted via zero-click exploits (FORCEDENTRY, CVE-2023-41064) by Pegasus spyware and state-sponsored actors against journalists and dissidents."
+  },
+  {
+    "name": "Apple macOS",
+    "aliases": [
+      "macOS",
+      "OS X",
+      "Mac OS"
+    ],
+    "category": "Operating Systems",
+    "vendor": "Apple",
+    "notes": "Targeted by DPRK macOS malware (RustBucket, KANDYKORN), Lazarus Group cryptocurrency theft campaigns, and adware/stealers; XProtect bypasses and GateKeeper evasion are recurring themes."
+  },
+  {
+    "name": "Atlassian Confluence",
+    "aliases": [
+      "Confluence Server",
+      "Confluence Data Center",
+      "Confluence Cloud"
+    ],
+    "category": "CMS / Web Apps",
+    "vendor": "Atlassian",
+    "notes": "CVE-2021-26084, CVE-2022-26134, and CVE-2023-22527 (CVSS 10.0) have been mass-exploited for cryptomining, ransomware, and initial access; heavily represented in CISA KEV."
+  },
+  {
+    "name": "AWS (Amazon Web Services)",
+    "aliases": [
+      "Amazon Web Services",
+      "AWS IAM",
+      "S3",
+      "EC2",
+      "Lambda"
+    ],
+    "category": "Cloud Providers / Services",
+    "vendor": "Amazon",
+    "notes": "AWS credential theft (IAM key exposure, S3 misconfigurations, EC2 IMDS abuse) is a primary cloud attack vector; Pacu and CloudFox frameworks observed in Mandiant IR engagements targeting AWS."
+  },
+  {
+    "name": "Azure Active Directory / Entra ID",
+    "aliases": [
+      "Azure AD",
+      "Entra ID",
+      "AAD",
+      "Microsoft Entra"
+    ],
+    "category": "Identity / Directory",
+    "vendor": "Microsoft",
+    "notes": "Targeted for golden SAML attacks, token theft, and OAuth abuse; UNC3944 and APT29 both exploited federated identity to persist across M365 and Azure environments."
+  },
+  {
+    "name": "Barracuda Email Security Gateway",
+    "aliases": [
+      "Barracuda ESG",
+      "Barracuda Email Gateway"
+    ],
+    "category": "Email / Collaboration",
+    "vendor": "Barracuda Networks",
+    "notes": "CVE-2023-2868 was exploited as a zero-day from at least October 2022; Mandiant's 3rd most prevalent 2023 vulnerability; Barracuda advised full appliance replacement due to deep persistence."
+  },
+  {
+    "name": "BeyondTrust PRA / Remote Support",
+    "aliases": [
+      "BeyondTrust",
+      "Privileged Remote Access",
+      "BeyondTrust RS"
+    ],
+    "category": "Identity / Directory",
+    "vendor": "BeyondTrust",
+    "notes": "CVE-2024-12356 exploited in December 2024 compromising the U.S. Treasury Department via BeyondTrust's Remote Support SaaS; critical authentication bypass enabling RCE."
+  },
+  {
+    "name": "BloodHound",
+    "aliases": [
+      "BloodHound CE",
+      "SharpHound"
+    ],
+    "category": "Security Tools abused by attackers",
+    "vendor": "SpecterOps",
+    "notes": "Open-source Active Directory reconnaissance tool routinely abused by ransomware operators and APT groups to map attack paths for privilege escalation."
+  },
+  {
+    "name": "Brute Ratel C4",
+    "aliases": [
+      "BRc4",
+      "Brute Ratel"
+    ],
+    "category": "Security Tools abused by attackers",
+    "vendor": "Dark Vortex",
+    "notes": "Commercial adversary simulation framework adopted by Black Basta and Qakbot-linked threat actors; designed specifically to evade EDR telemetry through direct syscalls."
+  },
+  {
+    "name": "Check Point Quantum / Gaia",
+    "aliases": [
+      "Check Point Firewall",
+      "Check Point Gaia OS",
+      "Check Point NGFW"
+    ],
+    "category": "Network / Edge Devices",
+    "vendor": "Check Point Software",
+    "notes": "CVE-2024-24919 (information disclosure) was exploited in 2024 campaigns to deploy ShadowPad ransomware; Check Point perimeter devices are recurring targets for initial access."
+  },
+  {
+    "name": "Cisco ASA / FTD",
+    "aliases": [
+      "ASA",
+      "Cisco Firepower",
+      "FTD",
+      "Cisco Adaptive Security Appliance"
+    ],
+    "category": "Network / Edge Devices",
+    "vendor": "Cisco",
+    "notes": "Cisco ASA/FTD has 5 entries in top-10 2024 CISA KEV products; CVE-2018-0171 and CVE-2023-20198 exploited by Salt Typhoon and other threat actors for persistent access."
+  },
+  {
+    "name": "Cisco IOS / IOS XE",
+    "aliases": [
+      "IOS XE",
+      "Cisco IOS",
+      "Cisco Router OS"
+    ],
+    "category": "Network / Edge Devices",
+    "vendor": "Cisco",
+    "notes": "CVE-2023-20198 and CVE-2023-20273 (IOS XE web UI RCE) were zero-day exploited by Salt Typhoon to implant backdoors on thousands of internet-facing Cisco routers."
+  },
+  {
+    "name": "Citrix NetScaler ADC / Gateway",
+    "aliases": [
+      "NetScaler",
+      "Citrix ADC",
+      "NetScaler Gateway",
+      "Citrix Gateway",
+      "CitrixBleed"
+    ],
+    "category": "Network / Edge Devices",
+    "vendor": "Citrix",
+    "notes": "CVE-2023-4966 (CitrixBleed) and CVE-2023-3519 both in CISA KEV; CVE-2023-4966 exploited by LockBit and Medusa for session token hijacking across healthcare and finance sectors."
+  },
+  {
+    "name": "Citrix ShareFile / StorageZones",
+    "aliases": [
+      "ShareFile",
+      "Citrix Content Collaboration"
+    ],
+    "category": "File Transfer / MFT",
+    "vendor": "Citrix",
+    "notes": "CVE-2023-24489 (ShareFile StorageZones unauthenticated RCE) exploited in 2023; ShareFile is a recurring target for ransomware actors seeking access to enterprise file-sharing infrastructure."
+  },
+  {
+    "name": "Cleo Harmony / VLTrader / LexiCom",
+    "aliases": [
+      "Cleo MFT",
+      "Cleo Harmony",
+      "Cleo VLTrader"
+    ],
+    "category": "File Transfer / MFT",
+    "vendor": "Cleo",
+    "notes": "CVE-2024-50623 exploited by the Cl0p ransomware group in December 2024, leading to extortion of at least 66 victim organizations; a follow-on to the MOVEit/GoAnywhere MFT exploit wave."
+  },
+  {
+    "name": "Cobalt Strike",
+    "aliases": [
+      "CS Beacon",
+      "Cobalt Strike Beacon",
+      "BEACON"
+    ],
+    "category": "Security Tools abused by attackers",
+    "vendor": "Fortra (HelpSystems)",
+    "notes": "Most frequently observed malware/tool in Mandiant investigations (10% of all intrusions in 2023); the de facto post-exploitation C2 framework for both nation-state actors and ransomware groups globally."
+  },
+  {
+    "name": "ConnectWise ScreenConnect",
+    "aliases": [
+      "ScreenConnect",
+      "ConnectWise Control"
+    ],
+    "category": "Security Tools abused by attackers",
+    "vendor": "ConnectWise",
+    "notes": "CVE-2024-1708 and CVE-2024-1709 (authentication bypass + path traversal) were chained by ransomware groups in the first publicly reported exploitation of ScreenConnect vulnerabilities in 2024."
+  },
+  {
+    "name": "CrowdStrike Falcon",
+    "aliases": [
+      "Falcon Sensor",
+      "Falcon EDR",
+      "CrowdStrike Agent"
+    ],
+    "category": "Endpoints / EDR",
+    "vendor": "CrowdStrike",
+    "notes": "The July 2024 faulty sensor update (CSAgent) caused a global outage affecting 8.5 million Windows systems; Falcon is also deliberately targeted by attackers seeking to identify and disable EDR."
+  },
+  {
+    "name": "CyberArk PAM",
+    "aliases": [
+      "CyberArk",
+      "CyberArk Vault",
+      "Privileged Access Manager"
+    ],
+    "category": "Identity / Directory",
+    "vendor": "CyberArk",
+    "notes": "CyberArk vaults are targeted by advanced threat actors during lateral movement to access privileged credentials; compromised CyberArk credentials provide keys to an entire enterprise."
+  },
+  {
+    "name": "D-Link Routers",
+    "aliases": [
+      "D-Link",
+      "D-Link DSR",
+      "D-Link DIR"
+    ],
+    "category": "IoT / OT / SCADA",
+    "vendor": "D-Link",
+    "notes": "D-Link had 14 exploited CVEs in 2024 threat intelligence datasets; numerous end-of-life D-Link devices are botnet targets due to persistent authentication bypass and command injection flaws."
+  },
+  {
+    "name": "Docker",
+    "aliases": [
+      "Docker Engine",
+      "Docker Desktop",
+      "Docker Hub"
+    ],
+    "category": "Containers / Orchestration",
+    "vendor": "Docker, Inc.",
+    "notes": "Targeted by TeamTNT and similar cloud-focused threat actors for cryptomining and lateral movement; misconfigured Docker API endpoints and exposed sockets are a common initial access vector."
+  },
+  {
+    "name": "Elastic (Elasticsearch)",
+    "aliases": [
+      "Elasticsearch",
+      "Elastic Stack",
+      "ELK Stack"
+    ],
+    "category": "Databases",
+    "vendor": "Elastic N.V.",
+    "notes": "Unauthenticated Elasticsearch instances have been mass-targeted for data exfiltration; recurring target in cloud misconfiguration campaigns and ransom-wipe attacks."
+  },
+  {
+    "name": "F5 BIG-IP",
+    "aliases": [
+      "BIG-IP",
+      "F5 TMOS",
+      "iControl REST"
+    ],
+    "category": "Network / Edge Devices",
+    "vendor": "F5 Networks",
+    "notes": "CVE-2020-5902, CVE-2021-22986, and CVE-2022-1388 (iControl REST RCE) widely exploited by nation-state and ransomware actors; heavily represented in CISA KEV."
+  },
+  {
+    "name": "Fortinet FortiClient EMS",
+    "aliases": [
+      "FortiClient",
+      "FortiClient EMS",
+      "Endpoint Management Server"
+    ],
+    "category": "Endpoints / EDR",
+    "vendor": "Fortinet",
+    "notes": "CVE-2023-48788 (SQL injection → RCE) was the 4th most exploited CVE in Mandiant's 2024 IR engagements; FIN8 and other financially motivated actors deployed ransomware via this flaw."
+  },
+  {
+    "name": "Fortinet FortiGate",
+    "aliases": [
+      "FortiOS",
+      "FortiGate",
+      "FortiGate Firewall",
+      "FortiProxy"
+    ],
+    "category": "Network / Edge Devices",
+    "vendor": "Fortinet",
+    "notes": "FortiOS SSL-VPN CVEs (CVE-2022-42475, CVE-2023-27997, CVE-2024-21762) are among the most actively exploited edge device flaws; fourth-most exploited CVE family in Mandiant 2024 IR engagements."
+  },
+  {
+    "name": "Fortinet FortiManager",
+    "aliases": [
+      "FortiManager",
+      "FortiAnalyzer"
+    ],
+    "category": "Network / Edge Devices",
+    "vendor": "Fortinet",
+    "notes": "CVE-2024-47575 (FortiJump) was a zero-day exploited by a threat actor compromising dozens of organizations before public disclosure; UNC3886 planted REPTILE/TABLEFLIP rootkits on FortiManager."
+  },
+  {
+    "name": "GitLab",
+    "aliases": [
+      "GitLab CE",
+      "GitLab EE",
+      "GitLab SCM"
+    ],
+    "category": "CMS / Web Apps",
+    "vendor": "GitLab",
+    "notes": "CVE-2023-7028 (account takeover via email) and CVE-2021-22205 (RCE) placed GitLab in CISA KEV; source code repositories are high-value targets for credential and secrets theft."
+  },
+  {
+    "name": "GoAnywhere MFT",
+    "aliases": [
+      "GoAnywhere Managed File Transfer",
+      "Fortra GoAnywhere"
+    ],
+    "category": "File Transfer / MFT",
+    "vendor": "Fortra (HelpSystems)",
+    "notes": "CVE-2023-0669 was exploited by Cl0p ransomware group as a zero-day in early 2023, resulting in over 130 known victim organizations; a major driver of the 2023 DBIR's vulnerability exploitation surge."
+  },
+  {
+    "name": "Google Chrome / Chromium",
+    "aliases": [
+      "Chrome",
+      "Chromium",
+      "Chrome Browser"
+    ],
+    "category": "Browsers / Plugins",
+    "vendor": "Google",
+    "notes": "9 entries in 2024 CISA KEV (Google Chromium); frequent zero-day exploitation by nation-state actors (APT groups) targeting browser engine components for initial access via drive-by."
+  },
+  {
+    "name": "Internet Explorer / MSHTML",
+    "aliases": [
+      "IE",
+      "Trident",
+      "MSHTML",
+      "Internet Explorer 11"
+    ],
+    "category": "Browsers / Plugins",
+    "vendor": "Microsoft",
+    "notes": "MSHTML (CVE-2021-40444, CVE-2023-36584) remains exploited in Office documents and HTML attachments despite IE retirement; CVE-2023-32046 added to CISA KEV in 2023."
+  },
+  {
+    "name": "Internet Information Services (IIS)",
+    "aliases": [
+      "IIS",
+      "Microsoft IIS",
+      "IIS Web Server"
+    ],
+    "category": "Web Servers / Reverse Proxies",
+    "vendor": "Microsoft",
+    "notes": "IIS is frequently targeted via ASP.NET deserialization, web shell deployment, and ProxyLogon/ProxyShell exploitation on Exchange/IIS; ProxyNotShell and OWASSRF also impacted IIS-hosted apps."
+  },
+  {
+    "name": "Ivanti Connect Secure",
+    "aliases": [
+      "Ivanti ICS",
+      "Pulse Connect Secure",
+      "Ivanti VPN",
+      "Ivanti Policy Secure"
+    ],
+    "category": "VPN / Remote Access",
+    "vendor": "Ivanti",
+    "notes": "CVE-2023-46805 and CVE-2024-21887 were the 2nd most exploited vulnerability pair in Mandiant's 2024 IR; exploited by 8 distinct threat clusters including five China-nexus espionage groups."
+  },
+  {
+    "name": "Ivanti Endpoint Manager Mobile",
+    "aliases": [
+      "EPMM",
+      "MobileIron",
+      "Ivanti MDM"
+    ],
+    "category": "VPN / Remote Access",
+    "vendor": "Ivanti",
+    "notes": "CVE-2023-35078 (unauthenticated API access) exploited by APT groups to access Norwegian government networks; EPMM/MobileIron MDM platforms are high-value targets for credential theft."
+  },
+  {
+    "name": "JBoss / WildFly",
+    "aliases": [
+      "JBoss EAP",
+      "WildFly",
+      "JBoss Application Server"
+    ],
+    "category": "App Servers / Frameworks",
+    "vendor": "Red Hat / JBoss Community",
+    "notes": "Legacy JBoss deserialization flaws (CVE-2017-12149) remain exploited years after disclosure; WildFly/JBoss deployments in financial and healthcare sectors are frequent APT targets."
+  },
+  {
+    "name": "Jenkins",
+    "aliases": [
+      "Jenkins CI",
+      "Jenkins Server"
+    ],
+    "category": "CMS / Web Apps",
+    "vendor": "Jenkins / CloudBees",
+    "notes": "CVE-2024-23897 (arbitrary file read to RCE) and multiple older deserialization CVEs exploited for initial access and supply chain attacks; exposed Jenkins instances are prime targets."
+  },
+  {
+    "name": "JetBrains TeamCity",
+    "aliases": [
+      "TeamCity",
+      "TeamCity CI/CD"
+    ],
+    "category": "Supply Chain / Build",
+    "vendor": "JetBrains",
+    "notes": "CVE-2023-42793 exploited by APT29 and North Korean groups to compromise CI/CD pipelines and inject malicious code into build artifacts; Mandiant cited it in the 2024 M-Trends campaign list."
+  },
+  {
+    "name": "Juniper Junos OS",
+    "aliases": [
+      "Junos",
+      "Juniper SRX",
+      "Juniper EX"
+    ],
+    "category": "Network / Edge Devices",
+    "vendor": "Juniper Networks",
+    "notes": "CVE-2023-36844 and related J-Web chain vulnerabilities exploited actively; Juniper SRX firewalls targeted by threat actors for VPN initial access and network pivoting."
+  },
+  {
+    "name": "Kaseya VSA",
+    "aliases": [
+      "Kaseya VSA",
+      "Kaseya Remote Management"
+    ],
+    "category": "Supply Chain / Build",
+    "vendor": "Kaseya",
+    "notes": "CVE-2021-30116 exploited by REvil/Sodinokibi in the July 2021 supply chain ransomware attack; approximately 1,500 downstream MSP customers compromised through a single SQL injection."
+  },
+  {
+    "name": "Kerberos",
+    "aliases": [
+      "Kerberoasting",
+      "AS-REP Roasting",
+      "Pass-the-Ticket",
+      "Golden Ticket"
+    ],
+    "category": "Identity / Directory",
+    "vendor": "MIT / Microsoft",
+    "notes": "CrowdStrike observed a 583% increase in Kerberoasting attacks in 2023; Kerberos ticket abuse (Golden Ticket, Silver Ticket, Pass-the-Ticket) is a core technique in nearly all Windows-environment APT campaigns."
+  },
+  {
+    "name": "Kubernetes",
+    "aliases": [
+      "K8s",
+      "kubectl",
+      "kube-apiserver"
+    ],
+    "category": "Containers / Orchestration",
+    "vendor": "CNCF / Google",
+    "notes": "Misconfigured Kubernetes API servers and exposed dashboards are exploited by cryptomining groups (TeamTNT) and APTs; privilege escalation to cluster-admin is a recurring incident response finding."
+  },
+  {
+    "name": "Linux Kernel",
+    "aliases": [
+      "Linux",
+      "Linux OS",
+      "kernel"
+    ],
+    "category": "Operating Systems",
+    "vendor": "Linux Foundation",
+    "notes": "4 Linux Kernel CVEs added to CISA KEV in 2024; privilege escalation (DirtyCow, Dirty Pipe, netfilter flaws) routinely exploited post-initial access on server and cloud workloads."
+  },
+  {
+    "name": "LNK / Shortcut Files",
+    "aliases": [
+      "LNK",
+      "Windows shortcut",
+      ".lnk"
+    ],
+    "category": "Archives / Loaders",
+    "vendor": "Microsoft",
+    "notes": "Weaponized LNK files are the dominant phishing payload after Microsoft blocked Office macros in 2022; used by APT28, Lazarus Group, and numerous ransomware operators for initial execution."
+  },
+  {
+    "name": "Log4j / Log4Shell",
+    "aliases": [
+      "Log4j2",
+      "Log4Shell",
+      "CVE-2021-44228",
+      "Apache Log4j"
+    ],
+    "category": "App Servers / Frameworks",
+    "vendor": "Apache Software Foundation",
+    "notes": "CVE-2021-44228 (Log4Shell) triggered the broadest mass-exploitation event of 2021-2022; remains actively exploited by Lazarus Group and ransomware actors years after disclosure."
+  },
+  {
+    "name": "Metasploit Framework",
+    "aliases": [
+      "Metasploit",
+      "msfconsole",
+      "meterpreter"
+    ],
+    "category": "Security Tools abused by attackers",
+    "vendor": "Rapid7 (open source)",
+    "notes": "One of the most frequently observed attack frameworks globally; seen in Mandiant IR data alongside Cobalt Strike; used across all threat actor categories from script kiddies to nation-state actors."
+  },
+  {
+    "name": "Microsoft .NET Framework",
+    "aliases": [
+      ".NET",
+      "ASP.NET",
+      ".NET Runtime",
+      "dotnet"
+    ],
+    "category": "Programming Runtimes",
+    "vendor": "Microsoft",
+    "notes": "Deserialization vulnerabilities in .NET and ASP.NET (CVE-2017-9248, ViewState exploitation) are routinely exploited for RCE on IIS-hosted applications; frequently seen in web-shell delivery chains."
+  },
+  {
+    "name": "Microsoft Defender / Windows Defender",
+    "aliases": [
+      "Windows Defender",
+      "Microsoft Defender AV",
+      "Defender for Endpoint"
+    ],
+    "category": "Endpoints / EDR",
+    "vendor": "Microsoft",
+    "notes": "Actively targeted for evasion and disabling by ransomware (Black Basta, LockBit) and APT groups; CVE-2023-36033 (Defender DWM privilege escalation) exploited as a zero-day."
+  },
+  {
+    "name": "Microsoft Exchange Server",
+    "aliases": [
+      "Exchange Server",
+      "Exchange On-Premises",
+      "OWA",
+      "Exchange EAP"
+    ],
+    "category": "Email / Collaboration",
+    "vendor": "Microsoft",
+    "notes": "ProxyLogon (CVE-2021-26855) and ProxyShell remain among the most mass-exploited vulnerabilities in history; Exchange is the 2nd most-exploited product by CVE count in CISA KEV."
+  },
+  {
+    "name": "Microsoft Office / Microsoft 365",
+    "aliases": [
+      "Office 365",
+      "M365",
+      "Word",
+      "Excel",
+      "Outlook",
+      "Office Suite"
+    ],
+    "category": "Office / Productivity",
+    "vendor": "Microsoft",
+    "notes": "Office documents (CVE-2023-36884, macro-embedded docs, OneNote, LNK) are the dominant phishing payload; Microsoft 365 credential theft and BEC is the top-ranked breach pattern in Verizon DBIR."
+  },
+  {
+    "name": "Microsoft OneNote",
+    "aliases": [
+      "OneNote",
+      "OneNote notebooks",
+      ".one files"
+    ],
+    "category": "Archives / Loaders",
+    "vendor": "Microsoft",
+    "notes": "Emerged as a primary phishing payload container in 2023 after macro blocking; QakBot, AsyncRAT, and multiple RATs delivered via malicious .one file attachments (T1566.001)."
+  },
+  {
+    "name": "Microsoft SharePoint",
+    "aliases": [
+      "SharePoint Server",
+      "SharePoint Online"
+    ],
+    "category": "CMS / Web Apps",
+    "vendor": "Microsoft",
+    "notes": "CVE-2023-24955 and multiple Server-Side Request Forgery chains in SharePoint Server exploited for RCE; attackers frequently use SharePoint for data exfiltration and as a phishing payload host."
+  },
+  {
+    "name": "Microsoft Teams",
+    "aliases": [
+      "MS Teams",
+      "Teams"
+    ],
+    "category": "Email / Collaboration",
+    "vendor": "Microsoft",
+    "notes": "APT29 (Midnight Blizzard) and DARKGATE operators conducted spear-phishing via compromised Microsoft Teams accounts in 2023; Storm-1811 used Teams for vishing-based initial access."
+  },
+  {
+    "name": "Microsoft Windows",
+    "aliases": [
+      "Windows OS",
+      "Windows Server",
+      "Win32",
+      "Windows 10",
+      "Windows 11"
+    ],
+    "category": "Operating Systems",
+    "vendor": "Microsoft",
+    "notes": "Most-targeted OS in CISA KEV by a wide margin (22 additions in 2024 alone); exploited for privilege escalation, lateral movement, and persistence via CLFS, Win32k, and NTLM hash flaws."
+  },
+  {
+    "name": "MikroTik RouterOS",
+    "aliases": [
+      "MikroTik",
+      "RouterOS",
+      "MikroTik Router"
+    ],
+    "category": "IoT / OT / SCADA",
+    "vendor": "MikroTik",
+    "notes": "Routinely recruited into Meris and other large-scale DDoS botnets; used by Volt Typhoon and other APTs as SOHO router proxies for victim-network covert relay infrastructure."
+  },
+  {
+    "name": "Mimikatz",
+    "aliases": [
+      "lsass dump",
+      "sekurlsa",
+      "credential dump"
+    ],
+    "category": "Security Tools abused by attackers",
+    "vendor": "gentilkiwi (open source)",
+    "notes": "The most widely used credential-harvesting tool across threat actor categories; used in virtually every Windows-based intrusion for NTLM hash extraction and Kerberos ticket manipulation."
+  },
+  {
+    "name": "MongoDB",
+    "aliases": [
+      "MongoDB Atlas",
+      "Mongo DB"
+    ],
+    "category": "Databases",
+    "vendor": "MongoDB, Inc.",
+    "notes": "Exposed, unauthenticated MongoDB instances are systematically compromised for data exfiltration and ransom-wipe campaigns; large numbers of internet-facing instances remain unprotected."
+  },
+  {
+    "name": "MOVEit Transfer",
+    "aliases": [
+      "MOVEit",
+      "Progress MOVEit",
+      "MOVEit MFT"
+    ],
+    "category": "File Transfer / MFT",
+    "vendor": "Progress Software",
+    "notes": "CVE-2023-34362 was Mandiant's most prevalent 2023 vulnerability; Cl0p ransomware group exploited it as a zero-day in May 2023, affecting 1,000+ organizations globally and driving the 180% DBIR spike."
+  },
+  {
+    "name": "MySQL / MariaDB",
+    "aliases": [
+      "MySQL",
+      "MariaDB",
+      "mysqld"
+    ],
+    "category": "Databases",
+    "vendor": "Oracle / MariaDB Foundation",
+    "notes": "Exposed MySQL instances targeted by GandCrab and other ransomware families via brute force; SQL injection leading to MySQL file read/write is a persistent web application attack vector."
+  },
+  {
+    "name": "Netgear Routers",
+    "aliases": [
+      "Netgear",
+      "Netgear SOHO"
+    ],
+    "category": "IoT / OT / SCADA",
+    "vendor": "Netgear",
+    "notes": "Multiple CISA KEV entries for Netgear routers; targeted by Volt Typhoon for SOHO proxy infrastructure and commonly recruited into botnets via default credential abuse."
+  },
+  {
+    "name": "Nginx",
+    "aliases": [
+      "nginx",
+      "NGINX web server",
+      "Nginx reverse proxy"
+    ],
+    "category": "Web Servers / Reverse Proxies",
+    "vendor": "F5 Networks / NGINX, Inc.",
+    "notes": "Misconfigurations and vulnerabilities in Nginx (CVE-2017-7529, HTTP/2 rapid reset) are exploited for DoS and data leakage; frequently seen as the entry point in web application breaches."
+  },
+  {
+    "name": "Node.js / npm",
+    "aliases": [
+      "Node.js",
+      "npm packages",
+      "node",
+      "npm supply chain"
+    ],
+    "category": "Supply Chain / Build",
+    "vendor": "OpenJS Foundation",
+    "notes": "npm package supply chain attacks (typosquatting, dependency confusion, malicious maintainer takeovers) are a high-frequency threat intelligence topic; node.js prototype pollution CVEs also exploited."
+  },
+  {
+    "name": "Okta",
+    "aliases": [
+      "Okta Identity Cloud",
+      "Okta SAML",
+      "Okta SSO"
+    ],
+    "category": "Identity / Directory",
+    "vendor": "Okta",
+    "notes": "Compromised by LAPSUS$ in 2022 and again in 2023 via support system access; Scattered Spider (UNC3944) routinely phishes Okta help desks to bypass MFA and pivot to downstream tenants."
+  },
+  {
+    "name": "Oracle Database",
+    "aliases": [
+      "Oracle DB",
+      "Oracle RDBMS",
+      "OracleDB"
+    ],
+    "category": "Databases",
+    "vendor": "Oracle",
+    "notes": "14 Oracle CVEs in 2024 exploited products list; Oracle E-Business Suite CVE-2022-21587 was Mandiant's 2nd most prevalent 2023 vulnerability; Oracle DB default credential attacks are persistent."
+  },
+  {
+    "name": "Oracle WebLogic",
+    "aliases": [
+      "WebLogic",
+      "WebLogic Server"
+    ],
+    "category": "App Servers / Frameworks",
+    "vendor": "Oracle",
+    "notes": "CVE-2020-14882 (unauthenticated RCE) and multiple T3/IIOP deserialization CVEs repeatedly exploited by crypto-mining groups and ransomware actors; WebLogic has over 14 CISA KEV entries."
+  },
+  {
+    "name": "Palo Alto PAN-OS",
+    "aliases": [
+      "PAN-OS",
+      "Palo Alto Firewall",
+      "GlobalProtect",
+      "Palo Alto NGFW"
+    ],
+    "category": "Network / Edge Devices",
+    "vendor": "Palo Alto Networks",
+    "notes": "CVE-2024-3400 (GlobalProtect command injection) was the #1 most exploited vulnerability across all 2024 Mandiant IR engagements; 6 PAN-OS CVEs added to CISA KEV in 2024."
+  },
+  {
+    "name": "PHP",
+    "aliases": [
+      "PHP runtime",
+      "PHP-FPM",
+      "php"
+    ],
+    "category": "Programming Runtimes",
+    "vendor": "The PHP Group",
+    "notes": "CVE-2024-4577 (PHP-CGI Windows RCE) was mass-exploited shortly after disclosure; PHP file inclusion, deserialization, and object injection vulnerabilities are endemic across web applications."
+  },
+  {
+    "name": "PostgreSQL",
+    "aliases": [
+      "Postgres",
+      "psql",
+      "PostgreSQL DB"
+    ],
+    "category": "Databases",
+    "vendor": "PostgreSQL Global Development Group",
+    "notes": "CVE-2024-1597 (SQL injection bypass) and misconfigurations in pg_hba.conf lead to mass compromise; PostgreSQL COPY TO/FROM PROGRAM is abused for OS command execution in lateral movement."
+  },
+  {
+    "name": "PowerShell",
+    "aliases": [
+      "powershell.exe",
+      "PS",
+      "PowerShell ISE",
+      "PowerShell Remoting"
+    ],
+    "category": "Security Tools abused by attackers",
+    "vendor": "Microsoft",
+    "notes": "Top MITRE ATT&CK sub-technique (T1059.001); used in virtually every Windows-based attack for execution, lateral movement, and AMSI bypass; a core component of most post-exploitation toolchains."
+  },
+  {
+    "name": "PsExec",
+    "aliases": [
+      "Sysinternals PsExec",
+      "psexec.exe"
+    ],
+    "category": "Security Tools abused by attackers",
+    "vendor": "Microsoft (Sysinternals)",
+    "notes": "Canonical living-off-the-land lateral movement tool; used by Conti, LockBit, and dozens of other ransomware groups to propagate payloads across Windows environments."
+  },
+  {
+    "name": "Python / PyPI",
+    "aliases": [
+      "Python runtime",
+      "PyPI packages",
+      "pip",
+      "PyPI supply chain"
+    ],
+    "category": "Supply Chain / Build",
+    "vendor": "Python Software Foundation",
+    "notes": "PyPI supply chain attacks via typosquatting and malicious packages are a documented vector for credential theft and backdoor deployment; Python runtime also used in attack toolchains."
+  },
+  {
+    "name": "QNAP QTS / NAS",
+    "aliases": [
+      "QNAP",
+      "QTS",
+      "QNAP NAS",
+      "QNAP HBS"
+    ],
+    "category": "Backup / Storage",
+    "vendor": "QNAP Systems",
+    "notes": "5 QNAP QTS entries in top-10 2024 exploited products; Deadbolt, Qlocker, and eCh0raix ransomware families specifically target internet-exposed QNAP devices via HBS and SMB CVEs."
+  },
+  {
+    "name": "Redis",
+    "aliases": [
+      "Redis Cache",
+      "redis-server"
+    ],
+    "category": "Databases",
+    "vendor": "Redis, Inc.",
+    "notes": "Unauthenticated Redis instances exploited for remote code execution via CONFIG rewrite and cron job techniques; widely abused by cryptomining threat actors and used as C2 relay."
+  },
+  {
+    "name": "Rockwell Automation / Allen-Bradley",
+    "aliases": [
+      "FactoryTalk",
+      "Allen-Bradley PLC",
+      "Studio 5000",
+      "Rockwell ControlLogix"
+    ],
+    "category": "IoT / OT / SCADA",
+    "vendor": "Rockwell Automation",
+    "notes": "CISA has issued multiple advisories for Rockwell ControlLogix and FactoryTalk CVEs; critical infrastructure OT targeting by Volt Typhoon and Sandworm includes Allen-Bradley PLC systems."
+  },
+  {
+    "name": "Schneider Electric Modicon",
+    "aliases": [
+      "Modicon PLC",
+      "EcoStruxure",
+      "Modicon M340"
+    ],
+    "category": "IoT / OT / SCADA",
+    "vendor": "Schneider Electric",
+    "notes": "Modbus protocol attacks and HMI vulnerabilities targeting Schneider Modicon PLCs have been exploited by Incontroller/Pipedream ICS malware; recurring subject of CISA ICS-CERT advisories."
+  },
+  {
+    "name": "Siemens SIMATIC / TIA Portal",
+    "aliases": [
+      "SIMATIC S7",
+      "TIA Portal",
+      "Siemens PLC",
+      "SCADA Siemens"
+    ],
+    "category": "IoT / OT / SCADA",
+    "vendor": "Siemens",
+    "notes": "Siemens SIMATIC S7 PLCs were the original target of Stuxnet; ongoing CVEs in TIA Portal and S7 protocol implementation targeted by nation-state actors in critical infrastructure campaigns."
+  },
+  {
+    "name": "Sliver C2",
+    "aliases": [
+      "Sliver",
+      "Sliver Framework",
+      "Bishop Fox Sliver"
+    ],
+    "category": "Security Tools abused by attackers",
+    "vendor": "Bishop Fox (open source)",
+    "notes": "Open-source C2 framework increasingly adopted by APT groups and ransomware operators as a Cobalt Strike alternative; observed in nation-state and ransomware campaigns by Microsoft and CrowdStrike."
+  },
+  {
+    "name": "SolarWinds Orion",
+    "aliases": [
+      "SolarWinds",
+      "Orion Platform",
+      "SUNBURST"
+    ],
+    "category": "Supply Chain / Build",
+    "vendor": "SolarWinds",
+    "notes": "The SUNBURST supply chain attack (2020) compromised 18,000+ organizations via trojanized Orion updates; attributed to APT29/SVR and considered the most damaging supply chain attack on record."
+  },
+  {
+    "name": "SonicWall Firewalls / SMA",
+    "aliases": [
+      "SonicWall",
+      "SonicOS",
+      "SMA 100",
+      "SonicWall SSL-VPN"
+    ],
+    "category": "Network / Edge Devices",
+    "vendor": "SonicWall",
+    "notes": "SonicWall SSL-VPN accounts were the initial access vector for Fog and Akira ransomware attacks in 2024; CVE-2025-23006 added to CISA KEV in 2025; historically targeted by multiple ransomware groups."
+  },
+  {
+    "name": "Sophos XG / Firewall",
+    "aliases": [
+      "Sophos Firewall",
+      "XG Firewall",
+      "Sophos UTM"
+    ],
+    "category": "Network / Edge Devices",
+    "vendor": "Sophos",
+    "notes": "CVE-2020-12271 (SQL injection for zero-day RCE) exploited by suspected Chinese APT to plant Asnarök backdoor; Sophos devices repeatedly targeted for VPN initial access by multiple threat actors."
+  },
+  {
+    "name": "Spring Framework / Spring Boot",
+    "aliases": [
+      "Spring",
+      "SpringMVC",
+      "Spring Boot",
+      "Spring4Shell"
+    ],
+    "category": "App Servers / Frameworks",
+    "vendor": "VMware / Spring",
+    "notes": "CVE-2022-22965 (Spring4Shell) and CVE-2022-22963 (Spring Cloud Function RCE) exploited across Java web application deployments; heavily present in enterprise microservices environments."
+  },
+  {
+    "name": "SQL Server (MSSQL)",
+    "aliases": [
+      "Microsoft SQL Server",
+      "MSSQL",
+      "T-SQL",
+      "xp_cmdshell"
+    ],
+    "category": "Databases",
+    "vendor": "Microsoft",
+    "notes": "Abused via SQL injection chains leading to xp_cmdshell RCE; commonly targeted in network intrusions for credential harvesting and lateral movement within enterprise environments."
+  },
+  {
+    "name": "Synology DiskStation Manager",
+    "aliases": [
+      "Synology DSM",
+      "Synology NAS",
+      "DiskStation"
+    ],
+    "category": "Backup / Storage",
+    "vendor": "Synology",
+    "notes": "eCh0raix ransomware specifically targets Synology NAS devices; critical RCE vulnerabilities demonstrated at Pwn2Own 2024 (CVE-2024-10443) highlight persistent exposure of backup infrastructure."
+  },
+  {
+    "name": "TeamViewer",
+    "aliases": [
+      "TeamViewer Remote",
+      "TeamViewer RMM"
+    ],
+    "category": "Security Tools abused by attackers",
+    "vendor": "TeamViewer SE",
+    "notes": "Widely abused for unauthorized remote access persistence by ransomware operators and BEC actors; stolen TeamViewer credentials sold on darknet markets and used for initial access."
+  },
+  {
+    "name": "Telegram",
+    "aliases": [
+      "Telegram Bot API",
+      "Telegram messenger"
+    ],
+    "category": "Comms / Messaging",
+    "vendor": "Telegram FZ-LLC",
+    "notes": "Preferred C2 and exfiltration channel for infostealers, RATs, and credential-harvesting tools; Mandiant observed attackers forwarding stolen credentials and TOTP codes via Telegram channels."
+  },
+  {
+    "name": "TP-Link Routers",
+    "aliases": [
+      "TP-Link",
+      "TP-Link SOHO",
+      "Archer series"
+    ],
+    "category": "IoT / OT / SCADA",
+    "vendor": "TP-Link Technologies",
+    "notes": "Volt Typhoon specifically used TP-Link SOHO routers as hop-point infrastructure; multiple CISA KEV entries for TP-Link command injection vulnerabilities enabling botnet recruitment."
+  },
+  {
+    "name": "Veeam Backup & Replication",
+    "aliases": [
+      "Veeam",
+      "VBR",
+      "Veeam B&R"
+    ],
+    "category": "Backup / Storage",
+    "vendor": "Veeam Software",
+    "notes": "CVE-2024-40711 (CVSS 9.8) exploited to deploy Akira, Fog, and Frag ransomware; CVE-2023-27532 previously exploited by Cuba, EstateRansomware, and FIN7; over 20% of Rapid7 2024 IR cases involved Veeam."
+  },
+  {
+    "name": "VMware ESXi",
+    "aliases": [
+      "ESXi",
+      "VMware Hypervisor",
+      "ESXi bare metal"
+    ],
+    "category": "Hypervisors / Virtualization",
+    "vendor": "Broadcom / VMware",
+    "notes": "Dedicated ESXi ransomware encryptors (Black Basta, LockBit, Akira) target hypervisor mass-encryption; CVE-2024-37085 exploited by Storm-0506, Manatee Tempest, and Octo Tempest in 2024."
+  },
+  {
+    "name": "VMware vCenter Server",
+    "aliases": [
+      "vCenter",
+      "vSphere",
+      "VMware vSphere"
+    ],
+    "category": "Hypervisors / Virtualization",
+    "vendor": "Broadcom / VMware",
+    "notes": "4 VMware vCenter CVEs added to CISA KEV in 2024; CVE-2021-21985 and CVE-2023-34048 exploited by ransomware groups and APTs for VMware infrastructure compromise and lateral movement."
+  },
+  {
+    "name": "VMware Workspace ONE / Horizon",
+    "aliases": [
+      "VMware Horizon",
+      "Workspace ONE",
+      "VMware View"
+    ],
+    "category": "VPN / Remote Access",
+    "vendor": "Broadcom / VMware",
+    "notes": "CVE-2021-22054 and Log4Shell exploitation of VMware Horizon were mass-exploited by Iranian APT groups (TunnelVision) and Chinese threat actors for persistent access."
+  },
+  {
+    "name": "WinRAR",
+    "aliases": [
+      "RAR",
+      "WinRAR archiver",
+      "rar.exe"
+    ],
+    "category": "Archives / Loaders",
+    "vendor": "win.rar GmbH",
+    "notes": "CVE-2023-38831 (malicious archive RCE) was a zero-day exploited by at least four APT groups including DarkPink and APT29 to execute code when opening booby-trapped ZIP/RAR archives."
+  },
+  {
+    "name": "WMI (Windows Management Instrumentation)",
+    "aliases": [
+      "WMI",
+      "wmic.exe",
+      "WMIC",
+      "Win32_Process"
+    ],
+    "category": "Security Tools abused by attackers",
+    "vendor": "Microsoft",
+    "notes": "Top MITRE ATT&CK living-off-the-land technique (T1047); used for lateral movement, persistence (WMI subscriptions), and process execution by virtually all advanced ransomware and APT operators."
+  },
+  {
+    "name": "WordPress",
+    "aliases": [
+      "WP",
+      "WordPress CMS",
+      "wp-admin"
+    ],
+    "category": "CMS / Web Apps",
+    "vendor": "Automattic / WordPress Foundation",
+    "notes": "Most widely attacked CMS globally; plugin supply-chain attacks (30+ plugins backdoored in 2025), brute force on wp-admin, and xmlrpc.php abuse make it a persistent top web-threat target."
+  },
+  {
+    "name": "Zimbra Collaboration Suite",
+    "aliases": [
+      "Zimbra",
+      "ZCS",
+      "Zimbra Webmail"
+    ],
+    "category": "Email / Collaboration",
+    "vendor": "Synacor / Zimbra",
+    "notes": "CVE-2022-37042, CVE-2023-37580 (reflected XSS for credential theft) in CISA KEV; Zimbra webmail is heavily targeted by nation-state actors (TA473, Winter Vivern) for email access and credential theft."
+  }
+]
