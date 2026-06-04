@@ -16,6 +16,8 @@ data*.db-journal
 # Portrait uploads + any other runtime data
 data/*
 !data/README.md
+!data/public/
+!data/public/**
 data/*.db
 data/*.db-shm
 data/*.db-wal
@@ -23,6 +25,10 @@ data/*.db-journal
 data/portraits/
 data/dnstwist_screenshots/
 data/.optrasight-kek
+data/private/
+data/public/*.db-shm
+data/public/*.db-wal
+data/public/*.db-journal
 
 # Generated local analysis output
 output/

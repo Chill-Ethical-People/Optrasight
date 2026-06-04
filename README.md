@@ -81,8 +81,10 @@ shared/
   schema.ts                 Drizzle schema, DTOs, and Zod validation
 
 data/
-  data.db                   Runtime SQLite database
-  portraits/                Generated or uploaded TAP portraits
+  data.db                   Runtime SQLite database (git-ignored)
+  public/                   Sanitized GitHub-shareable CTI/TAP SQLite exports
+  private/                  Local-only client workspace export (git-ignored)
+  portraits/                Generated or uploaded TAP portraits (git-ignored)
 
 spec/
   openapi.yaml              API contract snapshot
@@ -289,12 +291,24 @@ See `spec/openapi.yaml` for the broader contract.
 
 Runtime data lives under `data/`. The local workspace may contain seeded tenants, findings, TAPs, portraits, rules, reports, exercises, and job history.
 
+Public/shareable intelligence exports are generated with:
+
+```bash
+npm run db:export-public
+```
+
+That command writes:
+
+- `data/public/optrasight-threat-intel-public.db`
+- `data/public/optrasight-threat-actors-public.db`
+- `data/private/optrasight-client-workspace-private.db` (git-ignored)
+
 Before publishing or sharing a build:
 
 - Remove or rotate seeded account credentials.
 - Clear real AI provider keys.
-- Check `data/data.db` for sensitive tenant data.
-- Avoid committing SQLite runtime files unless intentionally shipping a demo snapshot.
+- Check `data.db` and `data/data.db` for sensitive tenant data.
+- Commit only the sanitized `data/public/*.db` exports unless intentionally shipping a private demo snapshot.
 - Review `data/README.md` for restore notes.
 
 ## Security Notes

@@ -1,26 +1,43 @@
-# Seeded data bundled with this export
+# OptraSight Data Layout
 
-This directory is mounted at `<repo>/data/` on first boot. The application
-will use the SQLite database here instead of seeding an empty one.
+The runtime database and client artifacts live under `data/`, but only the
+sanitized public exports are intended for GitHub.
 
-| File | Contents |
-|---|---|
-| `data.db` | 301 threat-actor profiles · 18 589 parsed OSINT findings · 71 OSINT sources · 7 detection rules · 2 exercises · last 200 audit-log entries · 5 tenants · 4 users · 6 portraits seeded to actor IDs |
-| `portraits/*.png` | Persisted AI-generated and user-uploaded threat-actor portraits |
-| `portraits/.gitkeep` | Keep dir under version control |
+| Path | Git status | Contents |
+|---|---|---|
+| `../data.db` | ignored | Primary local runtime SQLite database used by the app today. May contain tenant/client data. |
+| `data.db` | ignored | Optional runtime SQLite database when running with a mounted `data/` directory. May contain tenant/client data. |
+| `public/optrasight-threat-intel-public.db` | tracked | Sanitized public OSINT source catalog and threat-intel findings. |
+| `public/optrasight-threat-actors-public.db` | tracked | Sanitized public threat actor profiles and appendices. |
+| `private/optrasight-client-workspace-private.db` | ignored | Reconstructed local client workspace export. Contains tenant/client data. |
+| `portraits/` | ignored | Generated or uploaded TAP portraits. |
+| `dnstwist_screenshots/` | ignored | Runtime malicious-site scanner screenshots. |
+| `.optrasight-kek` | ignored | Local encryption key material. Never commit. |
 
-## What was redacted before export
+## Refresh Public Exports
 
-- **`ai_providers.api_key_enc`** wiped on every row. Open `/#/ai-setup`, paste your own DeepSeek / OpenAI / Anthropic key into each row, click **Test**. The provider settings (kind, label, model, baseUrl, enabled, default) are preserved.
-- **`audit_log`** trimmed to the most recent 200 entries.
-- **User session tokens** are kept in memory only; restarting the server already invalidated them. Log in again with the legacy seeded admin (see top-level `README.md` → "Login").
+Run:
 
-## Schema migrations
+```bash
+npm run db:export-public
+```
 
-Migrations run automatically on every boot via `seedIfEmpty()` and the
-column-add migration pass in `server/storage.ts`. Nothing to invoke by hand.
+The exporter reads `data.db` by default, or `data/data.db` if the root DB does
+not exist. You can also pass an explicit source:
 
-## Clean slate
+```bash
+node scripts/export-public-dbs.cjs data/data.db
+```
 
-To start fresh, delete `data/data.db` before the first server start. An
-empty database will be seeded with the default tenant and admin user.
+## Public Export Privacy Rules
+
+The public threat-intel export removes tenant ids, draft emails, analyst tags,
+triage status, full source article bodies, provider errors, retry state, and
+client relevance fields.
+
+The public threat-actor export removes tenant ids, tenant relevance tagging,
+detection-rule links, author identity, client-specific relevance ratings, and
+portrait file paths.
+
+The private workspace export is for local backup and inspection only. It is
+ignored by Git and should not be uploaded to GitHub.

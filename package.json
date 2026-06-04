@@ -10,7 +10,8 @@
     "build": "tsx script/build.ts",
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
-    "db:push": "drizzle-kit push"
+    "db:push": "drizzle-kit push",
+    "db:export-public": "node scripts/export-public-dbs.cjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
