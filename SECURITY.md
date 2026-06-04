@@ -55,4 +55,6 @@ The Express server does not set CORS headers by default — the client is served
 
 ## Reporting vulnerabilities
 
-This is an internal/proprietary repo. Report vulnerabilities to the security architect listed in the project metadata. Do not file public issues.
+Please report suspected vulnerabilities privately to the project maintainer.
+Do not include exploit details, client data, credentials, or sensitive logs in
+public issues.

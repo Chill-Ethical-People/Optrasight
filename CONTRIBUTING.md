@@ -1,6 +1,7 @@
 # Contributing
 
-This is an internal codebase. The conventions below keep waves shippable on tight cycles.
+These conventions keep OptraSight changes reviewable, reproducible, and safe
+to publish.
 
 ## Setup
 

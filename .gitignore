@@ -50,6 +50,10 @@ bin/
 .idea/
 *.swp
 
+# Local agent handoff notes; not public documentation
+AGENTS.md
+CLAUDE.md
+
 # OS
 Thumbs.db
 # Added by code-review-graph

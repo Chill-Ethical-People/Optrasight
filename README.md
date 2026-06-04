@@ -30,6 +30,11 @@ It is built for MSSP and internal security teams that need one operational conso
 - **In-memory UI state:** the browser app avoids localStorage, sessionStorage, indexedDB, and cookies for application state.
 - **Operational density:** UI favors restrained enterprise controls over marketing-style layouts.
 
+## Contributors
+
+See [CONTRIBUTORS.md](./CONTRIBUTORS.md) for maintainer and AI-assisted
+contribution credits, including OpenAI Codex and Anthropic Claude.
+
 ## Current UX Notes
 
 Recent platform updates include:
@@ -345,9 +350,9 @@ See `SECURITY.md` for more detail.
 - `SECURITY.md` - security and secret-handling notes
 - `CONTRIBUTING.md` - contribution workflow
 - `CHANGELOG.md` - historical implementation notes
-- `CLAUDE.md` - local handoff context
 - `data/README.md` - seeded data handling
+- `CONTRIBUTORS.md` - maintainer and AI-assisted contribution credits
 
 ## License
 
-Internal proprietary project unless your organization has provided a separate license file or written redistribution approval.
+MIT. See [package.json](./package.json) for the repository license metadata.
