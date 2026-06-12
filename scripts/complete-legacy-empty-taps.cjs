@@ -2,7 +2,7 @@
 
 const Database = require("better-sqlite3");
 const { randomUUID, createHash } = require("node:crypto");
-const { existsSync, mkdirSync, writeFileSync } = require("node:fs");
+const { existsSync, mkdirSync } = require("node:fs");
 const { join, resolve } = require("node:path");
 
 const sharp = require("sharp");
@@ -146,7 +146,7 @@ ${ttps.map((t) => `- ${t[1]}${t[2] || ""} ${t[3]} (${t[0]}): ${t[4]}`).join("\n"
 Normalize new indicators into STIX-like records with source, confidence, first seen, last confirmed, ATT&CK mapping, TLP, and TTL. Suggested TTLs: IP addresses 30 days, domains 90 days, hashes up to one year when tied to malware samples. Deduplicate by normalized indicator value and do not block low-confidence indicators without tenant confirmation.
 
 ## Defensive Priority Actions
-Enforce phishing-resistant MFA, harden remote access, close exposed edge services, centralize logs, restrict administrative tools, validate backup immutability, and run periodic tabletop exercises for ${f.type.includes("Nation-State") ? "espionage and strategic access" : "extortion and data-theft"} scenarios.
+Enforce phishing-resistant MFA, harden remote access, close exposed edge services, centralize logs, restrict administrative tools, validate backup immutability, and run periodic incident-readiness drills for ${f.type.includes("Nation-State") ? "espionage and strategic access" : "extortion and data-theft"} scenarios.
 
 ## Incident Response Notes
 During a suspected incident, preserve IdP, VPN, EDR, DNS, proxy, mail, and cloud audit logs; disable suspect accounts and sessions; rotate privileged secrets; isolate affected hosts; collect exfiltration evidence; and avoid public attribution until containment and evidence review are complete.

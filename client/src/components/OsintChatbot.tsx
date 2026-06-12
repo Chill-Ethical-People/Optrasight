@@ -1,14 +1,12 @@
-// v2.17 — Floating AI chatbot, repurposed as a free-form chat with the
-// integrated AI provider. The CIRT Triage + Deep Dive workflows that used to
-// live here have moved to OsintTriagePanel.tsx (inline on the OSINT page).
+// Floating analyst chat backed by the configured AI provider. The CIRT Triage
+// + Deep Dive workflows live in OsintTriagePanel.tsx on the Intel Inbox page.
 //
 // The floating button is the bottom-right entry point. Clicking it opens a
 // right-side Sheet with a chat conversation backed by
 // `/api/v1/osint/chat/converse`. The conversation is automatically
-// context-aware of the currently visible findings — the analyst can ask
-// open-ended questions like "summarize the ransomware leaks this week" or
-// "which findings affect Atlassian Confluence".
-import { useEffect, useRef, useState } from "react";
+// context-aware when findings are supplied, while still supporting general
+// analyst questions and pasted source URLs from any protected workspace page.
+import { useEffect, useRef, useState, type PointerEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Bot, Loader2, MessageSquare, Send, Sparkles, Trash2 } from "lucide-react";
@@ -28,8 +26,8 @@ import type { OsintFindingDTO } from "@shared/schema";
 export type RangeKey = "1d" | "7d" | "1m" | "1q" | "1y" | "all";
 
 interface Props {
-  range: RangeKey;
-  findings: OsintFindingDTO[];
+  range?: RangeKey;
+  findings?: OsintFindingDTO[];
 }
 
 interface ChatMessage {
@@ -62,13 +60,21 @@ function parseApiError(e: any): { isAiFailure: boolean; message: string } {
 }
 
 const SUGGESTIONS = [
-  "Summarize the most critical findings I have right now.",
-  "Which findings would you escalate to a client today and why?",
-  "Are there any CVEs being actively exploited that I should hunt for?",
-  "Group the findings by threat actor and tell me which actor is most active.",
+  "Summarize the most important threat signals in the current workspace.",
+  "Review this URL and extract security-relevant findings.",
+  "Draft a concise hunt hypothesis for a ransomware actor.",
+  "Explain which CVEs or TTPs should be prioritized and why.",
 ];
 
-export default function OsintChatbot({ findings }: Props) {
+const CHAT_FAB_SIZE = 56;
+const CHAT_FAB_MARGIN = 24;
+
+function clampFabOffset(value: number, viewportSize: number): number {
+  const max = Math.max(CHAT_FAB_MARGIN, viewportSize - CHAT_FAB_SIZE - CHAT_FAB_MARGIN);
+  return Math.min(Math.max(value, CHAT_FAB_MARGIN), max);
+}
+
+export default function OsintChatbot({ findings = [] }: Props) {
   const { toast } = useToast();
   const aiAvailability = useAiAvailability();
   const aiDisabled = !aiAvailability.hasUsableProvider;
@@ -76,7 +82,17 @@ export default function OsintChatbot({ findings }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [fabOffset, setFabOffset] = useState({ right: CHAT_FAB_MARGIN, bottom: CHAT_FAB_MARGIN });
   const scrollRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    startRight: number;
+    startBottom: number;
+    moved: boolean;
+  } | null>(null);
+  const suppressFabClickRef = useRef(false);
 
   // Auto-scroll to the bottom as new messages arrive.
   useEffect(() => {
@@ -84,7 +100,8 @@ export default function OsintChatbot({ findings }: Props) {
   }, [messages, loading]);
 
   // Cap the context we send: top-20 findings by recency (already sorted server-side).
-  const contextFindingIds = (findings || []).slice(0, 20).map((f) => f.id);
+  const contextFindingIds = findings.slice(0, 20).map((f) => f.id);
+  const hasFindingContext = contextFindingIds.length > 0;
 
   async function send(text: string) {
     const trimmed = text.trim();
@@ -123,16 +140,62 @@ export default function OsintChatbot({ findings }: Props) {
     setInput("");
   }
 
+  function onFabPointerDown(e: PointerEvent<HTMLButtonElement>) {
+    if (aiDisabled || e.button !== 0) return;
+    suppressFabClickRef.current = false;
+    dragRef.current = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      startRight: fabOffset.right,
+      startBottom: fabOffset.bottom,
+      moved: false,
+    };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+
+  function onFabPointerMove(e: PointerEvent<HTMLButtonElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    const dx = e.clientX - drag.startX;
+    const dy = e.clientY - drag.startY;
+    if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
+    setFabOffset({
+      right: clampFabOffset(drag.startRight - dx, window.innerWidth),
+      bottom: clampFabOffset(drag.startBottom - dy, window.innerHeight),
+    });
+  }
+
+  function finishFabDrag(e: PointerEvent<HTMLButtonElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    suppressFabClickRef.current = drag.moved;
+    dragRef.current = null;
+  }
+
   return (
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={(e) => {
+          if (suppressFabClickRef.current) {
+            e.preventDefault();
+            suppressFabClickRef.current = false;
+            return;
+          }
+          setOpen(true);
+        }}
+        onPointerDown={onFabPointerDown}
+        onPointerMove={onFabPointerMove}
+        onPointerUp={finishFabDrag}
+        onPointerCancel={finishFabDrag}
         disabled={aiDisabled}
-        className={`fixed bottom-6 right-6 z-40 h-14 w-14 rounded-full shadow-xl transition-all flex items-center justify-center group ${aiDisabled ? "bg-muted text-muted-foreground cursor-not-allowed opacity-60" : "bg-primary text-primary-foreground hover:shadow-2xl hover:scale-105 active:scale-95"}`}
+        style={{ right: fabOffset.right, bottom: fabOffset.bottom, touchAction: "none" }}
+        className={`fixed z-40 h-14 w-14 rounded-full shadow-xl transition-shadow flex items-center justify-center group ${aiDisabled ? "bg-muted text-muted-foreground cursor-not-allowed opacity-60" : "bg-primary text-primary-foreground cursor-grab hover:shadow-2xl active:cursor-grabbing active:scale-95"}`}
         data-testid="button-osint-chatbot-fab"
-        aria-label="Open OSINT AI chat"
-        title={aiAvailability.disabledReason ?? "OSINT AI chat"}
+        aria-label="Open analyst chat"
+        title={aiAvailability.disabledReason ?? "Drag to move. Click to open analyst chat."}
       >
         <MessageSquare size={22} className="group-hover:rotate-3 transition-transform" />
         {/* Pulse ring — signals "AI online" without a misleading unread-count dot. */}
@@ -148,10 +211,12 @@ export default function OsintChatbot({ findings }: Props) {
           <SheetHeader>
             <SheetTitle className="flex items-center gap-2">
               <Bot size={18} className="text-primary" />
-              OSINT AI Chat
+              Analyst chat
             </SheetTitle>
             <SheetDescription className="text-xs">
-              Ask anything about the {findings?.length ?? 0} currently visible findings. The assistant uses your configured AI provider (DeepSeek / OpenAI / Anthropic / Gemini).
+              {hasFindingContext
+                ? `Ask about the ${findings.length} visible findings, a pasted source URL, or any threat-intel question.`
+                : "Ask any threat-intel, TAP, hunt-query, or source URL question."} The assistant uses your configured AI provider and does not perform platform code-development work.
             </SheetDescription>
           </SheetHeader>
 
@@ -206,7 +271,9 @@ export default function OsintChatbot({ findings }: Props) {
                     {m.role === "assistant" && (m.providerLabel || typeof m.contextSize === "number") && (
                       <div className="text-[10px] text-muted-foreground mt-1.5 flex items-center gap-2 flex-wrap border-t pt-1.5">
                         {m.providerLabel && <Badge variant="outline" className="text-[9px]">{m.providerLabel}</Badge>}
-                        {typeof m.contextSize === "number" && <span>{m.contextSize} findings in context</span>}
+                        {typeof m.contextSize === "number" && (
+                          <span>{m.contextSize} context item{m.contextSize === 1 ? "" : "s"}</span>
+                        )}
                       </div>
                     )}
                   </div>
@@ -233,7 +300,7 @@ export default function OsintChatbot({ findings }: Props) {
                   if (!loading) send(input);
                 }
               }}
-              placeholder="Ask about these findings… (Enter to send, Shift+Enter for newline)"
+              placeholder="Ask a question or paste a source URL... (Enter to send, Shift+Enter for newline)"
               className="text-sm resize-none min-h-[64px]"
               data-testid="textarea-chat-input"
               disabled={loading || aiDisabled}
@@ -249,7 +316,7 @@ export default function OsintChatbot({ findings }: Props) {
               </Button>
               <div className="flex-1" />
               <span className="text-[10px] text-muted-foreground">
-                {findings?.length ?? 0} findings · up to 20 in context
+                {hasFindingContext ? `${findings.length} findings - up to 20 in context` : "General workspace context"}
               </span>
               <Button
                 size="sm"

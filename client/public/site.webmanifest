@@ -1,0 +1,22 @@
+{
+  "name": "OptraSight",
+  "short_name": "OptraSight",
+  "description": "Evidence-led signal intelligence for MSSP threat operations.",
+  "icons": [
+    {
+      "src": "/brand/optrasight-smooth-mark-light-256.png",
+      "sizes": "256x256",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "theme_color": "#4F46E5",
+  "background_color": "#EEF0FE",
+  "display": "standalone"
+}

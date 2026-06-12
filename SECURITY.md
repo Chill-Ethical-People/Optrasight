@@ -1,17 +1,28 @@
 # Security
 
+## Public default credentials: rotate immediately
+
+The seeded local credentials are public knowledge because they are documented
+in this repository and may also appear in local seed data. They are intended only
+to get a fresh local instance through first login. A stale default administrator
+account is a high-risk deployment finding.
+
+On first boot, OptraSight forces seeded accounts through temporary-password
+change and MFA enrollment before platform functions unlock. Before using real
+data, create named operator accounts, verify MFA enrollment, then rotate,
+disable, or delete the seed accounts from Platform Users.
+
 ## What to rotate immediately after first boot
 
 | Item | Where | How to rotate |
 |---|---|---|
-| **Default admin account** `admin@brandguard.local / admin1234` (legacy domain — kept as primary key on existing installs) | Seeded into `users` table by `seedIfEmpty()` in `server/storage.ts` (line ~1140). | Log in once, create a new admin user with a strong password, then delete the seeded account at `/#/settings`. |
+| **Seed local accounts** `admin@cep.com`, `reviewer@cep.com` | Seeded into `users` table by `ensurePlatformSeedUsers()` in `server/storage.ts`. | Temporary passwords are forced through password change and MFA enrollment. Create named accounts, then delete or rotate the seeded accounts in Platform Users. |
 | **Bearer sessions** | `auth_sessions.token_hash` (opaque token issued by `/api/v1/auth/login`). | Logout revokes the current session. Rotating all sessions means deleting rows from `auth_sessions`. |
-| **AI provider keys** | `ai_providers.api_key_enc` per tenant. | `/#/ai-setup` → edit each row. Stored encrypted at rest with the per-instance key in `data/.optrasight-kek`. |
-| **Magic-link exercise tokens** | `exercise_runs.token` — public-portal access. | Tokens expire when the exercise is closed; re-issue by generating a fresh run. |
+| **AI provider keys** | `data/secrets/optrasight-secrets.db` per tenant/provider. | `/#/ai-setup` → edit each row. Metadata and masks remain in `ai_providers`; encrypted ciphertext is stored separately and encrypted with the per-instance key in `data/.optrasight-kek`. |
 
 ## Threat model
 
-OptraSight is an MSSP **back-office** tool. It is assumed to run behind:
+OptraSight Batch One release is an MSSP **back-office** tool. It is assumed to run behind:
 
 * A reverse proxy that terminates TLS (Cloudflare Tunnel, nginx, Caddy).
 * An authentication boundary (the dashboard's own login is a baseline; a corporate SSO/SAML layer in front is recommended for production deployments).
@@ -21,7 +32,7 @@ The internal authn model is intentionally simple but production-hardened enough 
 
 1. **Passwords are hashed on login** — legacy plaintext seeded rows are transparently rehashed to `scrypt:v1` after the first successful login. New password-management UI should write the same format.
 2. **Add SSO / OIDC** — wire `passport-openidconnect` into the existing Passport middleware in `routes.ts`.
-3. **Rate limiting is built in for sensitive public edges** — `/api/v1/auth/login` and `/api/v1/exercise-portal/*` use in-memory throttles. Put Cloudflare/nginx limits in front for distributed production traffic.
+3. **Rate limiting is built in for sensitive public edges** — `/api/v1/auth/login` uses in-memory throttling. Put Cloudflare/nginx limits in front for distributed production traffic.
 
 ## What is encrypted, what is not
 
@@ -29,8 +40,8 @@ The internal authn model is intentionally simple but production-hardened enough 
 |---|---|---|
 | User passwords | `users.password` | `scrypt:v1` hashes after first successful legacy login. |
 | Session tokens | `auth_sessions.token_hash` | SHA-256 hash of an opaque random bearer token; raw token is only returned once. |
-| AI provider keys | `ai_providers.api_key_enc` | AES-256-GCM with per-instance key at `data/.optrasight-kek`; keep disk-level encryption enabled. |
-| Magic-link exercise tokens | `exercise_runs.token` | Random UUID v4. Short-lived. |
+| AI provider keys | `data/secrets/optrasight-secrets.db` | AES-256-GCM ciphertext with per-instance key at `data/.optrasight-kek`; keep this DB outside public data exports and keep disk-level encryption enabled. |
+| Connector API keys/secrets | `data/secrets/optrasight-secrets.db` | Same secret store as AI provider keys; only masks remain in the workspace DB. |
 | Finding content (OSINT) | `osint_findings.*` | Public-source data — not sensitive. |
 | Portrait images | `data/portraits/*` | Filesystem only. Validated by magic-byte sniff on upload (`POST /api/v1/threat-actors/:aid/portrait/upload`). |
 
@@ -41,7 +52,7 @@ The internal authn model is intentionally simple but production-hardened enough 
 * PNG / JPEG / WebP / GIF (extension regex AND magic-byte sniff).
 * Maximum 5 MB.
 
-Other file uploads (exercise PPTX in `routes.ts` line ~1788) use the same JSON+base64 pattern. Add new uploads through this pattern only — there is no multer / multipart endpoint by design (a 50 MB body limit applies globally in `server/index.ts`).
+Add any future uploads through the same JSON+base64 pattern. There is no multer / multipart endpoint by design, and a 50 MB body limit applies globally in `server/index.ts`.
 
 ## CORS
 
@@ -53,8 +64,20 @@ The Express server does not set CORS headers by default — the client is served
 * Errors are logged via `console.error("Internal Server Error:", err)`.
 * API keys, tokens, passwords, large result bodies, report content, uploaded file content, and AI outputs are redacted/truncated in the request log middleware.
 
+## Secret Store Boundary
+
+OptraSight separates credentials from exportable workspace data. OSINT findings, TAP dossiers, and public release databases can live in the main workspace SQLite files; API-provider and connector credential ciphertext belongs in `data/secrets/optrasight-secrets.db` or the path configured by `OPTRASIGHT_SECRET_DB`.
+
+On boot, legacy ciphertext found in `ai_providers.api_key_enc`, `integrations.api_key_enc`, or `integrations.api_secret_enc` is migrated into the secret DB and removed from the public workspace DB columns. Keep this migration enabled as a release security control.
+
 ## Reporting vulnerabilities
 
-Please report suspected vulnerabilities privately to the project maintainer.
-Do not include exploit details, client data, credentials, or sensitive logs in
-public issues.
+Please report suspected vulnerabilities privately through GitHub Private
+Vulnerability Reporting when it is enabled for the repository, or by contacting
+the project maintainer listed in the repository metadata. Do not file public
+issues for vulnerabilities until a maintainer has confirmed disclosure timing.
+
+Do not include client data, live credentials, API keys, private logs, or exploit
+payloads beyond the minimum needed to reproduce the issue. A good report
+includes affected version or commit, impact, reproduction steps, and suggested
+remediation if known.

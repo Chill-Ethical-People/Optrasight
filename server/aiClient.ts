@@ -1,14 +1,9 @@
 /**
- * AI client — live-first dispatcher with deterministic mock fallback.
+ * AI client — live-provider dispatcher for BatchOne analysis tasks.
  *
- * v2.11 (May 2026):
- *   • Each task attempts a real provider call via aiLive.ts.
- *   • On any failure (missing key, HTTP error, JSON parse, schema mismatch),
- *     the task falls back to the deterministic mock so the demo never breaks.
- *   • testProvider() now performs a real connectivity ping.
- *
- * The fallback mocks remain pure functions of (provider, model, task, input),
- * which keeps the demo reproducible and unit-testable when no key is configured.
+ * BatchOne strict mode requires real provider output for AI workflows. Missing
+ * keys, provider failures, malformed JSON, and schema mismatches surface as
+ * explicit errors so the UI can show the real provider state.
  */
 import type { AiTask, AiProvider, FindingDTO, YoungDomainCandidateDTO } from "@shared/schema";
 import { liveChatJson, liveChatJsonDiagnostic, livePing, providerHasUsableKey, type LiveChatDiagnostic } from "./aiLive";
@@ -103,7 +98,7 @@ function grammarReferenceFor(languages: string[]): string {
 // v2.26 — live calls are now mandatory whenever a provider is configured.
 // The kill-switch is retained for emergency offline development only.
 function liveCallsEnabled(): boolean {
-  return process.env.BRANDGUARD_AI_LIVE !== "0";
+  return process.env.OPTRASIGHT_AI_LIVE !== "0";
 }
 
 /** v2.26 — thrown when a live AI call cannot produce a usable result. The
@@ -184,7 +179,7 @@ export interface TriageOutput {
   iocs: string[];
 }
 
-function triageMock(finding: FindingDTO, provider: AiProvider): TriageOutput {
+function _triageMock(finding: FindingDTO, provider: AiProvider): TriageOutput {
   const seed = djb2(`${provider.id}:${finding.id}:${finding.title}`);
   const sevMatrix: Record<string, TriageOutput["severity"]> = {
     critical: "critical", high: "high", medium: "high",
@@ -276,7 +271,7 @@ export interface YoungDomainAiOutput {
   recommendedActions: string[];
 }
 
-function youngDomainMock(input: YoungDomainAiInput, provider: AiProvider): YoungDomainAiOutput {
+function _youngDomainMock(input: YoungDomainAiInput, provider: AiProvider): YoungDomainAiOutput {
   const seed = djb2(`${provider.id}:${input.domain}`);
   // Heuristic: high similarity + MX + young age → phishing
   let verdict: YoungDomainAiOutput["verdict"] = "inconclusive";
@@ -336,7 +331,7 @@ export interface ReportSummaryOutput {
   recommendations: string[];
 }
 
-function reportSummaryMock(input: ReportSummaryInput, _provider: AiProvider): ReportSummaryOutput {
+function _reportSummaryMock(input: ReportSummaryInput, _provider: AiProvider): ReportSummaryOutput {
   const tenantList = input.tenants.length > 1 ? `${input.tenants.length} tenants` : input.tenants[0];
   const exec = `Across ${tenantList}, OptraSight surfaced ${input.totals.findings} findings (${input.totals.critical} critical, ${input.totals.high} high) over ${input.totals.scans} scans. The dominant risk theme is brand impersonation and credential phishing infrastructure adjacent to the protected domains. Immediate priority items center on takedown coordination for the highest-similarity lookalike domains and remediation of the externally exposed services that materially raise the attack surface.`;
 
@@ -364,7 +359,7 @@ export interface AnalysisOutput {
   structured?: Record<string, any>;
 }
 
-function analysisMock(input: AnalysisInput, provider: AiProvider): AnalysisOutput {
+function _analysisMock(input: AnalysisInput, provider: AiProvider): AnalysisOutput {
   const seed = djb2(`${provider.id}:${input.prompt}`);
   const tones = [
     "Analysis complete. The provided indicators correlate with a known phishing pattern.",
@@ -385,7 +380,7 @@ export interface LogoAbuseOutput {
   reasoning: string;
 }
 
-function logoAbuseMock(input: LogoAbuseInput, provider: AiProvider): LogoAbuseOutput {
+function _logoAbuseMock(input: LogoAbuseInput, provider: AiProvider): LogoAbuseOutput {
   const seed = djb2(`${provider.id}:${input.baseAssetSha256}:${input.candidateUrl}`);
   const sim = 0.5 + ((seed % 50) / 100);
   return {
@@ -465,7 +460,7 @@ export interface OsintAnalysisOutput {
   regions?: string[];
 }
 
-function osintAnalysisMock(input: OsintAnalysisInput, provider: AiProvider): OsintAnalysisOutput {
+function _osintAnalysisMock(input: OsintAnalysisInput, provider: AiProvider): OsintAnalysisOutput {
   const seed = djb2(`${provider.id}:${input.finding.title}`);
   const watchHits = (input.finding.affectedTech || []).filter((t) => (input.clientProfile.monitoredTechnologies || []).includes(t));
   const sevWeight: Record<string, number> = { critical: 0.95, high: 0.78, medium: 0.55, low: 0.32, info: 0.18 };
@@ -513,341 +508,12 @@ export interface HuntQueryInput {
     sourceContent?: string | null;
   }>;
   languages: string[];
+  titleInstruction?: string;
 }
 // v2.13: each language may now carry multiple queries. Older clients that
 // expect a single string still work because the dispatcher returns the first
 // query alongside the array (see HuntQueryOutputItem below).
 export type HuntQueryOutput = Record<string, string | string[]>;
-
-/**
- * Extract behavioural / network IoCs from finding titles, summaries and raw snippets.
- * The output is woven into the language-specific query templates so generated
- * queries reflect the *actual* finding content, not just a tech name + CVE id.
- */
-function extractContext(input: HuntQueryInput): {
-  techs: string[];
-  cves: string[];
-  actors: string[];
-  ips: string[];
-  domains: string[];
-  hashes: string[];
-  urls: string[];
-  cmdPatterns: string[];
-  titles: string[];
-  severity: string;
-} {
-  const textBlobs: string[] = [];
-  const techs = new Set<string>();
-  const cves = new Set<string>();
-  const actors = new Set<string>();
-  const titles: string[] = [];
-  let topSev = "info";
-  const sevRank: Record<string, number> = { critical: 5, high: 4, medium: 3, low: 2, info: 1 };
-  for (const f of input.findings) {
-    (f.affectedTech || []).forEach((t) => techs.add(t));
-    (f.cveIds || []).forEach((c) => cves.add(c));
-    (f.threatActors || []).forEach((a) => actors.add(a));
-    if (f.title) titles.push(f.title);
-    if (f.title) textBlobs.push(f.title);
-    if (f.summary) textBlobs.push(f.summary);
-    if (f.rawSnippet) textBlobs.push(f.rawSnippet);
-    if (f.severity && (sevRank[f.severity] || 0) > (sevRank[topSev] || 0)) topSev = f.severity;
-  }
-  const text = textBlobs.join("\n");
-
-  // Network IoCs
-  const ips = new Set<string>();
-  const ipRe = /\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b/g;
-  let m: RegExpExecArray | null;
-  while ((m = ipRe.exec(text)) !== null) {
-    // Filter obvious noise (RFC1918 private IPs and version-string-like "1.2.3.4")
-    if (!/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|127\.|0\.)/.test(m[0])) ips.add(m[0]);
-  }
-  // Domain IoCs (avoid common false positives like example.com/com.com)
-  const domains = new Set<string>();
-  const domainRe = /\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:com|net|org|io|co|info|biz|onion|ru|cn|jp|hk|sg|tw|kr|in|de|fr|uk|tk|ml|ga|cf|xyz|top|club|site|live|app|dev|me|cc)\b/gi;
-  while ((m = domainRe.exec(text)) !== null) {
-    const d = m[0].toLowerCase();
-    if (!["example.com", "localhost", "github.com", "microsoft.com", "google.com"].includes(d)) domains.add(d);
-  }
-  // File hashes (MD5/SHA1/SHA256)
-  const hashes = new Set<string>();
-  const hashRe = /\b[a-f0-9]{32}|[a-f0-9]{40}|[a-f0-9]{64}\b/gi;
-  while ((m = hashRe.exec(text)) !== null) hashes.add(m[0].toLowerCase());
-  // URLs
-  const urls = new Set<string>();
-  const urlRe = /https?:\/\/[^\s<>"'`]+/gi;
-  while ((m = urlRe.exec(text)) !== null) urls.add(m[0]);
-  // Behavioural patterns frequently called out in advisories
-  const cmdPatterns: string[] = [];
-  if (/powershell.{0,12}-enc/i.test(text)) cmdPatterns.push("powershell -enc");
-  if (/Invoke-(Mimikatz|WebRequest|Expression)/i.test(text)) cmdPatterns.push("Invoke-Mimikatz");
-  if (/certutil.{0,12}-urlcache/i.test(text)) cmdPatterns.push("certutil -urlcache");
-  if (/mshta\s+http/i.test(text)) cmdPatterns.push("mshta http");
-  if (/rundll32\s+javascript/i.test(text)) cmdPatterns.push("rundll32 javascript:");
-  if (/wmic\s+(process|shadowcopy)/i.test(text)) cmdPatterns.push("wmic shadowcopy");
-  if (/vssadmin\s+delete/i.test(text)) cmdPatterns.push("vssadmin delete shadows");
-  if (/bcdedit\s+\/set/i.test(text)) cmdPatterns.push("bcdedit recovery tampering");
-  if (/(\bcmd\b|\bbash\b).{0,30}(curl|wget).{0,30}(\|\s*(sh|bash|powershell))/i.test(text)) cmdPatterns.push("curl|sh pipe-to-shell");
-  if (/sqlmap/i.test(text)) cmdPatterns.push("sqlmap");
-  if (/\.\.[\\/]|%2e%2e/i.test(text)) cmdPatterns.push("path traversal");
-  if (/cobalt\s*strike|beacon|stager/i.test(text)) cmdPatterns.push("Cobalt Strike beacon");
-  if (/lolbas|living[\s-]off[\s-]the[\s-]land/i.test(text)) cmdPatterns.push("LOLBin abuse");
-  if (/lsass|credential[\s-]dump/i.test(text)) cmdPatterns.push("lsass credential dump");
-  if (/ransom(ware)?|encrypt(or|ion)/i.test(text)) cmdPatterns.push("ransomware encryptor");
-  // De-dupe & cap
-  return {
-    techs: Array.from(techs).slice(0, 6),
-    cves: Array.from(cves).slice(0, 6),
-    actors: Array.from(actors).slice(0, 4),
-    ips: Array.from(ips).slice(0, 8),
-    domains: Array.from(domains).slice(0, 8),
-    hashes: Array.from(hashes).slice(0, 6),
-    urls: Array.from(urls).slice(0, 4),
-    cmdPatterns: Array.from(new Set(cmdPatterns)).slice(0, 6),
-    titles: titles.slice(0, 5),
-    severity: topSev,
-  };
-}
-
-function huntQueryMock(input: HuntQueryInput, provider: AiProvider): HuntQueryOutput {
-  void provider;
-  const ctx = extractContext(input);
-  const out: HuntQueryOutput = {};
-  for (const lang of input.languages) {
-    out[lang] = renderHuntQuery(lang, ctx);
-  }
-  return out;
-}
-
-/**
- * Render a language-specific hunt query using the extracted context.
- * Each query weaves in the real signals (tech, CVEs, actor names, network IoCs,
- * hashes, behavioural cmdline patterns) instead of placeholders.
- */
-function renderHuntQuery(
-  lang: string,
-  ctx: ReturnType<typeof extractContext>,
-): string {
-  const techs = ctx.techs.length ? ctx.techs : ["vendor"];
-  const cves = ctx.cves.length ? ctx.cves : [];
-  const actors = ctx.actors;
-  const ips = ctx.ips;
-  const domains = ctx.domains;
-  const hashes = ctx.hashes;
-  const cmds = ctx.cmdPatterns;
-  const titlesPreview = ctx.titles.slice(0, 3).map((t) => t.length > 80 ? t.slice(0, 77) + "…" : t);
-
-  const csv = (arr: string[]) => arr.map((x) => `"${x.replace(/"/g, '\\"')}"`).join(",");
-  const regex = (arr: string[]) => arr.map((x) => x.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join("|") || "vendor";
-  const orList = (arr: string[], field: string) => arr.length ? arr.map((x) => `${field}="${x}"`).join(" OR ") : `${field}="*"`;
-
-  const headerLines = [
-    `// Generated by OptraSight OSINT — ${new Date().toISOString().slice(0, 10)}`,
-    `// Context: ${titlesPreview.join(" | ") || "OSINT findings"}`,
-    actors.length ? `// Threat actors: ${actors.join(", ")}` : null,
-    cves.length ? `// CVEs: ${cves.join(", ")}` : null,
-    techs.length ? `// Affected tech: ${techs.join(", ")}` : null,
-  ].filter(Boolean) as string[];
-
-  switch (lang) {
-    case "splunk": {
-      const lines = [
-        ...headerLines.map((l) => l),
-        `index=* sourcetype IN ("vendor:firewall","vendor:proxy","vendor:edr","WinEventLog:*","linux_secure","aws:cloudtrail")`,
-        `  earliest=-30d`,
-        `  AND (`,
-        `    (${orList(techs, "product")})`,
-        cves.length ? `    OR cve IN (${csv(cves)})` : null,
-        ips.length ? `    OR (src_ip IN (${csv(ips)}) OR dest_ip IN (${csv(ips)}))` : null,
-        domains.length ? `    OR query IN (${csv(domains)}) OR dest IN (${csv(domains)})` : null,
-        hashes.length ? `    OR (md5 IN (${csv(hashes)}) OR sha1 IN (${csv(hashes)}) OR sha256 IN (${csv(hashes)}))` : null,
-        cmds.length ? `    OR (${cmds.map((c) => `process_command_line="*${c}*"`).join(" OR ")})` : null,
-        `  )`,
-        `| eval optrasight_signal=case(`,
-        ...techs.slice(0, 3).map((t) => `    product="${t}", "${t}",`),
-        `    1=1, "behavioural")`,
-        `| stats count, values(src_ip) AS src, values(dest_ip) AS dst, values(user) AS users, values(host) AS hosts BY optrasight_signal, signature`,
-        `| where count > 1`,
-        `| sort - count`,
-      ].filter(Boolean) as string[];
-      return lines.join("\n");
-    }
-    case "kql_elk": {
-      const parts = [
-        ...headerLines,
-        `@timestamp >= now-30d`,
-        `and (`,
-        `  event.module : (${techs.map((t) => `"${t}"`).join(" or ")})`,
-        cves.length ? `  or vulnerability.id : (${cves.map((c) => `"${c}"`).join(" or ")})` : null,
-        ips.length ? `  or source.ip : (${ips.map((i) => `"${i}"`).join(" or ")}) or destination.ip : (${ips.map((i) => `"${i}"`).join(" or ")})` : null,
-        domains.length ? `  or dns.question.name : (${domains.map((d) => `"${d}"`).join(" or ")}) or url.domain : (${domains.map((d) => `"${d}"`).join(" or ")})` : null,
-        hashes.length ? `  or file.hash.* : (${hashes.map((h) => `"${h}"`).join(" or ")})` : null,
-        cmds.length ? `  or process.command_line : (${cmds.map((c) => `"*${c}*"`).join(" or ")})` : null,
-        `)`,
-      ].filter(Boolean) as string[];
-      return parts.join("\n");
-    }
-    case "chronicle": {
-      const ruleName = (techs[0] || "optrasight").replace(/[^a-z0-9]/gi, "_").toLowerCase();
-      const lines = [
-        `rule optrasight_${ruleName}_${(cves[0] || "recent").replace(/-/g, "_").toLowerCase()} {`,
-        `  meta:`,
-        `    author      = "OptraSight OSINT"`,
-        `    severity    = "${(ctx.severity || "high").toUpperCase()}"`,
-        `    description = "Hunt for ${titlesPreview[0] || techs.join(", ")}${cves.length ? ` (${cves.join(", ")})` : ""}${actors.length ? ` — actor: ${actors.join(", ")}` : ""}"`,
-        `  events:`,
-        `    $e.metadata.event_type = "NETWORK_HTTP" or $e.metadata.event_type = "PROCESS_LAUNCH"`,
-        `    $e.principal.hostname != ""`,
-        domains.length ? `    re.regex($e.target.url, \`(?i)(${regex(domains)})\`)` : `    re.regex($e.target.url, \`(?i)(${regex(techs)})\`)`,
-        cves.length ? `    re.regex($e.security_result.description, \`(?i)(${cves.join("|")})\`)` : null,
-        cmds.length ? `    re.regex($e.target.process.command_line, \`(?i)(${regex(cmds)})\`)` : null,
-        ips.length ? `    $e.target.ip in [${ips.map((i) => `"${i}"`).join(", ")}]` : null,
-        `  condition: $e`,
-        `}`,
-      ].filter(Boolean) as string[];
-      return lines.join("\n");
-    }
-    case "defender": {
-      const lines = [
-        ...headerLines,
-        `// Microsoft Defender / Sentinel KQL`,
-        `union DeviceProcessEvents, DeviceNetworkEvents, DeviceFileEvents, DeviceLogonEvents`,
-        `| where Timestamp > ago(30d)`,
-        `| where ${[
-          cmds.length ? `ProcessCommandLine has_any (${csv(cmds)})` : null,
-          domains.length ? `RemoteUrl has_any (${csv(domains)})` : null,
-          ips.length ? `RemoteIP in (${csv(ips)})` : null,
-          hashes.length ? `SHA256 in (${csv(hashes)}) or SHA1 in (${csv(hashes)}) or MD5 in (${csv(hashes)})` : null,
-          techs.length ? `AdditionalFields has_any (${csv(techs)})` : null,
-          cves.length ? `AdditionalFields has_any (${csv(cves)})` : null,
-        ].filter(Boolean).join(" or ") || `true`}`,
-        `| project Timestamp, DeviceName, ActionType, FileName, ProcessCommandLine, RemoteUrl, RemoteIP, SHA256, InitiatingProcessFileName`,
-        actors.length ? `| extend SuspectedActor = "${actors.join(" / ")}"` : null,
-        `| sort by Timestamp desc`,
-      ].filter(Boolean) as string[];
-      return lines.join("\n");
-    }
-    case "crowdstrike": {
-      const lines = [
-        ...headerLines,
-        `// CrowdStrike Falcon LogScale (CQL)`,
-        `#event_simpleName=/ProcessRollup2|NetworkConnect|DnsRequest|FileWritten/`,
-        techs.length ? `| in(field=ImageFileName, values=[${csv(techs)}], ignoreCase=true)` : null,
-        cmds.length ? `   OR regex(field=CommandLine, regex="(?i)(${regex(cmds)})")` : null,
-        ips.length ? `   OR in(field=RemoteAddressIP4, values=[${csv(ips)}])` : null,
-        domains.length ? `   OR in(field=DomainName, values=[${csv(domains)}], ignoreCase=true)` : null,
-        hashes.length ? `   OR in(field=SHA256HashData, values=[${csv(hashes)}], ignoreCase=true)` : null,
-        `| groupby([ComputerName, UserName, ImageFileName, CommandLine])`,
-        `| sort(field=_count, order=desc)`,
-      ].filter(Boolean) as string[];
-      return lines.join("\n");
-    }
-    case "cortex_xdr": {
-      const lines = [
-        ...headerLines,
-        `// Cortex XDR XQL`,
-        `dataset = xdr_data`,
-        `| filter event_type in (PROCESS, NETWORK, FILE, AUTHENTICATION)`,
-        `| filter (`,
-        techs.length ? `       action_process_image_name in (${csv(techs)})` : null,
-        cmds.length ? `    or actor_process_command_line ~= "(?i)(${regex(cmds)})"` : null,
-        cves.length ? `    or actor_process_command_line ~= "(?i)(${cves.join("|")})"` : null,
-        ips.length ? `    or action_remote_ip in (${csv(ips)})` : null,
-        domains.length ? `    or action_remote_url contains_any (${csv(domains)})` : null,
-        hashes.length ? `    or action_file_sha256 in (${csv(hashes)})` : null,
-        `  )`,
-        `| fields _time, agent_hostname, actor_process_image_name, action_process_image_command_line, action_remote_url, action_remote_ip, action_file_sha256`,
-        `| sort desc _time`,
-      ].filter(Boolean) as string[];
-      return lines.join("\n");
-    }
-    case "sentinelone": {
-      const lines = [
-        ...headerLines,
-        `// SentinelOne PowerQuery`,
-        `event.type in ("Process Creation", "DNS Resolved", "IP Connect", "File Creation")`,
-        `and (`,
-        techs.length ? `  tgt.process.image.path contains:anycase (${csv(techs)})` : null,
-        cmds.length ? `   or src.process.cmdline matches "(?i)(${regex(cmds)})"` : null,
-        domains.length ? `   or url.address contains:anycase (${csv(domains)})` : null,
-        ips.length ? `   or dst.ip.address in (${csv(ips)})` : null,
-        hashes.length ? `   or tgt.file.sha256 in (${csv(hashes)})` : null,
-        `)`,
-        `| group count() by endpoint.name, src.process.image.path, tgt.process.cmdline, dst.ip.address`,
-        `| sort -count`,
-      ].filter(Boolean) as string[];
-      return lines.join("\n");
-    }
-    case "yara": {
-      const safeName = (techs[0] || "OptraSight").replace(/[^A-Za-z0-9]/g, "_");
-      const cveName  = (cves[0] || "recent").replace(/-/g, "_");
-      const lines = [
-        `rule OptraSight_${safeName}_${cveName}`,
-        `{`,
-        `  meta:`,
-        `    author      = "OptraSight OSINT"`,
-        `    description = "${titlesPreview[0] || `Exploitation tooling for ${techs.join(", ")}`}"`,
-        cves.length ? `    cve         = "${cves.join(", ")}"` : `    cve         = "(none assigned)"`,
-        actors.length ? `    actor       = "${actors.join(", ")}"` : null,
-        `    severity    = "${ctx.severity}"`,
-        `    generated   = "${new Date().toISOString()}"`,
-        `  strings:`,
-        ...techs.slice(0, 4).map((t, i) => `    $tech${i + 1} = "${t}" ascii nocase wide`),
-        ...cves.slice(0, 4).map((c, i) => `    $cve${i + 1}  = "${c}" ascii nocase wide`),
-        ...domains.slice(0, 4).map((d, i) => `    $dom${i + 1}  = "${d}" ascii nocase wide`),
-        ...hashes.slice(0, 4).map((h, i) => `    $hash${i + 1} = "${h}" ascii nocase wide`),
-        cmds.length ? `    $tool1 = /(${regex(cmds)})/ ascii nocase wide` : `    $tool1 = /Invoke-(Mimikatz|WebRequest)/ ascii nocase wide`,
-        `  condition:`,
-        `    uint16(0) == 0x5a4d and (any of ($tech*) or any of ($cve*) or any of ($dom*) or any of ($hash*)) and any of ($tool*)`,
-        `}`,
-      ].filter(Boolean) as string[];
-      return lines.join("\n");
-    }
-    case "sigma": {
-      const lines = [
-        `title: OptraSight — ${titlesPreview[0] || `Activity Targeting ${techs.join(", ")}`}`,
-        `id: ${(cves[0] || "optrasight").toLowerCase().replace(/[^a-z0-9]/g, "-")}-${Date.now().toString(36)}`,
-        `status: experimental`,
-        `description: |`,
-        `    Detection candidate generated from OptraSight OSINT findings.`,
-        `    Affected technology: ${techs.join(", ") || "(none)"}`,
-        cves.length ? `    CVE references: ${cves.join(", ")}` : null,
-        actors.length ? `    Suspected threat actor(s): ${actors.join(", ")}` : null,
-        `author: OptraSight OSINT`,
-        `references:`,
-        ...(ctx.urls.length ? ctx.urls.slice(0, 3).map((u) => `    - ${u}`) : [`    - https://nvd.nist.gov/`]),
-        `tags:`,
-        `    - attack.initial_access`,
-        `    - attack.t1190`,
-        ...(cmds.includes("lsass credential dump") ? [`    - attack.credential_access`, `    - attack.t1003.001`] : []),
-        ...(cmds.includes("ransomware encryptor") ? [`    - attack.impact`, `    - attack.t1486`] : []),
-        `logsource:`,
-        `    category: process_creation`,
-        `    product: windows`,
-        `detection:`,
-        techs.length ? `    selection_tech:\n        Image|contains:\n${techs.map((t) => `            - '${t}'`).join("\n")}` : null,
-        cves.length ? `    selection_cve:\n        CommandLine|contains:\n${cves.map((c) => `            - '${c}'`).join("\n")}` : null,
-        cmds.length ? `    selection_behaviour:\n        CommandLine|contains:\n${cmds.map((c) => `            - '${c}'`).join("\n")}` : null,
-        ips.length ? `    selection_network:\n        DestinationIp:\n${ips.map((i) => `            - '${i}'`).join("\n")}` : null,
-        domains.length ? `    selection_domain:\n        DestinationHostname|contains:\n${domains.map((d) => `            - '${d}'`).join("\n")}` : null,
-        `    condition: 1 of selection_*`,
-        `falsepositives:`,
-        `    - Vendor patching scripts`,
-        `    - Authorised red-team activity`,
-        `level: ${ctx.severity === "critical" || ctx.severity === "high" ? "high" : ctx.severity === "medium" ? "medium" : "low"}`,
-      ].filter(Boolean) as string[];
-      return lines.join("\n");
-    }
-    default:
-      return [
-        `// Unsupported hunt language: ${lang}`,
-        `// Affected tech: ${techs.join(", ")}`,
-        cves.length ? `// CVEs: ${cves.join(", ")}` : `// CVEs: (none)`,
-        actors.length ? `// Actors: ${actors.join(", ")}` : null,
-      ].filter(Boolean).join("\n");
-  }
-}
 
 // ---------- task: osint_overview ----------
 export interface OsintOverviewInput {
@@ -874,7 +540,7 @@ export interface OsintOverviewOutput {
   recommendations: string[];
 }
 
-function osintOverviewMock(input: OsintOverviewInput, provider: AiProvider): OsintOverviewOutput {
+function _osintOverviewMock(input: OsintOverviewInput, provider: AiProvider): OsintOverviewOutput {
   void provider;
   const sevTally: Record<string, number> = {};
   const techTally: Record<string, number> = {};
@@ -948,7 +614,7 @@ function osintOverviewMock(input: OsintOverviewInput, provider: AiProvider): Osi
   if (persona === "ir") {
     recommendations = [
       `Patch verification across ${topTech.slice(0, 3).map(([t]) => t).join(", ") || "the watchlist"} — confirm coverage within 7 days.`,
-      `Update the IR playbook with the top actor TTPs (${topActors.slice(0, 2).map(([a]) => a).join(", ") || "commodity affiliates"}) and rehearse the corresponding tabletop.`,
+      `Update the IR playbook with the top actor TTPs (${topActors.slice(0, 2).map(([a]) => a).join(", ") || "commodity affiliates"}) and rehearse the corresponding incident drill.`,
       `Engage the on-call SOC tier to deploy hunt queries for the listed CVEs and stage containment artefacts (block-lists, EDR custom IoCs).`,
       `Brief executive sponsors using OptraSight's Draft-email feature — escalate within 24h for any tenant with critical/high exposure.`,
       `Document a post-incident review checkpoint in 14 days.`,
@@ -989,79 +655,14 @@ export interface ThreatLandscapeOutput {
   stats: Record<string, any>;
 }
 
-function threatLandscapeMock(input: ThreatLandscapeInput, _provider: AiProvider): ThreatLandscapeOutput {
-  // Storage owns the rich markdown via mockThreatLandscape(). Here we return an empty body so
-  // storage detects "no AI body" and falls back to its deterministic generator.
-  // We DO populate stats so the dispatch path remains useful.
-  const sevTally: Record<string, number> = {};
-  input.recentSignals.forEach((s) => { sevTally[s.severity] = (sevTally[s.severity] || 0) + 1; });
-  const topActorsTally: Record<string, number> = {};
-  input.recentSignals.forEach((s) => (s.threatActors || []).forEach((a) => (topActorsTally[a] = (topActorsTally[a] || 0) + 1)));
-  const topActors = Object.entries(topActorsTally).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, count]) => ({ name, count }));
-  return {
-    bodyMd: "",
-    stats: {
-      severityTally: sevTally,
-      topActors,
-      topSectors: input.profile.industries,
-      geosCovered: input.profile.geos,
-      signalCount: input.recentSignals.length,
-    },
-  };
-}
-
-// ---------- task: email_draft ----------
-export interface EmailDraftInput {
-  finding: { title: string; severity: string; affectedTech: string[]; cveIds: string[]; summary: string | null; url?: string | null };
-  clientName: string;
-  industries: string[];
-  geos: string[];
-  recipientEmails: string[];
-}
-export interface EmailDraftOutput {
-  subject: string;
-  body: string;
-}
-
-function emailDraftMock(input: EmailDraftInput, _provider: AiProvider): EmailDraftOutput {
-  const sev = input.finding.severity.toUpperCase();
-  const techList = (input.finding.affectedTech || []).slice(0, 4).join(", ") || "the affected technology";
-  const cveList = (input.finding.cveIds || []).slice(0, 4).join(", ");
-  const subject = `[OptraSight — ${sev}] ${input.finding.title.slice(0, 90)}${input.finding.title.length > 90 ? "…" : ""}`;
-  const body = [
-    `Dear ${input.clientName} security team,`,
-    ``,
-    `We are writing to advise of an OSINT signal that intersects your monitored technology stack and operating regions (${(input.geos || []).join(", ") || "global"}; ${(input.industries || []).join(", ") || "all sectors"}).`,
-    ``,
-    `Signal: ${input.finding.title}`,
-    `Severity: ${sev}`,
-    `Affected technology: ${techList}`,
-    cveList ? `Referenced CVEs: ${cveList}` : `Referenced CVEs: (none assigned)`,
-    input.finding.summary ? `\nSummary: ${input.finding.summary}` : "",
-    ``,
-    `Recommended next steps:`,
-    `1. Confirm patch / configuration coverage across ${techList}.`,
-    `2. Deploy the OptraSight-generated hunt queries (Splunk / KQL / Chronicle / MDE / CrowdStrike / Cortex XDR / SentinelOne / YARA / Sigma) for the listed indicators.`,
-    `3. Brief affected business owners and document the response in your incident tracker.`,
-    ``,
-    `We will continue to monitor and will issue an update should the situation materially change.`,
-    ``,
-    `Regards,`,
-    `OptraSight Threat Intelligence`,
-  ].filter(Boolean).join("\n");
-  return { subject, body };
-}
-
 // ---------- public dispatcher ----------
 export interface DispatchOptions<I> {
   task: AiTask;
   input: I;
   provider: AiProvider;
 }
-// v2.22 — every dispatch result now carries an `isMock` flag so callers can
-// distinguish a real live AI response from the deterministic mock fallback.
-// Storage uses this to set ai_provider_label = "Mock (<provider> not
-// configured)" instead of falsely advertising the live provider's name.
+// `isMock` is retained in the result contract for legacy callers, but BatchOne
+// dispatch paths throw before returning synthetic output.
 export type DispatchResult =
   | { task: "triage";           output: TriageOutput; isMock: boolean }
   | { task: "young_domain";     output: YoungDomainAiOutput; isMock: boolean }
@@ -1071,7 +672,6 @@ export type DispatchResult =
   | { task: "osint_analysis";   output: OsintAnalysisOutput; isMock: boolean }
   | { task: "hunt_query";       output: HuntQueryOutput; isMock: boolean }
   | { task: "threat_landscape"; output: ThreatLandscapeOutput; isMock: boolean }
-  | { task: "email_draft";      output: EmailDraftOutput; isMock: boolean }
   | { task: "osint_overview";   output: OsintOverviewOutput; isMock: boolean }
   | { task: "detection_rule";   output: DetectionRuleOutput; isMock: boolean }
   | { task: "threat_actor_enrichment"; output: ThreatActorEnrichmentOutput; isMock: boolean };
@@ -1082,10 +682,8 @@ export type DispatchResult =
 //
 // Each helper below builds a small system+user prompt tuned for the task,
 // calls the live provider via liveChatJson(), validates the returned JSON
-// shape, and either returns the typed output or null. dispatchAi() chains the
-// live call ahead of the existing mock so that a successful live call replaces
-// the mock entirely, and any failure (no key, HTTP/JSON error, bad shape)
-// transparently falls back to the deterministic mock.
+// shape, and either returns the typed output or null. dispatchAi() converts a
+// missing or invalid live result into a LiveAiError.
 //
 // The system prompts always say "Respond with a strict JSON object matching
 // this TypeScript shape" and then describe the keys. The user message carries
@@ -1194,7 +792,7 @@ function scrubIocSentencesFromSummary(
     .filter((d) => !isSecurityPublisherHost(d));
   mergeBucket("domain", domains);
   // URLs — strip publisher refs
-  const urls = Array.from(text.matchAll(/https?:\/\/[^\s,"<>\)]+/g))
+  const urls = Array.from(text.matchAll(/https?:\/\/[^\s,"<>)]+/g))
     .map((m) => stripDefangs(m[0]))
     .filter((u) => {
       try {
@@ -1433,7 +1031,7 @@ function osintAnalysisLive(input: OsintAnalysisInput, provider: AiProvider): Osi
   const system = [
     "You are a senior CTI/CIRT analyst. The 'sourceContent' (when present) is the authoritative article body; the feed 'summary' is only a teaser.",
     hasFetched
-      ? "The 'sourceContent' field holds the cleaned text of the original article. Treat it as the AUTHORITATIVE source. If it conflicts with the feed teaser, the fetched article wins."
+      ? "The 'sourceContent' field holds the cleaned text of the original article and may include 'Referenced source (...)' sections fetched from links inside that article. Treat the Primary source as authoritative for the finding. Use Referenced source sections as supplemental evidence to enrich CVE details, vendor context, IoC confirmation, MITRE mapping, and recommended actions. If a referenced source conflicts with the Primary source, say so and prefer the Primary source for the finding's core claim."
       : "Only the feed teaser is available — sourceContent is empty. Say so in the summary and leave IoC groups empty rather than regex-fishing from the teaser.",
     "ALWAYS respond in ENGLISH. Translate non-English inline.",
     "",
@@ -1441,18 +1039,19 @@ function osintAnalysisLive(input: OsintAnalysisInput, provider: AiProvider): Osi
     "",
     "PASS 1 — EXTRACTION (scratch, internal reasoning):",
     "  • Read the article end-to-end and understand the context of the reported intel.",
+    "  • If 'Referenced source (...)' sections are present, read those too and capture what they add beyond the primary article. Do not ignore referenced CVE/vendor/MITRE/IoC evidence.",
     "  • Extract every available CVE, MITRE TID, product name, version string, threat-actor alias, malware family, file hash, IP, domain, URL, email, and bitcoin address you see — VERBATIM, with the surrounding sentence as evidence.",
-    "  • Mark each IoC as \"from sourceContent\" or \"from feed summary\".",
+    "  • Mark each IoC as \"from primary source\", \"from referenced source\", or \"from feed summary\".",
     "",
     "PASS 2 — STRUCTURED OUTPUT:",
     "  • summary — 4-7 sentences covering: (a) actor + event, (b) affected products + verbatim CVEs, (c) mechanism + MITRE TXXXX + Cyber Kill Chain phase(s), (d) exploitation status (PoC / in-the-wild / mass-scanning / vendor-only disclosure). The summary is PROSE for analyst reading — DO NOT enumerate hashes, IP addresses, domains, URLs, or other raw IoCs inside the summary. Those go in the 'iocs' object only. You may say 'three C2 IPs and two backdoor SHA-256 hashes were observed' as a count/description, but never paste the actual values.",
-    "  • relevanceScore — CIRT ladder:",
-    "      0.85-1.00 — direct hit on monitored tech/geo/sector AND active exploitation or imminent risk.",
-    "      0.60-0.84 — direct hit on monitored tech/geo/sector but informational or pre-exploitation.",
-    "      0.30-0.59 — adjacent (same vertical / similar stack) but not a direct hit.",
-    "      0.00-0.29 — generic threat-landscape noise.",
-    "  • recommendation — 2-4 ordered actions, each tied to a control the client owns (patch / config-change / detection rule / proactive hunt).",
-    "  • iocs — promote ONLY items marked \"from sourceContent\" in pass 1. Strip common defangs: '1.2.3[.]4' → '1.2.3.4', 'hxxps://' → 'https://', '(.)' → '.'. Empty arrays when none.",
+    "  • relevanceScore — BatchOne CIRT actionability ladder:",
+    "      0.85-1.00 — active exploitation, zero-day, severe supply-chain risk, confirmed IoCs, or urgent defensive action.",
+    "      0.60-0.84 — actionable advisory with named CVEs, actors, malware, tools, or detection opportunities.",
+    "      0.30-0.59 — useful context or trend signal, but limited direct actionability.",
+    "      0.00-0.29 — generic news, marketing, event, opinion, or low-evidence content.",
+    "  • recommendation — 2-4 ordered actions tied to analyst controls (patch validation, configuration review, detection rule, proactive hunt, or suppression/filtering).",
+    "  • iocs — promote ONLY items marked \"from primary source\" or \"from referenced source\" in pass 1. Strip common defangs: '1.2.3[.]4' → '1.2.3.4', 'hxxps://' → 'https://', '(.)' → '.'. Empty arrays when none.",
     "  • CRITICAL IoC EXCLUSIONS — these are NEVER IoCs even if they appear in the text:",
     "    - The article's OWN URL (finding.url) or its publisher host. The publisher host is the domain that PUBLISHED the article. These are publication addresses, NOT threat indicators. Strip them from 'domain' and 'url' buckets.\n    - Reference URLs from well-known security publishers and vendor research blogs — even when they appear inside the article body. Examples: www.rapid7.com, www.mandiant.com, cloud.google.com/blog, www.crowdstrike.com, www.microsoft.com/security, learn.microsoft.com, blog.talosintelligence.com, unit42.paloaltonetworks.com, www.kaspersky.com, securelist.com, www.welivesecurity.com, www.welivesecurity.com, blogs.cisco.com, www.fortinet.com, www.sentinelone.com, www.sophos.com, www.symantec.com, www.trendmicro.com, www.checkpoint.com, research.checkpoint.com, www.recordedfuture.com, www.proofpoint.com, www.bleepingcomputer.com, thehackernews.com, www.infosecurity-magazine.com, www.securityweek.com, www.cisa.gov, www.cert.gov, attack.mitre.org, nvd.nist.gov, github.com, www.zdnet.com, krebsonsecurity.com, www.darkreading.com, www.theregister.com, blog.virustotal.com, www.virustotal.com. These are reference / citation links — never threat indicators.",
     "    - Software version numbers misclassified as IPv4. Strings like '3.2.1.1', '3.2.0.0', '10.0.19042', '6.5.4.2', '1.0.0.0', '7.0.3.5' are software/build version numbers — NOT IPv4 addresses. Real IPv4 IoCs typically (a) appear defanged ('1[.]2[.]3[.]4'), or (b) appear in an explicit Indicators/IoC table, or (c) have at least one octet > 32 AND are clearly described as network addresses. If the surrounding text says 'version', 'build', 'release', 'patch', 'Windows', 'firmware', 'driver', etc., it is NOT an IPv4.",
@@ -1729,8 +1328,9 @@ function huntQueryLive(input: HuntQueryInput, provider: AiProvider): HuntQueryOu
     "Hard rules: do NOT pad with weak queries — one well-grounded query beats five guesses. Skip angles the intel does not support. Anchor every TTP-driven query to a MITRE ATT&CK technique ID (TXXXX[.XXX]) in the description.",
     "Every query MUST be valid in its target platform's native syntax (Splunk SPL, Elastic KQL/EQL, Chronicle UDM, Defender KQL, CrowdStrike CQL / Falcon LogScale, Cortex XQL, SentinelOne Deep Visibility / PowerQuery, YARA, Sigma).",
     "Always respond in ENGLISH. Translate any non-English quoted strings inline. Query keywords / operators stay in the platform's native syntax, but field names, comments, and any prose MUST be English.",
-    "Respond with STRICT JSON. Each key is the language identifier; each value is an OBJECT shaped like:",
-    `{ "<language>": { "queries": [ { "name": "short English label", "description": "one-sentence English explanation including the MITRE TXXXX where applicable", "query": "...native syntax, no markdown fences..." }, ... ] } }`,
+    "Respond with STRICT JSON. Include a top-level `title` string for the overall hunt package, then one key per requested language identifier. The title must be identifiable and based on the strongest visible signal, such as the primary CVE, actor, malware/tool, affected product, or source campaign. Avoid generic labels like `OSINT findings`.",
+    "Each language value is an OBJECT shaped like:",
+    `{ "title": "Identifiable hunt title", "<language>": { "queries": [ { "name": "short English label", "description": "one-sentence English explanation including the MITRE TXXXX where applicable", "query": "...native syntax, no markdown fences..." }, ... ] } }`,
     "Backward-compat: if you can only produce one query, you may instead return the language value as a single string — but prefer the structured 'queries' array.",
     "Do NOT wrap query content in markdown fences. The 'query' field must be ready to paste into the target SIEM unchanged.",
     "Supported language identifiers include: splunk, kql_elk, chronicle, defender, crowdstrike, cortex_xdr, sentinelone, yara, sigma.",
@@ -1740,6 +1340,9 @@ function huntQueryLive(input: HuntQueryInput, provider: AiProvider): HuntQueryOu
   const raw = liveChatJsonLogged("hunt_query", provider, { system, user, timeoutSeconds: 300 });
   if (!raw) return null;
   const out: HuntQueryOutput = {};
+  if (typeof raw.title === "string" && raw.title.trim().length > 0) {
+    (out as any).__title = raw.title.trim().slice(0, 160);
+  }
   for (const lang of langs) {
     const v = raw[lang];
     if (typeof v === "string" && v.trim().length > 0) {
@@ -2236,26 +1839,8 @@ function threatLandscapeLive(input: ThreatLandscapeInput, provider: AiProvider):
   const raw = liveChatJsonLogged("threat_landscape", provider, { system, user, timeoutSeconds: 300 });
   if (!raw) return null;
   const bodyMd = asString(raw.bodyMd, "");
-  // bodyMd may legitimately be empty (caller falls back to mockThreatLandscape); pass through.
   const stats = raw.stats && typeof raw.stats === "object" ? raw.stats : {};
   return { bodyMd, stats };
-}
-
-// ---------- email_draft ----------
-function emailDraftLive(input: EmailDraftInput, provider: AiProvider): EmailDraftOutput | null {
-  const system = [
-    "You are an MSSP threat-intelligence client-comms writer.",
-    "Draft a concise, professional notification email for the supplied finding. Respond with STRICT JSON:",
-    `{ "subject": string, "body": string }`,
-    "The subject must start with `[OptraSight — <SEVERITY>]`. The body should be plain text (no markdown), addressed to the client's security team.",
-  ].join("\n");
-  const user = JSON.stringify(input);
-  const raw = liveChatJsonLogged("email_draft", provider, { system, user, timeoutSeconds: 180 });
-  if (!raw) return null;
-  const subject = asString(raw.subject, "");
-  const body = asString(raw.body, "");
-  if (!subject || !body) return null;
-  return { subject, body };
 }
 
 // ---------- osint_overview ----------
@@ -2440,9 +2025,10 @@ const _CHAT_TRIAGE_SYSTEM_PROMPT: string = [
   "  • Intel: one bullet per related title, in italics. Cite verbatim CVE IDs, product versions, threat-actor groups.",
   "  • Why it's <Tier>: one sentence on rationale (active exploitation? targeted? supply-chain blast radius?).",
   "  • Action: one direct, ordered next step tied to a concrete asset or control.",
+  "After the tier sections, include a 'Source Aggregation:' section. Group the supplied findings by source name/domain and summarize count, date span, dominant intel category, notable CVEs/actors, and 1-3 representative source URLs. This section must help analysts see which publishers contributed the strongest signal.",
   "End with an 'Analyst Action Plan Summary:' — a numbered list of 3-6 immediate orders covering: 'Drop everything and check for', 'Engage DevOps / AppSec', 'Deploy Threat Hunts', and 'Standard Op' as applicable.",
   "Open the report with a 2-3 sentence executive lead-in (e.g. 'As a top-tier CIRT and SOC expert, I have reviewed the provided threat intelligence feed. The current landscape is dominated by N major themes: ...').",
-  "Always respond in ENGLISH. Translate any non-English titles, quotes, or technical terms inline.",
+  "Always respond in ENGLISH only. Translate any non-English titles, quotes, or technical terms inline. Do not emit Chinese, Japanese, Korean, or other non-English prose in headings, bullets, or summaries.",
   "Output MUST use this exact Markdown skeleton (headings VERBATIM, including the leading emoji):",
   "",
   "  <2-3 sentence executive lead-in paragraph>",
@@ -2467,6 +2053,9 @@ const _CHAT_TRIAGE_SYSTEM_PROMPT: string = [
   "  *<one-italic-line scope description>*",
   "  - **Ignore/Filter out for triage:**",
   "    - <bullet of vendor marketing / webinars / regulatory items>",
+  "",
+  "  ## Source Aggregation:",
+  "  - **<source/domain>:** <count> item(s); date span <oldest> to <newest>; dominant category <category>; notable CVEs/actors <list or none>; representative sources <URL list>",
   "",
   "  ## \uD83D\uDCCB Analyst Action Plan Summary:",
   "  1. **Drop everything and check for:** <items>",
@@ -2635,50 +2224,6 @@ function _unused_chatDeepDiveLive_legacy(input: ChatDeepDiveInput, provider: AiP
   };
 }
 
-// Build a mock fallback CIRT-style report so the UI works even without an AI key.
-export function chatTriageMock(input: ChatTriageInput): ChatTriageOutput {
-  const total = input.findings.length;
-  const critSamples = input.findings.filter((f) => (f.severity || "").toLowerCase() === "critical").slice(0, 3);
-  const highSamples = input.findings.filter((f) => (f.severity || "").toLowerCase() === "high").slice(0, 3);
-  const medSamples = input.findings.filter((f) => (f.severity || "").toLowerCase() === "medium").slice(0, 3);
-  const lowSamples = input.findings.filter((f) => ["low", "info"].includes((f.severity || "").toLowerCase())).slice(0, 3);
-  const tier = (heading: string, blurb: string, items: ChatTriageInputFinding[], rationale: string) => {
-    if (items.length === 0) return "";
-    return [
-      `## ${heading}`,
-      `*${blurb}*`,
-      ...items.map((it, idx) => [
-        `### ${idx + 1}. ${it.title.slice(0, 80)}`,
-        `- **Intel:** *${it.title}*`,
-        `- **Why it matters:** ${rationale}`,
-        `- **Action:** Review the source advisory at ${it.url || "(no URL)"} and validate exposure against monitored assets.`,
-      ].join("\n")),
-    ].join("\n");
-  };
-  const body = [
-    `As a top-tier CIRT and SOC expert, I have reviewed the provided threat intelligence feed covering ${input.rangeLabel}.`,
-    "",
-    `Across ${total} item${total === 1 ? "" : "s"}, the current landscape is dominated by several major themes detailed below.`,
-    "",
-    tier("\ud83d\udea8 TIER 1: CRITICAL RISK (Immediate Triage & Action Required)", "These items represent active exploitation, zero-day threats, or severe supply chain compromises.", critSamples, "Critical severity — active exploitation or imminent risk."),
-    "",
-    tier("\ud83d\udd34 TIER 2: HIGH RISK (Prioritize for Patching & Threat Hunting)", "High-impact vulnerabilities and notable extortion campaigns.", highSamples, "High severity — prioritise patching cycle."),
-    "",
-    tier("\ud83d\udfe0 TIER 3: MEDIUM RISK (Awareness & Detection Engineering)", "Emerging tactics and malware that require SOC detection rules to be updated.", medSamples, "Medium severity — update detection rules."),
-    "",
-    tier("\u26aa TIER 4: LOW RISK / INFORMATIONAL (Filter Out)", "Vendor marketing, webinars, regulatory updates. They do not require CIRT intervention.", lowSamples, "Informational only."),
-    "",
-    "## \ud83d\udccb Analyst Action Plan Summary:",
-    `1. **Drop everything and check for:** the Tier 1 items above (${critSamples.length} item${critSamples.length === 1 ? "" : "s"}).`,
-    "2. **Engage DevOps:** for any supply-chain or CI/CD-impacting Tier 1/2 items.",
-    "3. **Deploy Threat Hunts:** generate hunt queries via the OSINT hunt-query workflow for prioritised intel.",
-    "4. **Standard Op:** schedule patch cycles for vendor advisories.",
-    "",
-    "_Note: This is a deterministic mock (no AI provider configured). Configure DeepSeek / OpenAI / Anthropic / Gemini under AI Setup for full CIRT-grade triage._",
-  ].filter(Boolean).join("\n");
-  return { reportMd: body };
-}
-
 // =============================================================================
 //                              DISPATCHER
 // =============================================================================
@@ -2759,15 +2304,18 @@ export function dispatchAi(opts: DispatchOptions<any>): DispatchResult {
       if (!out) throwLiveSchemaError("threat_landscape", opts.provider);
       return { task: "threat_landscape", output: out, isMock: false };
     }
-    case "email_draft": {
-      const out = emailDraftLive(opts.input as EmailDraftInput, opts.provider);
-      if (!out) throwLiveSchemaError("email_draft", opts.provider);
-      return { task: "email_draft", output: out, isMock: false };
-    }
     case "osint_overview": {
       const out = osintOverviewLive(opts.input as OsintOverviewInput, opts.provider);
       if (!out) throwLiveSchemaError("osint_overview", opts.provider);
       return { task: "osint_overview", output: out, isMock: false };
+    }
+    case "osint_chat": {
+      throw new LiveAiError("osint_chat", opts.provider, {
+        reason: "osint_chat is handled by the synchronous chatroom path, not dispatchAi",
+        httpStatus: 0,
+        latencyMs: 0,
+        rawBodyPreview: "",
+      });
     }
     case "detection_rule": {
       const out = detectionRuleLive(opts.input as DetectionRuleInput, opts.provider);
@@ -2780,8 +2328,6 @@ export function dispatchAi(opts: DispatchOptions<any>): DispatchResult {
       return { task: "threat_actor_enrichment", output: out, isMock: false };
     }
     default: {
-      const _exhaust: never = opts.task;
-      void _exhaust;
       throw new LiveAiError("unknown", opts.provider, {
         reason: `unsupported AI task: ${(opts as any).task}`,
         httpStatus: 0,

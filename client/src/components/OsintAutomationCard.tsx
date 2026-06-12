@@ -48,9 +48,9 @@ interface AutomationResponse {
   queue: QueueStats;
 }
 
-function relativeTime(iso: string | null): string {
+export function relativeTime(iso: string | null, nowMs = Date.now()): string {
   if (!iso) return "never";
-  const ms = Date.now() - Date.parse(iso);
+  const ms = nowMs - Date.parse(iso);
   if (Number.isNaN(ms) || ms < 0) return "just now";
   const sec = Math.floor(ms / 1000);
   if (sec < 60) return `${sec}s ago`;
@@ -59,6 +59,14 @@ function relativeTime(iso: string | null): string {
   const hr = Math.floor(min / 60);
   if (hr < 24) return `${hr}h ago`;
   return `${Math.floor(hr / 24)}d ago`;
+}
+
+export function canRunAnalyzeNow(opts: {
+  mutationPending: boolean;
+  autoAnalyzeEnabled: boolean;
+  aiDisabled: boolean;
+}): boolean {
+  return !opts.mutationPending && opts.autoAnalyzeEnabled && !opts.aiDisabled;
 }
 
 export default function OsintAutomationCard() {
@@ -167,7 +175,7 @@ export default function OsintAutomationCard() {
             <div className="space-y-1">
               <Label className="text-sm font-medium">Auto-fetch new intel</Label>
               <p className="text-xs text-muted-foreground">
-                Pulls the tenant's monitored sources every interval. Same logic as the manual <em>Scan now</em> button.
+                Pulls the workspace's monitored sources every interval. Same logic as the manual <em>Scan now</em> button.
               </p>
             </div>
             <Switch
@@ -295,7 +303,11 @@ export default function OsintAutomationCard() {
             <Button
               size="sm" variant="outline" className="h-7"
               onClick={() => analyzeNowMutation.mutate()}
-              disabled={analyzeNowMutation.isPending || !s.autoAnalyzeEnabled || aiDisabled}
+              disabled={!canRunAnalyzeNow({
+                mutationPending: analyzeNowMutation.isPending,
+                autoAnalyzeEnabled: s.autoAnalyzeEnabled,
+                aiDisabled,
+              })}
               title={aiAvailability.disabledReason}
               data-testid="button-analyze-now"
             >

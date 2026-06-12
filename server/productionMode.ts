@@ -103,6 +103,5 @@ export function logProductionMode(): void {
   } else {
     banner = `[optrasight] permissive mode — mock fallbacks ENABLED (NODE_ENV=${env}). Set OPTRASIGHT_STRICT=1 to disable.`;
   }
-  // eslint-disable-next-line no-console
   console.log(banner);
 }

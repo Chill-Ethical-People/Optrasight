@@ -11,7 +11,7 @@
 
 import {
   Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType,
-  Table, TableRow, TableCell, WidthType, BorderStyle, ShadingType,
+  Table, TableRow, TableCell, WidthType, ShadingType,
 } from "docx";
 import type { ThreatActorFullDTO } from "@shared/schema";
 
@@ -30,14 +30,6 @@ function h1(text: string): Paragraph {
   });
 }
 
-function h2(text: string): Paragraph {
-  return new Paragraph({
-    heading: HeadingLevel.HEADING_2,
-    spacing: { before: 240, after: 100 },
-    children: [new TextRun({ text, bold: true, size: 26, color: COLOR_HEADING })],
-  });
-}
-
 function h3(text: string): Paragraph {
   return new Paragraph({
     heading: HeadingLevel.HEADING_3,
@@ -50,13 +42,6 @@ function p(text: string, opts: { bold?: boolean; italic?: boolean; color?: strin
   return new Paragraph({
     spacing: { after: 80 },
     children: [new TextRun({ text, bold: opts.bold, italics: opts.italic, color: opts.color, size: 20 })],
-  });
-}
-
-function label(text: string): Paragraph {
-  return new Paragraph({
-    spacing: { after: 40 },
-    children: [new TextRun({ text: text.toUpperCase(), bold: true, size: 16, color: COLOR_LABEL })],
   });
 }
 

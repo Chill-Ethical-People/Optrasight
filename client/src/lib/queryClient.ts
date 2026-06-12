@@ -21,17 +21,16 @@ export function resolveAssetUrl(
 // Auth context updates it via setAuthToken / setOnUnauthorized.
 let authToken: string | null = null;
 let onUnauthorized: (() => void) | null = null;
-// Active tenant override (admin only — server enforces)
-let activeTenantId: string | null = null;
-
 export function setAuthToken(t: string | null) { authToken = t; }
 export function setOnUnauthorized(cb: (() => void) | null) { onUnauthorized = cb; }
-export function setActiveTenantId(tid: string | null) { activeTenantId = tid; }
+export function setActiveTenantId(_tid: string | null) {
+  // BatchOne is a single-workspace release. Keep this no-op export so older
+  // auth/UI code can call it without sending tenant override headers.
+}
 
 function authHeaders(extra: HeadersInit = {}): HeadersInit {
   const h: Record<string, string> = { ...(extra as Record<string, string>) };
   if (authToken) h.Authorization = `Bearer ${authToken}`;
-  if (activeTenantId) h["X-Tenant-Id"] = activeTenantId;
   return h;
 }
 

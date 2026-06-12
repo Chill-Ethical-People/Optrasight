@@ -16,10 +16,6 @@ const id = () => randomUUID();
 const now = () => new Date().toISOString();
 const j = (v) => JSON.stringify(v);
 
-function parseJson(value, fallback) {
-  try { const p = JSON.parse(value || ""); return p == null ? fallback : p; } catch { return fallback; }
-}
-
 // ─── IOC Collectors ──────────────────────────────────────────────────────────
 
 function getActorIocs(actorId, tenantId) {
@@ -28,10 +24,6 @@ function getActorIocs(actorId, tenantId) {
 
 function getActorTtps(actorId, tenantId) {
   return db.prepare("SELECT technique_id, sub_technique_id, technique_name, tactic FROM threat_actor_ttps WHERE actor_id = ? AND tenant_id = ? ORDER BY technique_id").all(actorId, tenantId);
-}
-
-function getActorTools(actorId, tenantId) {
-  return db.prepare("SELECT name, category FROM threat_actor_tools WHERE actor_id = ? AND tenant_id = ?").all(actorId, tenantId);
 }
 
 // ─── IOC Partitioner ─────────────────────────────────────────────────────────
@@ -524,7 +516,6 @@ const tx = db.transaction(() => {
     if (iocs.length === 0) { skipped++; continue; }
 
     const ttps = getActorTtps(actor.id, actor.tenant_id);
-    const tools = getActorTools(actor.id, actor.tenant_id);
     const p = partitionIocs(iocs);
     const severity = severityFromThreatLevel(actor.threat_level);
 

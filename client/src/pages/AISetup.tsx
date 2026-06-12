@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { AppShell } from "@/components/AppShell";
@@ -17,64 +17,68 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import {
-  AI_TASKS, AI_PROVIDERS, type AiProviderSummary, type AiTask, type AiProviderKind,
+  BATCH_ONE_AI_TASKS, AI_PROVIDERS, type AiProviderSummary, type AiTask, type AiProviderKind,
 } from "@shared/schema";
 import {
   Sparkles, Eye, EyeOff, Save, Loader2, CheckCircle2, XCircle, Plus, Trash2, Settings2,
 } from "lucide-react";
 
 const PROVIDER_META: Record<AiProviderKind, { label: string; defaultModel: string; defaultBase?: string; tone: string; needsKey: boolean }> = {
-  "openai":         { label: "OpenAI",         defaultModel: "gpt-5.5",              tone: "from-emerald-500/15 to-emerald-500/5 border-emerald-500/30", needsKey: true },
-  "anthropic":      { label: "Anthropic",      defaultModel: "claude-sonnet-4-6",    tone: "from-orange-500/15 to-orange-500/5 border-orange-500/30",   needsKey: true },
-  "gemini":         { label: "Google Gemini",  defaultModel: "gemini-2.5-flash",     tone: "from-blue-500/15 to-blue-500/5 border-blue-500/30",         needsKey: true },
-  "azure-openai":   { label: "Azure OpenAI",   defaultModel: "gpt-5.4",              tone: "from-cyan-500/15 to-cyan-500/5 border-cyan-500/30",         needsKey: true },
+  "openai":         { label: "OpenAI",         defaultModel: "gpt-4.1-mini",         tone: "from-emerald-500/15 to-emerald-500/5 border-emerald-500/30", needsKey: true },
+  "anthropic":      { label: "Anthropic",      defaultModel: "claude-sonnet-4-20250514", tone: "from-orange-500/15 to-orange-500/5 border-orange-500/30", needsKey: true },
+  "gemini":         { label: "Google Gemini",  defaultModel: "gemini-flash-latest",  tone: "from-blue-500/15 to-blue-500/5 border-blue-500/30",       needsKey: true },
+  "azure-openai":   { label: "Azure OpenAI",   defaultModel: "gpt-4.1-mini",         tone: "from-cyan-500/15 to-cyan-500/5 border-cyan-500/30",         needsKey: true },
   "ollama":         { label: "Ollama (self-hosted)", defaultModel: "llama3.1:8b",    defaultBase: "http://localhost:11434", tone: "from-slate-500/15 to-slate-500/5 border-slate-500/30", needsKey: false },
   "perplexity":     { label: "Perplexity",     defaultModel: "sonar-pro",            tone: "from-violet-500/15 to-violet-500/5 border-violet-500/30",   needsKey: true },
-  "deepseek":       { label: "DeepSeek",       defaultModel: "deepseek-v4-flash",    defaultBase: "https://api.deepseek.com", tone: "from-indigo-500/15 to-indigo-500/5 border-indigo-500/30", needsKey: true },
-  "kimi":           { label: "Kimi (Moonshot)", defaultModel: "kimi-latest",         defaultBase: "https://api.moonshot.ai", tone: "from-fuchsia-500/15 to-fuchsia-500/5 border-fuchsia-500/30", needsKey: true },
+  "deepseek":       { label: "DeepSeek",       defaultModel: "deepseek-chat",        defaultBase: "https://api.deepseek.com", tone: "from-indigo-500/15 to-indigo-500/5 border-indigo-500/30", needsKey: true },
+  "kimi":           { label: "Kimi (Moonshot)", defaultModel: "moonshot-v1-128k",    defaultBase: "https://api.moonshot.ai", tone: "from-fuchsia-500/15 to-fuchsia-500/5 border-fuchsia-500/30", needsKey: true },
 };
 
 // Quick-pick model presets per provider — surfaced as clickable chips under the
 // Model input in the provider edit dialog so users don't have to hand-type names.
-// Latest verified IDs as of May 2026 — confirmed against each vendor's docs.
+// Provider quick-picks favor API-valid model ids for this chat-completions
+// integration. Users can still type a newer account/deployment-specific id.
 const MODEL_PRESETS: Record<AiProviderKind, string[]> = {
-  "openai":         ["gpt-5.5", "gpt-5.5-pro", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-4o-mini", "gpt-4o"],
-  "anthropic":      ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5", "claude-3-5-sonnet-latest", "claude-3-5-haiku-latest"],
-  "gemini":         ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-flash-lite", "gemini-1.5-pro"],
-  "azure-openai":   ["gpt-5.4", "gpt-5.4-mini", "gpt-4o", "gpt-4o-mini"],
+  "openai":         ["gpt-image-2", "gpt-image-1.5", "gpt-image-1", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "gpt-4o", "gpt-4o-mini", "o3", "o4-mini"],
+  "anthropic":      ["claude-opus-4-1-20250805", "claude-opus-4-20250514", "claude-sonnet-4-20250514", "claude-3-7-sonnet-20250219", "claude-3-5-haiku-20241022"],
+  "gemini":         ["gemini-flash-latest", "gemini-3.5-flash", "gemini-3.1-pro", "gemini-3-flash", "gemini-3.1-flash-image", "gemini-3-pro-image"],
+  "azure-openai":   ["gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini", "o3-mini"],
   "ollama":         ["llama3.1:8b", "llama3.1:70b", "qwen2.5:14b", "mistral:7b", "deepseek-r1:14b"],
   "perplexity":     ["sonar-pro", "sonar", "sonar-reasoning-pro", "sonar-deep-research"],
-  "deepseek":       ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat", "deepseek-reasoner"],
+  "deepseek":       ["deepseek-chat", "deepseek-reasoner"],
   // Moonshot Kimi — OpenAI-compatible endpoint, multiple vision-capable models.
-  "kimi":           ["kimi-latest", "kimi-k2-instruct", "moonshot-v1-128k", "moonshot-v1-32k", "moonshot-v1-8k"],
+  "kimi":           ["moonshot-v1-128k", "moonshot-v1-32k", "moonshot-v1-8k", "kimi-k2-0711-preview"],
 };
 
 // Short note shown next to each model chip on hover so the user knows what each is for.
 const MODEL_DESCRIPTIONS: Record<string, string> = {
   // OpenAI
-  "gpt-5.5":            "Flagship reasoning + coding (2026)",
-  "gpt-5.5-pro":        "Highest-quality GPT-5.5 (more compute)",
-  "gpt-5.4":            "Cheaper GPT-5.4 for coding & pro work",
-  "gpt-5.4-mini":       "Strongest mini — agents, computer use",
-  "gpt-5.4-nano":       "Cheapest GPT-5.4 for high-volume",
+  "gpt-image-2":         "Latest OpenAI image generation model for TAP portraits",
+  "gpt-image-1.5":       "OpenAI image generation model",
+  "gpt-image-1":         "OpenAI image generation model",
+  "gpt-4.1":            "Flagship GPT-4.1 text model",
+  "gpt-4.1-mini":       "Balanced GPT-4.1 model",
+  "gpt-4.1-nano":       "Low-cost GPT-4.1 model",
+  "gpt-4o":             "Multimodal GPT-4o",
   "gpt-4o-mini":        "Fast, affordable GPT-4o",
-  "gpt-4o":             "Older flagship — multimodal",
+  "o3":                 "Reasoning model",
+  "o4-mini":            "Fast reasoning model",
   // Anthropic
-  "claude-opus-4-7":          "Most capable Claude — agentic coding",
-  "claude-sonnet-4-6":        "Best speed/intelligence balance",
-  "claude-haiku-4-5":         "Fastest Claude with frontier-near IQ",
-  "claude-3-5-sonnet-latest": "Legacy Sonnet 3.5 (still supported)",
-  "claude-3-5-haiku-latest":  "Legacy Haiku 3.5",
+  "claude-opus-4-1-20250805": "Claude Opus 4.1",
+  "claude-opus-4-20250514":   "Claude Opus 4",
+  "claude-sonnet-4-20250514": "Claude Sonnet 4",
+  "claude-3-7-sonnet-20250219":"Claude 3.7 Sonnet",
+  "claude-3-5-haiku-20241022":"Claude 3.5 Haiku",
   // Gemini
-  "gemini-2.5-pro":        "Adaptive thinking, 1M context",
-  "gemini-2.5-flash":      "Balanced speed/quality",
-  "gemini-2.5-flash-lite": "Cheapest Gemini 2.5",
-  "gemini-1.5-pro":        "Legacy multimodal Gemini",
+  "gemini-3.1-flash-image": "Gemini 3.1 Flash Image for TAP portraits",
+  "gemini-3-pro-image":     "Gemini 3 Pro Image for higher-quality TAP portraits",
+  "gemini-flash-latest":   "Latest Gemini Flash alias",
+  "gemini-3.5-flash":      "Current stable Gemini Flash model",
+  "gemini-3.1-pro":        "Preview Gemini Pro model",
+  "gemini-3-flash":        "Preview Gemini Flash model",
   // DeepSeek
-  "deepseek-v4-flash":  "284B/13B active — fast, cheap, 1M ctx",
-  "deepseek-v4-pro":    "1.6T/49B active — rivals top closed models",
-  "deepseek-chat":      "Legacy alias of v4-flash non-thinking mode (deprecates 2026-07-24)",
-  "deepseek-reasoner":  "Legacy alias of v4-flash thinking mode (deprecates 2026-07-24)",
+  "deepseek-chat":      "DeepSeek chat model",
+  "deepseek-reasoner":  "DeepSeek reasoning model",
   // Perplexity
   "sonar-pro":          "Advanced search with grounding",
   "sonar":              "Lightweight, cost-effective search",
@@ -87,27 +91,74 @@ const MODEL_DESCRIPTIONS: Record<string, string> = {
   "mistral:7b":         "Mistral 7B — small, fast",
   "deepseek-r1:14b":    "DeepSeek-R1 distilled — local reasoning",
   // Kimi / Moonshot
-  "kimi-latest":         "Vision-capable, auto-routes to current Kimi flagship",
-  "kimi-k2-instruct":    "Open-weights K2, agentic + tool use, 128K ctx",
   "moonshot-v1-128k":    "128K-context, balanced quality/cost",
   "moonshot-v1-32k":     "32K-context for shorter prompts (cheaper)",
   "moonshot-v1-8k":      "8K-context for low-volume cheap calls",
+  "kimi-k2-0711-preview":"Kimi K2 preview where enabled",
 };
 
-const TASK_META: Record<AiTask, { label: string; description: string }> = {
-  triage:         { label: "Finding triage",       description: "Classify each finding (severity, recommended status, IOCs)." },
-  analysis:       { label: "Deep analysis",        description: "Free-form follow-on analysis on demand." },
-  young_domain:   { label: "Young-domain verdict", description: "Phishing / impersonation classification with screenshot context." },
-  report_summary: { label: "Report summary",       description: "Executive summary, key findings and recommendations." },
-  logo_abuse:     { label: "Logo / trademark abuse", description: "Compare scraped imagery against client logo and trademark assets." },
-  osint_analysis: { label: "OSINT analysis",       description: "Score relevance of OSINT findings to the client and recommend response." },
-  hunt_query:     { label: "Threat-hunt query",    description: "Generate SIEM/EDR hunting queries (Splunk, KQL, Chronicle, Sigma…) from selected findings." },
-  threat_landscape: { label: "Threat landscape",   description: "Synthesize a markdown threat-landscape report from recent OSINT and client profile." },
-  email_draft:    { label: "Client email draft",   description: "Draft a notification email to client contacts based on selected findings." },
-  osint_overview: { label: "OSINT AI overview",    description: "Persona-tuned (IR / TI / SecOps) summary, takeaways and recommendations across scoped OSINT findings." },
-  detection_rule:  { label: "Detection rule",       description: "Generate Sigma YAML + per-SIEM compiled queries (Splunk, KQL, FQL, XQL, YARA-L…) with MITRE mapping from selected intel." },
-  threat_actor_enrichment: { label: "Threat actor profile", description: "Enrich a Threat Actor Profile (TAP) end-to-end from primaryName + aliases — 13 sections + IOCs, references, MITRE TTPs." },
-  exercise_generation: { label: "Tabletop exercise",   description: "Generate a scenario narrative, role briefs, inject timeline, and evaluation rubric for a tabletop exercise." },
+function normaliseModelForProvider(provider: AiProviderKind, model?: string | null): string {
+  const m = (model || "").trim();
+  const key = m.toLowerCase();
+  if (!m) return PROVIDER_META[provider].defaultModel;
+  if (provider === "gemini" && (/^gemini-1(?:\.|$|-)/i.test(m) || /^gemini-2(?:\.|$|-)/i.test(m) || key === "gemini-pro" || key === "gemini-3.1-flash-lite")) return "gemini-flash-latest";
+  if ((provider === "openai" || provider === "azure-openai") && (/^gpt-5\./.test(key) || key === "gpt-5")) return "gpt-4.1-mini";
+  if (provider === "anthropic") {
+    const aliases: Record<string, string> = {
+      "claude-opus-4-7": "claude-opus-4-1-20250805",
+      "claude-sonnet-4-6": "claude-sonnet-4-20250514",
+      "claude-haiku-4-5": "claude-3-5-haiku-20241022",
+      "claude-3-5-sonnet": "claude-3-7-sonnet-20250219",
+      "claude-3-5-sonnet-latest": "claude-3-7-sonnet-20250219",
+      "claude-3-5-haiku-latest": "claude-3-5-haiku-20241022",
+    };
+    return aliases[key] || m;
+  }
+  if (provider === "deepseek") {
+    if (key === "deepseek-v4-pro") return "deepseek-reasoner";
+    if (key === "deepseek-v4-flash") return "deepseek-chat";
+  }
+  if (provider === "perplexity" && key === "sonar-large") return "sonar-pro";
+  if (provider === "kimi") {
+    if (key === "kimi-latest") return "moonshot-v1-128k";
+    if (key === "kimi-k2-instruct") return "kimi-k2-0711-preview";
+  }
+  return m;
+}
+
+function providerTestDescription(providerLabel: string, data: { ok?: boolean; message?: string; latencyMs?: number | null }) {
+  const raw = String(data.message || "").trim();
+  const labelLower = providerLabel.toLowerCase();
+  const withoutDuplicateLabel = raw.toLowerCase().startsWith(`${labelLower}:`)
+    ? raw.slice(providerLabel.length + 1).trim()
+    : raw.toLowerCase().startsWith(labelLower)
+      ? raw.slice(providerLabel.length).trim()
+      : raw;
+  const cleaned = withoutDuplicateLabel
+    .replace(/^[-·:]\s*/, "")
+    .replace(/\s+—\s+connected via generateContent$/i, " connected")
+    .replace(/\s+—\s+connected via chat$/i, " connected")
+    .replace(/\s+—\s+connected$/i, " connected")
+    .replace(/\bHTTP 200 but response had no candidate text\b/i, "Google returned an empty response body for this model")
+    .trim();
+  const latency = data.latencyMs ? ` Response time: ${data.latencyMs}ms.` : "";
+  if (data.ok) {
+    const okDetail = cleaned || "connected";
+    const sentence = okDetail.toLowerCase().startsWith(providerLabel.toLowerCase())
+      ? okDetail
+      : `${providerLabel} ${okDetail}`;
+    return `${sentence.replace(/\.$/, "")}.${latency}`;
+  }
+  return `${providerLabel} test failed${cleaned ? `: ${cleaned}` : "."}${latency}`;
+}
+
+const TASK_META: Partial<Record<AiTask, { label: string; description: string }>> = {
+  osint_analysis: { label: "Intel analysis",       description: "Score source findings, run deep-dive analysis, and preserve evidence context." },
+  hunt_query:     { label: "Hunt query",           description: "Generate SIEM/EDR hunt queries from selected findings." },
+  osint_overview: { label: "CIRT overview",        description: "Run CIRT triage, analyst chat, and overview summaries across scoped findings." },
+  osint_chat:     { label: "Analyst chat",         description: "Power the floating OSINT chatroom with scoped findings and fetched URL context." },
+  threat_actor_enrichment: { label: "Threat actor profile", description: "Enrich TAP dossiers with identity, tradecraft, IOCs, references, and MITRE TTPs." },
+  tap_portrait: { label: "TAP portrait", description: "Generate fictional actor portrait art from TAP attributes using an image-capable provider." },
 };
 
 // Defensive fallback: if a new AiTask is added to shared/schema.ts but the
@@ -120,8 +171,14 @@ function taskMeta(t: AiTask): { label: string; description: string } {
   return { label, description: "" };
 }
 
-interface AssignmentsResp { assignments: Record<string, string> }
-interface ProvidersResp { providers: AiProviderSummary[]; hasUsableProvider?: boolean }
+function providerSupportsTask(provider: AiProviderSummary, task: AiTask): boolean {
+  if (task !== "tap_portrait") return true;
+  if (provider.provider === "openai" || provider.provider === "azure-openai" || provider.provider === "gemini") return true;
+  return false;
+}
+
+interface AssignmentsResp { assignments: Record<string, string>; tasks?: AiTask[] }
+interface ProvidersResp { providers: AiProviderSummary[]; hasUsableProvider?: boolean; tasks?: AiTask[] }
 
 function fmtTime(s: string | null | undefined) {
   if (!s) return "Never";
@@ -166,12 +223,12 @@ function ProviderCard({
     onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/v1/ai/providers"] });
       toast({
-        title: data.ok ? "Connected" : "Connection failed",
-        description: `${p.label} · ${data.message}${data.latencyMs ? ` (${data.latencyMs}ms)` : ""}`,
+        title: data.ok ? "Provider connected" : "Provider test failed",
+        description: providerTestDescription(p.label, data),
         variant: data.ok ? undefined : "destructive",
       });
     },
-    onError: (e: any) => toast({ variant: "destructive", title: "Test failed", description: String(e.message ?? e) }),
+    onError: (e: any) => toast({ variant: "destructive", title: "Provider test failed", description: String(e.message ?? e) }),
   });
 
   const dot =
@@ -280,7 +337,7 @@ function ProviderEditDialog({
       const p = initial?.provider ?? "openai";
       setProvider(p);
       setLabel(initial?.label ?? PROVIDER_META[p].label);
-      setModel(initial?.model ?? PROVIDER_META[p].defaultModel);
+      setModel(normaliseModelForProvider(p, initial?.model));
       setBaseUrl(initial?.baseUrl ?? PROVIDER_META[p].defaultBase ?? "");
       setApiKey("");
       setShowKey(false);
@@ -319,7 +376,7 @@ function ProviderEditDialog({
         <DialogHeader>
           <DialogTitle className="text-base">{initial?.id ? "Edit AI provider" : "Add AI provider"}</DialogTitle>
           <DialogDescription className="text-xs">
-            Credentials are encrypted at rest and never leave the tenant.
+            Credentials are encrypted at rest and never leave the workspace.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
@@ -447,21 +504,40 @@ export default function AISetup() {
   const { data: assignmentsData } = useQuery<AssignmentsResp>({
     queryKey: ["/api/v1/ai/assignments"],
   });
-  const assignments = assignmentsData?.assignments ?? {};
+  const assignments = assignmentsData?.assignments;
+  const visibleTasks = useMemo(
+    () => assignmentsData?.tasks ?? providersData?.tasks ?? [...BATCH_ONE_AI_TASKS],
+    [assignmentsData?.tasks, providersData?.tasks],
+  );
 
   const [draftAssignments, setDraftAssignments] = useState<Record<string, string>>({});
+  const keyedProviders = providers.filter((p) => p.enabled && p.hasKey && p.lastTestOk === true);
+  const providerById = useMemo(() => new Map(providers.map((p) => [p.id, p])), [providers]);
+  const usableCount = keyedProviders.length;
+
   useEffect(() => {
-    setDraftAssignments({ ...assignments });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [assignmentsData]);
+    const current = assignments ?? {};
+    setDraftAssignments(Object.fromEntries(
+      visibleTasks.map((task) => [task, current[task] ?? ""]),
+    ));
+  }, [assignments, visibleTasks]);
 
   const dirty =
-    Object.keys(draftAssignments).length > 0 &&
-    AI_TASKS.some((t) => draftAssignments[t] !== assignments[t]);
+    visibleTasks.length > 0 &&
+    visibleTasks.some((t) => (draftAssignments[t] ?? "") !== (assignments?.[t] ?? ""));
 
   const saveAssignments = useMutation({
     mutationFn: async () => {
-      await apiRequest("PUT", "/api/v1/ai/assignments", { assignments: draftAssignments });
+      const payload = Object.fromEntries(
+        visibleTasks
+          .map((task) => [task, draftAssignments[task]] as const)
+          .filter((entry): entry is readonly [AiTask, string] => {
+            if (typeof entry[1] !== "string" || entry[1].length === 0) return false;
+            const provider = providerById.get(entry[1]);
+            return !!provider && providerSupportsTask(provider, entry[0]);
+          }),
+      );
+      await apiRequest("PUT", "/api/v1/ai/assignments", { assignments: payload });
     },
     onSuccess: () => {
       toast({ title: "Routing saved", description: "AI tasks will use the new providers." });
@@ -479,11 +555,6 @@ export default function AISetup() {
     },
     onError: (e: any) => toast({ variant: "destructive", title: "Delete failed", description: String(e.message ?? e) }),
   });
-
-  const enabledProviders = providers.filter((p) => p.enabled);
-  const keyedProviders = providers.filter((p) => p.enabled && p.hasKey && p.lastTestOk === true);
-  const enabledCount = enabledProviders.length;
-  const usableCount = keyedProviders.length;
 
   return (
     <AppShell>
@@ -539,7 +610,7 @@ export default function AISetup() {
           <div className="flex items-center justify-between mb-3">
             <div>
               <div className="text-sm font-semibold">Task routing</div>
-              <div className="text-xs text-muted-foreground">Pick which provider handles each AI workload across OptraSight.</div>
+              <div className="text-xs text-muted-foreground">Pick which provider handles BatchOne intel and TAP workloads.</div>
             </div>
             <Button
               onClick={() => saveAssignments.mutate()}
@@ -555,9 +626,12 @@ export default function AISetup() {
            *  columns regardless of how long the task description is. */}
           <Card className="overflow-hidden">
             <div className="grid grid-cols-1 md:grid-cols-2 auto-rows-fr md:divide-x divide-y md:divide-y-0">
-              {AI_TASKS.map((task, idx) => {
+              {visibleTasks.map((task, idx) => {
                 const meta = taskMeta(task);
-                const value = draftAssignments[task] ?? "";
+                const taskProviders = keyedProviders.filter((p) => providerSupportsTask(p, task));
+                const assigned = draftAssignments[task] ?? "";
+                const assignedProvider = assigned ? providerById.get(assigned) : undefined;
+                const value = assignedProvider && providerSupportsTask(assignedProvider, task) ? assigned : "";
                 // Row separator: every cell from index 2 onward sits on a new
                 // grid row in 2-col layout, so it needs a top border to keep
                 // the divider rhythm intact when `divide-y` is hidden at `md`.
@@ -577,13 +651,13 @@ export default function AISetup() {
                     <Select
                       value={value}
                       onValueChange={(v) => setDraftAssignments((d) => ({ ...d, [task]: v }))}
-                      disabled={keyedProviders.length === 0}
+                      disabled={taskProviders.length === 0}
                     >
                       <SelectTrigger className="h-9 text-sm mt-auto" data-testid={`select-assignment-${task}`}>
-                        <SelectValue placeholder={keyedProviders.length === 0 ? "No live-tested providers" : "Pick a provider…"} />
+                        <SelectValue placeholder={taskProviders.length === 0 ? "No compatible live-tested providers" : "Pick a provider…"} />
                       </SelectTrigger>
                       <SelectContent>
-                        {keyedProviders.map((p) => (
+                        {taskProviders.map((p) => (
                           <SelectItem key={p.id} value={p.id} data-testid={`option-provider-${task}-${p.id}`}>
                             <span className="font-medium">{p.label}</span>
                             <span className="text-muted-foreground font-mono text-[10px] ml-2">{p.model}</span>

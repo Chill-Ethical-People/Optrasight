@@ -7,4 +7,5 @@ export const BATCH_ONE_ALLOWED_PATHS = new Set([
   "/threat-actors",
   "/ai-setup",
   "/operations-audit",
+  "/platform-users",
 ]);

@@ -20,7 +20,10 @@ function req(path, body, token) {
 
 (async () => {
   const t0 = Date.now();
-  const login = await req("/api/v1/auth/login", { email: "admin@brandguard.local", password: "admin1234" });
+  const login = await req("/api/v1/auth/login", {
+    email: process.env.OPTRASIGHT_DIAG_EMAIL || "admin@cep.com",
+    password: process.env.OPTRASIGHT_DIAG_PASSWORD || "ChangeMe!2026Admin",
+  });
   const token = JSON.parse(login.body).access_token;
   console.log("login OK", token.slice(0, 8));
 

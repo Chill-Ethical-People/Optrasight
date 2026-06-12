@@ -10,29 +10,13 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { UiStateProvider } from "@/lib/uiState";
 import { AiJobsProvider } from "@/lib/aiJobs";
-import { ActiveScansProvider } from "@/lib/activeScans";
 import Login from "@/pages/Login";
-import Overview from "@/pages/Overview";
-import Findings from "@/pages/Findings";
-import Lookalikes from "@/pages/Lookalikes";
-import Assets from "@/pages/Assets";
-import Scans from "@/pages/Scans";
-import Evidence from "@/pages/Evidence";
-import Integrations from "@/pages/Integrations";
-import Reports from "@/pages/Reports";
-import Settings from "@/pages/Settings";
+import AccountSecuritySetup from "@/pages/AccountSecuritySetup";
 import AISetup from "@/pages/AISetup";
-import MaliciousSiteScanner from "@/pages/MaliciousSiteScanner";
 import OsintMonitoring from "@/pages/OsintMonitoring";
-import SourcesAnalytics from "@/pages/SourcesAnalytics";
-import ThreatLandscape from "@/pages/ThreatLandscape";
-import Investigations from "@/pages/Investigations";
 import ThreatActors from "@/pages/ThreatActors";
-import CoverageRadar from "@/pages/CoverageRadar";
-import DetectionRules from "@/pages/DetectionRules";
-import Exercises from "@/pages/Exercises";
-import ExercisePortal from "@/pages/ExercisePortal";
 import OperationsAudit from "@/pages/OperationsAudit";
+import PlatformUsers from "@/pages/PlatformUsers";
 import NotFound from "@/pages/not-found";
 
 function stripHashQuery(path: string) {
@@ -47,25 +31,25 @@ function useHashLocationWithoutQuery() {
 
 function ProtectedRoutes() {
   const { user } = useAuth();
-  // Participant portal is public (magic-link token authenticates) and bypasses
-  // the login wall + AppShell entirely.
-  if (typeof window !== "undefined") {
-    const hash = window.location.hash || "";
-    if (hash.startsWith("#/exercise/")) return <ExercisePortal />;
-  }
   if (!user) return <Login />;
+  if (user.passwordMustChange) return <AccountSecuritySetup />;
+  const reviewOnly = user.access_mode === "guest" || user.role === "reviewer";
   if (BATCH_ONE_RELEASE && typeof window !== "undefined") {
     const hash = window.location.hash || "#/";
     const rawPath = hash.startsWith("#") ? hash.slice(1) : hash;
     const hashPath = stripHashQuery(rawPath);
+    if (reviewOnly && !["/", "/osint", "/intel", "/threat-actors"].includes(hashPath)) {
+      window.location.hash = "#/osint";
+      return <OsintMonitoring />;
+    }
     if (!BATCH_ONE_ALLOWED_PATHS.has(hashPath)) {
       window.location.hash = "#/osint";
       return <OsintMonitoring />;
     }
   }
-  // Keep hash-query deep links route-safe. Wouter's hash hook behavior can vary
-  // across dev/prod builds, so known app routes with query params are rendered
-  // directly before the catch-all NotFound route can see them.
+  // Keep BatchOne hash-query deep links route-safe. Wouter's hash hook behavior
+  // can vary across dev/prod builds, so known release routes with query params
+  // are rendered directly before the catch-all NotFound route can see them.
   if (typeof window !== "undefined") {
     const hash = window.location.hash || "";
     const rawPath = hash.startsWith("#") ? hash.slice(1) : hash;
@@ -75,54 +59,25 @@ function ProtectedRoutes() {
         case "/intel":
         case "/osint":
           return <OsintMonitoring />;
-        case "/findings":
-          return <Findings />;
-        case "/malicious-site-scanner":
-        case "/young-domains":
-          return <MaliciousSiteScanner />;
-        case "/detection-rules":
-          return <DetectionRules />;
-        case "/investigations":
-          return <Investigations />;
-        case "/coverage-radar":
-          return <CoverageRadar />;
         case "/threat-actors":
           return <ThreatActors />;
-        case "/exercises":
-          return <Exercises />;
+        case "/ai-setup":
+          return reviewOnly ? <OsintMonitoring /> : <AISetup />;
         case "/operations-audit":
-          return <OperationsAudit />;
+          return reviewOnly ? <OsintMonitoring /> : <OperationsAudit />;
+        case "/platform-users":
+          return user.role === "admin" ? <PlatformUsers /> : <OsintMonitoring />;
       }
     }
-    if (hashPath.startsWith("/investigations/")) return <Investigations />;
-    if (hashPath.startsWith("/detection-rules/")) return <DetectionRules />;
   }
   return (
     <Switch>
-      <Route path="/" component={BATCH_ONE_RELEASE ? OsintMonitoring : Overview} />
+      <Route path="/" component={OsintMonitoring} />
       <Route path="/osint" component={OsintMonitoring} />
       <Route path="/threat-actors" component={ThreatActors} />
-      <Route path="/ai-setup" component={AISetup} />
-      <Route path="/operations-audit" component={OperationsAudit} />
-      {!BATCH_ONE_RELEASE && <Route path="/findings" component={Findings} />}
-      {!BATCH_ONE_RELEASE && <Route path="/lookalikes" component={Lookalikes} />}
-      {!BATCH_ONE_RELEASE && <Route path="/assets" component={Assets} />}
-      {!BATCH_ONE_RELEASE && <Route path="/scans" component={Scans} />}
-      {!BATCH_ONE_RELEASE && <Route path="/evidence" component={Evidence} />}
-      {!BATCH_ONE_RELEASE && <Route path="/integrations" component={Integrations} />}
-      {!BATCH_ONE_RELEASE && <Route path="/reports" component={Reports} />}
-      {!BATCH_ONE_RELEASE && <Route path="/malicious-site-scanner" component={MaliciousSiteScanner} />}
-      {!BATCH_ONE_RELEASE && <Route path="/young-domains" component={MaliciousSiteScanner} />}
-      {!BATCH_ONE_RELEASE && <Route path="/detection-rules/:technique" component={DetectionRules} />}
-      {!BATCH_ONE_RELEASE && <Route path="/detection-rules" component={DetectionRules} />}
-      {!BATCH_ONE_RELEASE && <Route path="/sources-analytics" component={SourcesAnalytics} />}
-      {!BATCH_ONE_RELEASE && <Route path="/threat-landscape" component={ThreatLandscape} />}
-      {!BATCH_ONE_RELEASE && <Route path="/investigations/:caseId" component={Investigations} />}
-      {!BATCH_ONE_RELEASE && <Route path="/investigations" component={Investigations} />}
-      {!BATCH_ONE_RELEASE && <Route path="/coverage-radar" component={CoverageRadar} />}
-      {!BATCH_ONE_RELEASE && <Route path="/exercises" component={Exercises} />}
-      {!BATCH_ONE_RELEASE && <Route path="/exercise/:token" component={ExercisePortal} />}
-      {!BATCH_ONE_RELEASE && <Route path="/settings" component={Settings} />}
+      <Route path="/ai-setup">{reviewOnly ? <OsintMonitoring /> : <AISetup />}</Route>
+      <Route path="/operations-audit">{reviewOnly ? <OsintMonitoring /> : <OperationsAudit />}</Route>
+      <Route path="/platform-users">{user.role === "admin" ? <PlatformUsers /> : <OsintMonitoring />}</Route>
       <Route component={NotFound} />
     </Switch>
   );
@@ -187,13 +142,11 @@ export default function App() {
         <TooltipProvider delayDuration={150}>
           <AuthProvider>
             <AiJobsProvider>
-              <ActiveScansProvider>
-                <WarmDataCache />
-                <Router hook={useHashLocationWithoutQuery}>
-                  <ProtectedRoutes />
-                </Router>
-                <Toaster />
-              </ActiveScansProvider>
+              <WarmDataCache />
+              <Router hook={useHashLocationWithoutQuery}>
+                <ProtectedRoutes />
+              </Router>
+              <Toaster />
             </AiJobsProvider>
           </AuthProvider>
         </TooltipProvider>

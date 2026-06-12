@@ -5,7 +5,6 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { startOsintBackgroundJobs } from "./backgroundJobs";
 import { assertModeConsistency, logProductionMode } from "./productionMode";
-import { logToolAvailability } from "./tools/availability";
 import { createServer } from "node:http";
 
 // Boot-time sanity check — fail loud if mutually-exclusive mode flags are set
@@ -15,6 +14,8 @@ assertModeConsistency();
 
 const app = express();
 const httpServer = createServer(app);
+app.set("trust proxy", process.env.TRUST_PROXY || "loopback, linklocal, uniquelocal");
+const REQUEST_BODY_LIMIT = process.env.OPTRASIGHT_BODY_LIMIT || "10mb";
 
 declare module "http" {
   interface IncomingMessage {
@@ -24,14 +25,14 @@ declare module "http" {
 
 app.use(
   express.json({
-    limit: "50mb",
+    limit: REQUEST_BODY_LIMIT,
     verify: (req, _res, buf) => {
       req.rawBody = buf;
     },
   }),
 );
 
-app.use(express.urlencoded({ limit: "50mb", extended: false }));
+app.use(express.urlencoded({ limit: REQUEST_BODY_LIMIT, extended: false }));
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
@@ -90,11 +91,30 @@ app.use((req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Referrer-Policy", "no-referrer");
   res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  const connectSrc = process.env.NODE_ENV === "development"
+    ? "'self' ws: wss: http://localhost:* http://127.0.0.1:*"
+    : "'self'";
+  const scriptSrc = process.env.NODE_ENV === "development"
+    ? "'self' 'unsafe-inline' 'unsafe-eval'"
+    : "'self'";
+  res.setHeader("Content-Security-Policy", [
+    "default-src 'self'",
+    `script-src ${scriptSrc}`,
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "font-src 'self' data:",
+    `connect-src ${connectSrc}`,
+    "object-src 'none'",
+    "base-uri 'self'",
+    "frame-ancestors 'none'",
+    "form-action 'self'",
+  ].join("; "));
   next();
 });
 
 app.use("/api/v1/auth/login", rateLimit({ keyPrefix: "login", windowMs: 60_000, max: 10 }));
-app.use("/api/v1/exercise-portal", rateLimit({ keyPrefix: "exercise-portal", windowMs: 60_000, max: 120 }));
 
 app.use((req, res, next) => {
   const start = Date.now();
@@ -125,6 +145,10 @@ app.use((req, res, next) => {
 
 (async () => {
   await registerRoutes(httpServer, app);
+
+  app.use("/api", (_req: Request, res: Response) => {
+    res.status(404).json({ detail: "API route not found" });
+  });
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     if (res.headersSent) {
@@ -207,7 +231,6 @@ app.use((req, res, next) => {
           reason: err.reason,
           httpStatus: err.httpStatus,
           latencyMs: err.latencyMs,
-          rawBodyPreview: err.rawBodyPreview,
         },
       });
     }
@@ -249,9 +272,6 @@ app.use((req, res, next) => {
     () => {
       log(`serving on port ${port}`);
       logProductionMode();
-      // Phase 0 — log which external scanner CLIs are installed so operators
-      // see at boot whether they need to run `scripts/install-tools.sh`.
-      logToolAvailability();
       // v2.16 — boot the background OSINT scheduler. Per-tenant settings
       // (tenant_osint_settings) gate whether anything runs; default is OFF
       // for both fetch + analyze so existing tenants see no behaviour

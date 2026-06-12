@@ -28,18 +28,6 @@ export const tenantScopes = sqliteTable("tenant_scopes", {
   notificationEmails: text("notification_emails").notNull().default("[]"),
 });
 
-// ----- Client contacts -----
-export const clientContacts = sqliteTable("client_contacts", {
-  id: text("id").primaryKey(),
-  tenantId: text("tenant_id").notNull(),
-  name: text("name").notNull(),
-  role: text("role"),
-  email: text("email").notNull(),
-  phone: text("phone"),
-  isPrimary: integer("is_primary").notNull().default(0),
-  createdAt: text("created_at").notNull(),
-});
-
 // ----- OSINT sources catalog (500+ feeds) -----
 export const osintSources = sqliteTable("osint_sources", {
   id: text("id").primaryKey(),
@@ -208,8 +196,20 @@ export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
   tenantId: text("tenant_id").notNull(),
   email: text("email").notNull().unique(),
-  password: text("password").notNull(), // demo only - plaintext
-  role: text("role").notNull().default("analyst"),
+  password: text("password").notNull(),
+  accountType: text("account_type").notNull().default("platform"),
+  role: text("role").notNull().default("threat_intel_expert"),
+  displayName: text("display_name"),
+  status: text("status").notNull().default("active"),
+  passwordMustChange: integer("password_must_change", { mode: "boolean" }).notNull().default(false),
+  mfaEnabled: integer("mfa_enabled", { mode: "boolean" }).notNull().default(false),
+  mfaSecretEnc: text("mfa_secret_enc"),
+  mfaVerifiedAt: text("mfa_verified_at"),
+  failedLoginCount: integer("failed_login_count").notNull().default(0),
+  failedMfaCount: integer("failed_mfa_count").notNull().default(0),
+  accountLockedUntil: text("account_locked_until"),
+  createdAt: text("created_at"),
+  lastLoginAt: text("last_login_at"),
 });
 
 // ----- Assets -----
@@ -550,7 +550,45 @@ export const triageSchema = z.object({
   status: z.enum(["open", "investigating", "takedown", "false_positive", "resolved"]),
   note: z.string().optional(),
 });
-export const loginSchema = z.object({ email: z.string().email(), password: z.string() });
+export const PLATFORM_USER_ROLES = ["admin", "threat_intel_expert", "detection_engineer", "reviewer"] as const;
+export const complexPasswordSchema = z.string()
+  .min(12, "password must be at least 12 characters")
+  .regex(/[a-z]/, "password must include a lowercase letter")
+  .regex(/[A-Z]/, "password must include an uppercase letter")
+  .regex(/[0-9]/, "password must include a number")
+  .regex(/[^A-Za-z0-9]/, "password must include a symbol");
+export const loginSchema = z.object({
+  email: z.string().email(),
+  password: z.string(),
+  mfaCode: z.string().trim().regex(/^\d{6}$/, "MFA code must be 6 digits").optional(),
+});
+export const passwordChangeSchema = z.object({
+  currentPassword: z.string(),
+  newPassword: complexPasswordSchema,
+});
+export const mfaVerifySchema = z.object({
+  code: z.string().trim().regex(/^\d{6}$/, "MFA code must be 6 digits"),
+});
+export const platformUserCreateSchema = z.object({
+  email: z.string().email(),
+  password: complexPasswordSchema,
+  tenantId: z.string().min(1),
+  displayName: z.string().trim().min(1).optional(),
+  role: z.enum(PLATFORM_USER_ROLES).default("threat_intel_expert"),
+  status: z.enum(["active", "disabled"]).default("active"),
+});
+export const platformUserUpdateSchema = z.object({
+  email: z.string().email().optional(),
+  password: complexPasswordSchema.optional(),
+  tenantId: z.string().min(1).optional(),
+  displayName: z.string().trim().min(1).nullable().optional(),
+  role: z.enum(PLATFORM_USER_ROLES).optional(),
+  status: z.enum(["active", "disabled"]).optional(),
+});
+export const platformUserBulkActionSchema = z.object({
+  userIds: z.array(z.string().min(1)).min(1),
+  action: z.enum(["disable", "delete"]),
+});
 export const scanRequestSchema = z.object({
   target: z.string().optional(),
   targets: z.array(z.string()).optional(),
@@ -570,12 +608,6 @@ export type Finding = typeof findings.$inferSelect;
 export type Evidence = typeof evidence.$inferSelect;
 
 // ---- DTOs returned to client (parsed JSON columns) ----
-export interface TenantScopeDTO {
-  brandKeywords: string[];
-  monitoredDomains: string[];
-  ipRanges: string[];
-  executiveEmails: string[];
-}
 export interface AssetDTO extends Omit<Asset, "technologies"> {
   technologies: string[];
 }
@@ -625,16 +657,25 @@ export const SCAN_KIND_TO_TOOLS: Record<ScanKind, string[]> = {
 // ----- AI task taxonomy -----
 export const AI_TASKS = [
   "triage", "analysis", "young_domain", "report_summary", "logo_abuse",
-  "osint_analysis", "hunt_query", "threat_landscape", "email_draft",
-  "osint_overview", "detection_rule",
+  "osint_analysis", "hunt_query", "threat_landscape",
+  "osint_overview", "osint_chat", "detection_rule",
   // v2.30.3 — Threat Actor Profile enrichment (DeepSeek populates all 13
   // sections + appendices from primaryName + aliases).
   "threat_actor_enrichment",
-  // v2.31.0 — Tabletop Exercise generator (proposes scenario narrative,
-  // role briefs, timeline of injects, evaluation rubric).
-  "exercise_generation",
+  // Provider-backed image generation for TAP portraits. This lets BatchOne use
+  // encrypted AI Setup credentials instead of requiring a local image CLI.
+  "tap_portrait",
 ] as const;
 export type AiTask = typeof AI_TASKS[number];
+
+export const BATCH_ONE_AI_TASKS = [
+  "osint_analysis",
+  "osint_overview",
+  "osint_chat",
+  "hunt_query",
+  "threat_actor_enrichment",
+  "tap_portrait",
+] as const satisfies readonly AiTask[];
 
 export const AI_PROVIDERS = [
   "openai", "anthropic", "gemini", "azure-openai", "ollama", "perplexity", "deepseek", "kimi",
@@ -856,7 +897,6 @@ export type Report = typeof reports.$inferSelect;
 export type ClientAsset = typeof clientAssets.$inferSelect;
 export type AiProvider = typeof aiProviders.$inferSelect;
 export type AiTaskAssignment = typeof aiTaskAssignments.$inferSelect;
-export type ClientContact = typeof clientContacts.$inferSelect;
 export type OsintSource = typeof osintSources.$inferSelect;
 export type OsintFinding = typeof osintFindings.$inferSelect;
 export type HuntQuery = typeof huntQueries.$inferSelect;
@@ -864,36 +904,6 @@ export type ThreatLandscape = typeof threatLandscapes.$inferSelect;
 export type AuditLogEntry = typeof auditLog.$inferSelect;
 export type DetectionRule = typeof detectionRules.$inferSelect;
 export type RuleDeployment = typeof ruleDeployments.$inferSelect;
-
-// ---- Client profile schemas ----
-export const clientProfileUpdateSchema = z.object({
-  brandKeywords: z.array(z.string()).optional(),
-  monitoredDomains: z.array(z.string()).optional(),
-  ipRanges: z.array(z.string()).optional(),
-  executiveEmails: z.array(z.string().email()).optional(),
-  clientTypes: z.array(z.string()).optional(),
-  geos: z.array(z.string()).optional(),
-  industries: z.array(z.string()).optional(),
-  monitoredTechnologies: z.array(z.string()).optional(),
-  notificationEmails: z.array(z.string().email()).optional(),
-});
-export interface ClientProfileDTO extends TenantScopeDTO {
-  clientTypes: string[];
-  geos: string[];
-  industries: string[];
-  monitoredTechnologies: string[];
-  notificationEmails: string[];
-  contacts: ClientContact[];
-}
-
-export const clientContactUpsertSchema = z.object({
-  id: z.string().optional(),
-  name: z.string().min(1),
-  role: z.string().optional(),
-  email: z.string().email(),
-  phone: z.string().optional(),
-  isPrimary: z.boolean().default(false),
-});
 
 // ---- OSINT schemas ----
 export const osintScanSchema = z.object({
@@ -910,10 +920,11 @@ export const osintScanSchema = z.object({
  * of the analyst's locale.
  */
 export const OSINT_CATEGORY_LABELS: Record<string, string> = {
-  // v2.10 5-bucket taxonomy
+  // v2.11 6-bucket taxonomy
   CVE_VULN:         "CVE & Vulnerability DBs",
   CERT_GOV:         "CERT / Government Advisories",
   VENDOR_RESEARCH:  "Vendor Threat Research",
+  THREAT_INTEL:     "Threat Intelligence Feeds",
   SECURITY_NEWS:    "Security News & Press",
   RANSOMWARE_LEAK:  "Ransomware & Data-Leak Feeds",
   // legacy codes (kept so any pre-v2.10 row that survives is still labelled)
@@ -930,6 +941,7 @@ export const OSINT_CATEGORY_ORDER: readonly string[] = [
   "CVE_VULN",
   "CERT_GOV",
   "VENDOR_RESEARCH",
+  "THREAT_INTEL",
   "SECURITY_NEWS",
   "RANSOMWARE_LEAK",
 ] as const;
@@ -956,9 +968,6 @@ export const osintAnalyzeSchema = z.object({
   ids: z.array(z.string()).optional(),
   onlyUnanalyzed: z.boolean().default(true),
 });
-export const osintEmailDraftSchema = z.object({
-  ids: z.array(z.string()).min(1),
-});
 /**
  * Source row enriched for the dashboard — adds an English display name
  * (translated when the upstream name is non-Latin) and a parsed-finding
@@ -971,7 +980,7 @@ export const osintEmailDraftSchema = z.object({
 export interface OsintOverviewResultDTO {
   persona: OsintOverviewPersona;
   personaLabel: string;
-  scopeLabel: string;          // e.g. "Acme Bank", "Global (3 clients)", "Industry: banking"
+  scopeLabel: string;          // e.g. "BatchOne Workspace"
   category: string | null;     // null = all categories
   severityFilter: string | null;
   findingCount: number;
@@ -2078,7 +2087,7 @@ export const threatActorTenantPatchSchema = z.object({
 });
 
 // ============================================================================
-// v2.31.0 — Tabletop Exercise (TTX) Generator
+// Legacy full-platform exercise tables retained for DB compatibility.
 // ============================================================================
 //
 // 5 tables:

@@ -1,0 +1,1511 @@
+{
+  "generatedAt": "2026-06-11T16:47:54.941Z",
+  "count": 300,
+  "format": "webp",
+  "pixelSize": "900x900",
+  "watermark": "CEP mark, lower-right, baked into image at approximately 8.5% of portrait size",
+  "source": "Runtime root-style TAP portraits from data/portraits, exported for public BatchOne setup",
+  "files": [
+    {
+      "file": "017969e7-2c1e-4ace-883e-4c2ae1cb0682.webp",
+      "profileId": "TAP-001",
+      "name": "Qilin"
+    },
+    {
+      "file": "1f801ed0-c2dd-457b-8972-f527d2f788e2.webp",
+      "profileId": "TAP-001",
+      "name": "Qilin"
+    },
+    {
+      "file": "85374d65-e423-4cc9-8c1a-b48aaf50c58a.webp",
+      "profileId": "TAP-001",
+      "name": "Qilin"
+    },
+    {
+      "file": "bc300b6f-4637-4d33-9a77-6e4fbe549683.webp",
+      "profileId": "TAP-002",
+      "name": "Akira"
+    },
+    {
+      "file": "fce574aa-977e-42ba-ae3b-e57fdec7806e.webp",
+      "profileId": "TAP-002",
+      "name": "Akira"
+    },
+    {
+      "file": "fd4b51c7-108b-4c47-bafb-79577603c18c.webp",
+      "profileId": "TAP-002",
+      "name": "Akira"
+    },
+    {
+      "file": "380dc3e4-894e-429b-beaf-22371f7d8b3b.webp",
+      "profileId": "TAP-003",
+      "name": "Cl0p"
+    },
+    {
+      "file": "7db02c33-485b-44cc-8ed1-271f876648fe.webp",
+      "profileId": "TAP-003",
+      "name": "Cl0p"
+    },
+    {
+      "file": "e40555cc-e7c0-47d3-af21-a35ba580dbae.webp",
+      "profileId": "TAP-003",
+      "name": "Cl0p"
+    },
+    {
+      "file": "16ec4437-e896-4788-bdad-dc43a2fe9895.webp",
+      "profileId": "TAP-004",
+      "name": "Play"
+    },
+    {
+      "file": "2fd3b86d-3de1-4f05-b41c-5e27c85139dc.webp",
+      "profileId": "TAP-004",
+      "name": "Play"
+    },
+    {
+      "file": "3e6733a7-32d1-4b6a-8d8d-7f21e0b312ea.webp",
+      "profileId": "TAP-004",
+      "name": "Play"
+    },
+    {
+      "file": "20df2402-d9a5-40bf-9d48-14d14ef19187.webp",
+      "profileId": "TAP-005",
+      "name": "SafePay"
+    },
+    {
+      "file": "411f2514-c462-4256-a1e5-66d14778d36a.webp",
+      "profileId": "TAP-005",
+      "name": "SafePay"
+    },
+    {
+      "file": "a9e11f95-2c7a-48ab-8d15-ce13909d1fdc.webp",
+      "profileId": "TAP-005",
+      "name": "SafePay"
+    },
+    {
+      "file": "86f209a0-e715-409a-b7f5-50e1c29c75d4.webp",
+      "profileId": "TAP-006",
+      "name": "INC Ransom"
+    },
+    {
+      "file": "ab9faa24-1a3b-48f3-8b28-a40abae9ca7e.webp",
+      "profileId": "TAP-006",
+      "name": "INC Ransom"
+    },
+    {
+      "file": "ac07f207-4acc-493f-a689-3b7758d809e8.webp",
+      "profileId": "TAP-006",
+      "name": "INC Ransom"
+    },
+    {
+      "file": "062e8698-c38a-4b65-aa61-b4383ea9089c.webp",
+      "profileId": "TAP-007",
+      "name": "DragonForce"
+    },
+    {
+      "file": "7755914a-ca4a-4d32-9173-d09756b4d0a8.webp",
+      "profileId": "TAP-007",
+      "name": "DragonForce"
+    },
+    {
+      "file": "e42c2e07-9194-4417-8a90-991450254e43.webp",
+      "profileId": "TAP-007",
+      "name": "DragonForce"
+    },
+    {
+      "file": "672e5544-99b1-486c-994b-62fb34d9c064.webp",
+      "profileId": "TAP-008",
+      "name": "RansomHub"
+    },
+    {
+      "file": "d860a505-5f58-43fd-b39e-5511e56ae11b.webp",
+      "profileId": "TAP-008",
+      "name": "RansomHub"
+    },
+    {
+      "file": "f6dc29f2-55fd-4c75-9329-e3388a0b71fd.webp",
+      "profileId": "TAP-008",
+      "name": "RansomHub"
+    },
+    {
+      "file": "1b236de8-6340-4b29-b41b-6127c5b9f811.webp",
+      "profileId": "TAP-009",
+      "name": "LockBit"
+    },
+    {
+      "file": "c743838e-a61a-45e8-b18a-2f96b7299552.webp",
+      "profileId": "TAP-009",
+      "name": "LockBit"
+    },
+    {
+      "file": "f668d566-631f-4fdb-a065-9ad63dc255a5.webp",
+      "profileId": "TAP-009",
+      "name": "LockBit"
+    },
+    {
+      "file": "5cfe2eb6-459f-4678-b78c-ebd083d71f4b.webp",
+      "profileId": "TAP-010",
+      "name": "Black Basta"
+    },
+    {
+      "file": "9e01212e-1204-43bb-a777-c88af582ab37.webp",
+      "profileId": "TAP-010",
+      "name": "Black Basta"
+    },
+    {
+      "file": "a20cab4c-8d09-40b2-bc96-e853a7ff470f.webp",
+      "profileId": "TAP-010",
+      "name": "Black Basta"
+    },
+    {
+      "file": "61af877a-a6e9-4515-893b-6015df699d35.webp",
+      "profileId": "TAP-011",
+      "name": "Scattered Spider"
+    },
+    {
+      "file": "8eb8afa5-6101-46e2-ad9f-6f5dfa2c9d5d.webp",
+      "profileId": "TAP-011",
+      "name": "Scattered Spider"
+    },
+    {
+      "file": "de893159-2883-46f8-87a7-321041e8455c.webp",
+      "profileId": "TAP-011",
+      "name": "Scattered Spider"
+    },
+    {
+      "file": "20de7e9a-f96d-43b1-8fbb-e8e83876d099.webp",
+      "profileId": "TAP-012",
+      "name": "FIN7"
+    },
+    {
+      "file": "6751215e-9312-4e34-b866-9ae677c2a2d4.webp",
+      "profileId": "TAP-012",
+      "name": "FIN7"
+    },
+    {
+      "file": "88d71144-da43-441a-96c6-098c47715ac6.webp",
+      "profileId": "TAP-012",
+      "name": "FIN7"
+    },
+    {
+      "file": "1a221c7c-1fc1-4e53-9b9c-77da0d880940.webp",
+      "profileId": "TAP-013",
+      "name": "TA505"
+    },
+    {
+      "file": "5cd8e2c3-5283-4afd-83b1-c2681546f2c8.webp",
+      "profileId": "TAP-013",
+      "name": "TA505"
+    },
+    {
+      "file": "ef6efb0c-439d-42a2-8fe2-fc93608ed65d.webp",
+      "profileId": "TAP-013",
+      "name": "TA505"
+    },
+    {
+      "file": "5c78d2fa-7009-42fc-ba8b-c8ba6358bf2f.webp",
+      "profileId": "TAP-014",
+      "name": "Evil Corp"
+    },
+    {
+      "file": "6b165378-f9b3-4ba4-80d9-549fd7a46682.webp",
+      "profileId": "TAP-014",
+      "name": "Evil Corp"
+    },
+    {
+      "file": "c3749b30-41c1-4e24-bbc4-76f2f728c86b.webp",
+      "profileId": "TAP-014",
+      "name": "Evil Corp"
+    },
+    {
+      "file": "2a5a9755-2747-4be4-b51a-08d135315bfc.webp",
+      "profileId": "TAP-015",
+      "name": "Lazarus Group"
+    },
+    {
+      "file": "a857dbb1-bb22-4b7b-a9fb-807a756d087a.webp",
+      "profileId": "TAP-015",
+      "name": "Lazarus Group"
+    },
+    {
+      "file": "c5e3dee6-3161-4e7e-9fe2-0b797f332209.webp",
+      "profileId": "TAP-015",
+      "name": "Lazarus Group"
+    },
+    {
+      "file": "59e8d97f-55f4-4af8-b6bd-d412bcd12ac6.webp",
+      "profileId": "TAP-016",
+      "name": "Kimsuky"
+    },
+    {
+      "file": "b1adc908-bac7-45d0-89fb-d577ea320754.webp",
+      "profileId": "TAP-016",
+      "name": "Kimsuky"
+    },
+    {
+      "file": "cfe91ac9-e67d-43e3-b543-b3c19e7e5754.webp",
+      "profileId": "TAP-016",
+      "name": "Kimsuky"
+    },
+    {
+      "file": "41d04a92-7988-4012-9bf6-b03c4805dc06.webp",
+      "profileId": "TAP-017",
+      "name": "APT43"
+    },
+    {
+      "file": "4c2e46c3-4143-4e23-9406-610960f72559.webp",
+      "profileId": "TAP-017",
+      "name": "APT43"
+    },
+    {
+      "file": "713cfa88-68bb-4a8d-86f8-a238d2e56de0.webp",
+      "profileId": "TAP-017",
+      "name": "APT43"
+    },
+    {
+      "file": "2c8f9743-2bcd-425d-90c5-0bd376efc503.webp",
+      "profileId": "TAP-018",
+      "name": "Andariel"
+    },
+    {
+      "file": "3c6ba22d-b0bf-461e-930c-db323c51be81.webp",
+      "profileId": "TAP-018",
+      "name": "Andariel"
+    },
+    {
+      "file": "f222e092-11f8-4c35-bc2e-3942352431dd.webp",
+      "profileId": "TAP-018",
+      "name": "Andariel"
+    },
+    {
+      "file": "1b635045-c86f-410d-86e3-101c99df0eab.webp",
+      "profileId": "TAP-019",
+      "name": "Volt Typhoon"
+    },
+    {
+      "file": "52a40db7-1e63-4b9b-addd-ed456023ee3c.webp",
+      "profileId": "TAP-019",
+      "name": "Volt Typhoon"
+    },
+    {
+      "file": "c409763d-802b-44db-aa7c-75661895a818.webp",
+      "profileId": "TAP-019",
+      "name": "Volt Typhoon"
+    },
+    {
+      "file": "3712f4fb-ccf6-4dc7-b04c-27a723b1f451.webp",
+      "profileId": "TAP-020",
+      "name": "Salt Typhoon"
+    },
+    {
+      "file": "bb9b0b6a-baa8-4fd4-8178-b648843950a8.webp",
+      "profileId": "TAP-020",
+      "name": "Salt Typhoon"
+    },
+    {
+      "file": "ece42ca5-f329-4e5a-a02a-766a4456a779.webp",
+      "profileId": "TAP-020",
+      "name": "Salt Typhoon"
+    },
+    {
+      "file": "6afbd03f-8542-46d4-a63d-15625f00a876.webp",
+      "profileId": "TAP-021",
+      "name": "Flax Typhoon"
+    },
+    {
+      "file": "dd2da3f8-b445-4ac6-98f7-e646b298a65f.webp",
+      "profileId": "TAP-021",
+      "name": "Flax Typhoon"
+    },
+    {
+      "file": "f1a392fa-91bb-4bf7-b28a-b7c05a886559.webp",
+      "profileId": "TAP-021",
+      "name": "Flax Typhoon"
+    },
+    {
+      "file": "021c2453-af81-4cae-8fd4-fc27fb845c6f.webp",
+      "profileId": "TAP-022",
+      "name": "Mustang Panda"
+    },
+    {
+      "file": "324ef274-4fbf-410d-8fcd-d327388e7346.webp",
+      "profileId": "TAP-022",
+      "name": "Mustang Panda"
+    },
+    {
+      "file": "38f7fbdb-a609-4e9a-bec4-a873d3ed52db.webp",
+      "profileId": "TAP-022",
+      "name": "Mustang Panda"
+    },
+    {
+      "file": "3d25d8a8-477a-4789-bb36-dd2f76908a1a.webp",
+      "profileId": "TAP-023",
+      "name": "APT41"
+    },
+    {
+      "file": "b94522fb-3933-4b17-a548-159cf12ca4c0.webp",
+      "profileId": "TAP-023",
+      "name": "APT41"
+    },
+    {
+      "file": "d5e8277a-cd40-43db-a0e9-ef5111bbb67b.webp",
+      "profileId": "TAP-023",
+      "name": "APT41"
+    },
+    {
+      "file": "5329c01b-be89-4986-ae8f-5cdf2428e2bc.webp",
+      "profileId": "TAP-024",
+      "name": "APT40"
+    },
+    {
+      "file": "aa5c6471-d856-4847-a921-452050e59824.webp",
+      "profileId": "TAP-024",
+      "name": "APT40"
+    },
+    {
+      "file": "b2dae26b-639a-4356-b0e6-11f0b2e8fcba.webp",
+      "profileId": "TAP-024",
+      "name": "APT40"
+    },
+    {
+      "file": "36b48675-634e-4ab8-9f78-58c6568abdf5.webp",
+      "profileId": "TAP-025",
+      "name": "APT31"
+    },
+    {
+      "file": "766f6f46-e0f4-4495-89dd-cacbf8855455.webp",
+      "profileId": "TAP-025",
+      "name": "APT31"
+    },
+    {
+      "file": "ef717a4f-16a7-4692-8632-d9f9a67fde6d.webp",
+      "profileId": "TAP-025",
+      "name": "APT31"
+    },
+    {
+      "file": "4845d2a2-740b-40ad-8a7e-97f1681e983f.webp",
+      "profileId": "TAP-026",
+      "name": "UNC3886"
+    },
+    {
+      "file": "93aa9673-830b-4571-a1b4-569f5804ee7a.webp",
+      "profileId": "TAP-026",
+      "name": "UNC3886"
+    },
+    {
+      "file": "bf62c376-fb81-402a-a807-2c3e4ac35cad.webp",
+      "profileId": "TAP-026",
+      "name": "UNC3886"
+    },
+    {
+      "file": "236a04f5-353b-4524-b35b-d760a78e56c9.webp",
+      "profileId": "TAP-027",
+      "name": "Turla"
+    },
+    {
+      "file": "4d2e5b57-d578-47d3-931e-7b7fef0b5d0d.webp",
+      "profileId": "TAP-027",
+      "name": "Turla"
+    },
+    {
+      "file": "c942f549-57ca-41fa-9e3c-002ca380876b.webp",
+      "profileId": "TAP-027",
+      "name": "Turla"
+    },
+    {
+      "file": "49487835-fd9a-4185-bb0a-e6d5524a0660.webp",
+      "profileId": "TAP-028",
+      "name": "APT29"
+    },
+    {
+      "file": "850be336-d690-44bd-9309-706f47391393.webp",
+      "profileId": "TAP-028",
+      "name": "APT29"
+    },
+    {
+      "file": "f1970379-2ac6-4bc5-8302-cdc2c3bc702e.webp",
+      "profileId": "TAP-028",
+      "name": "APT29"
+    },
+    {
+      "file": "3bb84352-ff7b-4f22-9965-2692665a039a.webp",
+      "profileId": "TAP-029",
+      "name": "APT28"
+    },
+    {
+      "file": "66c7f8be-8fab-4344-991c-a6075c45e4a6.webp",
+      "profileId": "TAP-029",
+      "name": "APT28"
+    },
+    {
+      "file": "68d40c4a-fcc5-437c-9d14-b8fa0afe6dd2.webp",
+      "profileId": "TAP-029",
+      "name": "APT28"
+    },
+    {
+      "file": "1de61cfd-92eb-4dfe-9daa-f5042d22362b.webp",
+      "profileId": "TAP-030",
+      "name": "Sandworm Team"
+    },
+    {
+      "file": "72fbd441-ff9c-47f3-a3ed-6fedb6951833.webp",
+      "profileId": "TAP-030",
+      "name": "Sandworm Team"
+    },
+    {
+      "file": "94032a7b-51f0-4ab9-83f6-89494c059adc.webp",
+      "profileId": "TAP-030",
+      "name": "Sandworm Team"
+    },
+    {
+      "file": "439275ac-a3ef-4eef-8167-62742695ff59.webp",
+      "profileId": "TAP-031",
+      "name": "Gamaredon"
+    },
+    {
+      "file": "9983dc82-ff16-46b6-928f-5248d14120a5.webp",
+      "profileId": "TAP-031",
+      "name": "Gamaredon"
+    },
+    {
+      "file": "ab965222-521d-4586-837b-df1d9e56d76b.webp",
+      "profileId": "TAP-031",
+      "name": "Gamaredon"
+    },
+    {
+      "file": "19c32a7e-16fe-4c58-9e9d-9c59cc12c322.webp",
+      "profileId": "TAP-032",
+      "name": "FIN6"
+    },
+    {
+      "file": "64082d50-135b-4cfa-b1c5-990b3d4235af.webp",
+      "profileId": "TAP-032",
+      "name": "FIN6"
+    },
+    {
+      "file": "ec3c7b5d-b132-4409-9714-00d3c399d92e.webp",
+      "profileId": "TAP-032",
+      "name": "FIN6"
+    },
+    {
+      "file": "6949603d-4dc2-4012-8535-ff7c3060cf6d.webp",
+      "profileId": "TAP-033",
+      "name": "MuddyWater"
+    },
+    {
+      "file": "e5d60dfc-ddbb-4bcf-a9b8-f7936ce43337.webp",
+      "profileId": "TAP-033",
+      "name": "MuddyWater"
+    },
+    {
+      "file": "fe8f4ad3-3f3a-4661-aa7b-7373696a5667.webp",
+      "profileId": "TAP-033",
+      "name": "MuddyWater"
+    },
+    {
+      "file": "7c3d9f6f-d03d-43b1-9713-34b5667f06b0.webp",
+      "profileId": "TAP-034",
+      "name": "APT35"
+    },
+    {
+      "file": "aecb87a3-8a38-4bd6-847d-64b11b5fdf60.webp",
+      "profileId": "TAP-034",
+      "name": "APT35"
+    },
+    {
+      "file": "e086f405-9857-411c-91fe-a9a2940945b9.webp",
+      "profileId": "TAP-034",
+      "name": "APT35"
+    },
+    {
+      "file": "29b3a7ad-2579-44d6-85d3-2a966ec57c1a.webp",
+      "profileId": "TAP-035",
+      "name": "APT33"
+    },
+    {
+      "file": "9b74a36e-65e2-45aa-a57b-2251bcf49095.webp",
+      "profileId": "TAP-035",
+      "name": "APT33"
+    },
+    {
+      "file": "f3e9472a-8040-47b8-91e4-8b777e71ca59.webp",
+      "profileId": "TAP-035",
+      "name": "APT33"
+    },
+    {
+      "file": "666e292a-40e1-4b10-8b8f-2191116ad24a.webp",
+      "profileId": "TAP-036",
+      "name": "Agrius"
+    },
+    {
+      "file": "9a9dc3fb-c71a-4fed-b529-49f69e23223e.webp",
+      "profileId": "TAP-036",
+      "name": "Agrius"
+    },
+    {
+      "file": "d4da8585-dd01-4729-9546-c7bff7910601.webp",
+      "profileId": "TAP-036",
+      "name": "Agrius"
+    },
+    {
+      "file": "332295f7-0ece-4bb3-866c-414ba45a27f4.webp",
+      "profileId": "TAP-037",
+      "name": "OilRig"
+    },
+    {
+      "file": "c3a9720c-3c05-4f23-a1f3-5a38d9e8b547.webp",
+      "profileId": "TAP-037",
+      "name": "OilRig"
+    },
+    {
+      "file": "e99ffb21-3d7d-4499-affe-8b65c968b8cb.webp",
+      "profileId": "TAP-037",
+      "name": "OilRig"
+    },
+    {
+      "file": "4f08d80f-1725-4ea2-acd5-9e97d8f9dcc7.webp",
+      "profileId": "TAP-038",
+      "name": "Charming Kitten"
+    },
+    {
+      "file": "56b830cf-ed54-47cd-a987-cf7c4e28122b.webp",
+      "profileId": "TAP-038",
+      "name": "Charming Kitten"
+    },
+    {
+      "file": "81bbd52b-ccf1-4e84-ade8-436cad5d5359.webp",
+      "profileId": "TAP-038",
+      "name": "Charming Kitten"
+    },
+    {
+      "file": "47f5da0d-0f7a-48bd-9654-e18a64ea0c62.webp",
+      "profileId": "TAP-039",
+      "name": "BlackCat"
+    },
+    {
+      "file": "9c01d40a-ac13-4cf6-a671-369640351900.webp",
+      "profileId": "TAP-039",
+      "name": "BlackCat"
+    },
+    {
+      "file": "c4e1d1a9-c542-4613-9f96-2db3776cfd3f.webp",
+      "profileId": "TAP-039",
+      "name": "BlackCat"
+    },
+    {
+      "file": "33698b67-ff6c-403d-97ec-59e1b7ee95eb.webp",
+      "profileId": "TAP-040",
+      "name": "Royal"
+    },
+    {
+      "file": "989c44c5-ba71-4135-944d-e8245244dc7e.webp",
+      "profileId": "TAP-040",
+      "name": "Royal"
+    },
+    {
+      "file": "c7918d77-99c9-4b42-9047-b45b4bd7d393.webp",
+      "profileId": "TAP-040",
+      "name": "Royal"
+    },
+    {
+      "file": "5409d2eb-f47d-4c42-826c-1cf7be357e46.webp",
+      "profileId": "TAP-041",
+      "name": "BianLian"
+    },
+    {
+      "file": "ac98978f-ebda-4651-a3eb-4675f120e537.webp",
+      "profileId": "TAP-041",
+      "name": "BianLian"
+    },
+    {
+      "file": "e8cf81f2-c9bc-4a6f-9d46-6c2dfacf57cc.webp",
+      "profileId": "TAP-041",
+      "name": "BianLian"
+    },
+    {
+      "file": "56d3f0dd-6e9e-4f6c-944e-fb4a96bd8e69.webp",
+      "profileId": "TAP-042",
+      "name": "BlackSuit"
+    },
+    {
+      "file": "5a2a2b58-bdd7-4a51-96a0-bc6317a5d1b3.webp",
+      "profileId": "TAP-042",
+      "name": "BlackSuit"
+    },
+    {
+      "file": "909d3a9a-1c50-4530-9c37-aa72b13475eb.webp",
+      "profileId": "TAP-042",
+      "name": "BlackSuit"
+    },
+    {
+      "file": "2ed85a1e-6818-4216-94a1-406fb1195338.webp",
+      "profileId": "TAP-043",
+      "name": "Hunters International"
+    },
+    {
+      "file": "b9f361f1-0e7f-4608-919d-94d9f51ce702.webp",
+      "profileId": "TAP-043",
+      "name": "Hunters International"
+    },
+    {
+      "file": "fefc3a88-1300-4e18-99de-59469070c74a.webp",
+      "profileId": "TAP-043",
+      "name": "Hunters International"
+    },
+    {
+      "file": "62f6a5a1-68e1-4ad1-92d1-f6f624e32a3f.webp",
+      "profileId": "TAP-044",
+      "name": "Medusa"
+    },
+    {
+      "file": "946b4427-2cde-48c9-bf20-cdb30421f615.webp",
+      "profileId": "TAP-044",
+      "name": "Medusa"
+    },
+    {
+      "file": "d1ac4f8b-4bef-403b-a084-1799b403fb4e.webp",
+      "profileId": "TAP-044",
+      "name": "Medusa"
+    },
+    {
+      "file": "35324f98-3b96-4b27-90e0-0749926c6662.webp",
+      "profileId": "TAP-045",
+      "name": "8Base"
+    },
+    {
+      "file": "6886f486-3335-4398-9689-0fa2de121f62.webp",
+      "profileId": "TAP-045",
+      "name": "8Base"
+    },
+    {
+      "file": "f01be970-ff56-4e0c-98c0-c5e14df1157e.webp",
+      "profileId": "TAP-045",
+      "name": "8Base"
+    },
+    {
+      "file": "04b85bfa-99d3-4f93-a12d-ae7e010d37fd.webp",
+      "profileId": "TAP-046",
+      "name": "Rhysida"
+    },
+    {
+      "file": "783d0e08-5556-4f1f-82d8-df634a89a001.webp",
+      "profileId": "TAP-046",
+      "name": "Rhysida"
+    },
+    {
+      "file": "e98eab41-afca-4061-809d-d69158ce5f9b.webp",
+      "profileId": "TAP-046",
+      "name": "Rhysida"
+    },
+    {
+      "file": "398559dc-28ec-4184-91ae-19b7ff9c04ea.webp",
+      "profileId": "TAP-047",
+      "name": "BlackByte"
+    },
+    {
+      "file": "8657aecd-7556-4c58-b9f5-79a295f31681.webp",
+      "profileId": "TAP-047",
+      "name": "BlackByte"
+    },
+    {
+      "file": "a0bcfd45-7997-4743-be11-886728986659.webp",
+      "profileId": "TAP-047",
+      "name": "BlackByte"
+    },
+    {
+      "file": "1b86b130-057f-45b0-a12a-49d6598e2c87.webp",
+      "profileId": "TAP-048",
+      "name": "Cactus"
+    },
+    {
+      "file": "8d10c69f-bcdf-4eb6-8ea3-a2c4d6c3c1d2.webp",
+      "profileId": "TAP-048",
+      "name": "Cactus"
+    },
+    {
+      "file": "ed441294-cf85-4f14-8e15-3c535914993e.webp",
+      "profileId": "TAP-048",
+      "name": "Cactus"
+    },
+    {
+      "file": "b8638b5a-42ef-4193-9de7-131516b19d09.webp",
+      "profileId": "TAP-049",
+      "name": "TA577"
+    },
+    {
+      "file": "eb456269-e600-4e95-ba5b-0c48646fa998.webp",
+      "profileId": "TAP-049",
+      "name": "TA577"
+    },
+    {
+      "file": "f3c1c69f-2c85-4993-8624-72b0ac5c3645.webp",
+      "profileId": "TAP-049",
+      "name": "TA577"
+    },
+    {
+      "file": "347ee004-c5cd-4587-aac1-ad43a14c7cb1.webp",
+      "profileId": "TAP-050",
+      "name": "Storm-0501"
+    },
+    {
+      "file": "f1a9c304-49a2-487e-81df-3533f3427bd4.webp",
+      "profileId": "TAP-050",
+      "name": "Storm-0501"
+    },
+    {
+      "file": "fbf1074b-180c-40be-a4cd-b0f39944d86c.webp",
+      "profileId": "TAP-050",
+      "name": "Storm-0501"
+    },
+    {
+      "file": "0dd72eb3-b80f-4fcc-9384-3e456881a4fa.webp",
+      "profileId": "TAP-051",
+      "name": "Conti"
+    },
+    {
+      "file": "68377e34-f67c-437b-a799-9e7228d1de76.webp",
+      "profileId": "TAP-051",
+      "name": "Conti"
+    },
+    {
+      "file": "7a9bec6f-cedc-49ee-970e-b91266a60501.webp",
+      "profileId": "TAP-051",
+      "name": "Conti"
+    },
+    {
+      "file": "9ce52f56-01f2-4a8f-8bf4-34ff6b4e2ccb.webp",
+      "profileId": "TAP-052",
+      "name": "Opportunistic Intrusion Clusters"
+    },
+    {
+      "file": "c2e5a042-477e-45c2-b612-790e4c3a887e.webp",
+      "profileId": "TAP-052",
+      "name": "Opportunistic Intrusion Clusters"
+    },
+    {
+      "file": "d3be2049-814c-4c56-8d22-dcbe6e569047.webp",
+      "profileId": "TAP-052",
+      "name": "Opportunistic Intrusion Clusters"
+    },
+    {
+      "file": "750e7614-9683-4083-8303-4212554926e0.webp",
+      "profileId": "TAP-053",
+      "name": "Hive"
+    },
+    {
+      "file": "7f90630f-9ef9-4682-a435-49d45534e744.webp",
+      "profileId": "TAP-053",
+      "name": "Hive"
+    },
+    {
+      "file": "8f533021-bbe1-4dbc-beb9-1955559fcc87.webp",
+      "profileId": "TAP-053",
+      "name": "Hive"
+    },
+    {
+      "file": "08fa1aa2-f679-477a-b001-85c64cf66029.webp",
+      "profileId": "TAP-054",
+      "name": "Ransomware Operators"
+    },
+    {
+      "file": "4585e99b-e676-4249-8eda-196922eeb09a.webp",
+      "profileId": "TAP-054",
+      "name": "Ransomware Operators"
+    },
+    {
+      "file": "d745b3dc-a0ac-402a-8221-1c7fff0ee1b4.webp",
+      "profileId": "TAP-054",
+      "name": "Ransomware Operators"
+    },
+    {
+      "file": "0204479b-6770-4bd6-957b-afdf953117f3.webp",
+      "profileId": "TAP-056",
+      "name": "Chaos"
+    },
+    {
+      "file": "2fb6dd0e-0e21-4a5c-ba6d-c9336f0224ab.webp",
+      "profileId": "TAP-056",
+      "name": "Chaos"
+    },
+    {
+      "file": "45571611-2bd9-431e-8887-107771bd14c7.webp",
+      "profileId": "TAP-056",
+      "name": "Chaos"
+    },
+    {
+      "file": "54f6ab7c-63a2-4068-a807-56ee66ea5a12.webp",
+      "profileId": "TAP-057",
+      "name": "Nova"
+    },
+    {
+      "file": "80278b1b-6137-4661-a2ee-f1045080157d.webp",
+      "profileId": "TAP-057",
+      "name": "Nova"
+    },
+    {
+      "file": "dc230c68-bd55-4851-8dc1-10748e5a8123.webp",
+      "profileId": "TAP-057",
+      "name": "Nova"
+    },
+    {
+      "file": "1421d5e8-89cf-469f-8df5-39d82251bcca.webp",
+      "profileId": "TAP-058",
+      "name": "M3RX"
+    },
+    {
+      "file": "21066498-160b-4ebd-9a1c-39cf96dd42cb.webp",
+      "profileId": "TAP-058",
+      "name": "M3RX"
+    },
+    {
+      "file": "522b9a06-c421-4e86-9b84-609dec73d4b8.webp",
+      "profileId": "TAP-058",
+      "name": "M3RX"
+    },
+    {
+      "file": "392bccf5-5f0e-4e12-892a-17528c930427.webp",
+      "profileId": "TAP-059",
+      "name": "CMD Organization"
+    },
+    {
+      "file": "4dedc66b-a274-4ffc-a806-5b37e1ab3efe.webp",
+      "profileId": "TAP-059",
+      "name": "CMD Organization"
+    },
+    {
+      "file": "91d0ee0f-b91a-44b9-9713-ee9407b3ff56.webp",
+      "profileId": "TAP-059",
+      "name": "CMD Organization"
+    },
+    {
+      "file": "3887f9c2-ef97-4458-af73-ad7d649cd0fa.webp",
+      "profileId": "TAP-060",
+      "name": "Lamashtu"
+    },
+    {
+      "file": "6c24f172-47cd-4ab3-b07c-818464f3a76a.webp",
+      "profileId": "TAP-060",
+      "name": "Lamashtu"
+    },
+    {
+      "file": "cdec2f3e-18ca-477b-b11e-34a33ddcb4c8.webp",
+      "profileId": "TAP-060",
+      "name": "Lamashtu"
+    },
+    {
+      "file": "6ab6ba81-ca63-4bea-8a84-59388ed53f8b.webp",
+      "profileId": "TAP-061",
+      "name": "The Gentlemen"
+    },
+    {
+      "file": "73a74a0f-d6e0-495b-a688-25bf728f2c22.webp",
+      "profileId": "TAP-061",
+      "name": "The Gentlemen"
+    },
+    {
+      "file": "8211a497-102c-45c5-a8ce-9ed9d78110ce.webp",
+      "profileId": "TAP-061",
+      "name": "The Gentlemen"
+    },
+    {
+      "file": "0a22a38a-a45a-4e59-a6dc-844990210730.webp",
+      "profileId": "TAP-062",
+      "name": "Coinbase Cartel"
+    },
+    {
+      "file": "938fc824-0006-4c34-848a-a22be76f2c32.webp",
+      "profileId": "TAP-062",
+      "name": "Coinbase Cartel"
+    },
+    {
+      "file": "dc429808-5a81-4c42-8d48-c72fe9707e54.webp",
+      "profileId": "TAP-062",
+      "name": "Coinbase Cartel"
+    },
+    {
+      "file": "0b9c9b38-7cf8-4b92-abbe-b24fe682a8e5.webp",
+      "profileId": "TAP-063",
+      "name": "Kryptina"
+    },
+    {
+      "file": "4898cfbc-ab16-4541-8d4a-51b900ac7e50.webp",
+      "profileId": "TAP-063",
+      "name": "Kryptina"
+    },
+    {
+      "file": "718fd3e0-7b27-4022-bfdc-1265875837ed.webp",
+      "profileId": "TAP-063",
+      "name": "Kryptina"
+    },
+    {
+      "file": "18644f63-7c7c-40eb-b0ed-fd70fff92532.webp",
+      "profileId": "TAP-064",
+      "name": "Kairos"
+    },
+    {
+      "file": "930f58e2-d248-4c19-84d4-5fffbfa7cce6.webp",
+      "profileId": "TAP-064",
+      "name": "Kairos"
+    },
+    {
+      "file": "fc72a80e-589d-4a26-b550-822bcb54ae5b.webp",
+      "profileId": "TAP-064",
+      "name": "Kairos"
+    },
+    {
+      "file": "75980abc-69b7-4f4f-a2c7-5368e013e70b.webp",
+      "profileId": "TAP-065",
+      "name": "AuditTeam"
+    },
+    {
+      "file": "828df61f-bdfe-4acc-9975-03da32926e11.webp",
+      "profileId": "TAP-065",
+      "name": "AuditTeam"
+    },
+    {
+      "file": "b6ff0d18-71b6-4a6e-a3d0-97b6f040e1e3.webp",
+      "profileId": "TAP-065",
+      "name": "AuditTeam"
+    },
+    {
+      "file": "b2cfaaf1-12c2-4f49-aa04-ade03f3ddc6a.webp",
+      "profileId": "TAP-066",
+      "name": "ShadowByte"
+    },
+    {
+      "file": "de579891-96d6-48d7-be7a-c167e4f24d52.webp",
+      "profileId": "TAP-066",
+      "name": "ShadowByte"
+    },
+    {
+      "file": "e3005400-bb2a-45ba-87a7-8c56c0581e23.webp",
+      "profileId": "TAP-066",
+      "name": "ShadowByte"
+    },
+    {
+      "file": "19c82546-2cc8-4f89-b5cf-dbf40066e3b4.webp",
+      "profileId": "TAP-067",
+      "name": "Abyss"
+    },
+    {
+      "file": "8241e04a-c7aa-493e-a891-95a2316edaef.webp",
+      "profileId": "TAP-067",
+      "name": "Abyss"
+    },
+    {
+      "file": "cbce8d0a-8326-4c8a-9fe9-792e17750516.webp",
+      "profileId": "TAP-067",
+      "name": "Abyss"
+    },
+    {
+      "file": "025a388b-8628-4d4d-a5ae-ec40d29c3335.webp",
+      "profileId": "TAP-068",
+      "name": "Morpheus"
+    },
+    {
+      "file": "453f07c0-c15d-49a6-976d-16ba4f1acd08.webp",
+      "profileId": "TAP-068",
+      "name": "Morpheus"
+    },
+    {
+      "file": "fe5fdfd3-85d0-476d-9531-e964ecd173c6.webp",
+      "profileId": "TAP-068",
+      "name": "Morpheus"
+    },
+    {
+      "file": "62c03a65-4a8e-4d4b-bf2a-0b6ffdafc38b.webp",
+      "profileId": "TAP-069",
+      "name": "KillSec"
+    },
+    {
+      "file": "b58e64e1-8cb8-4355-b997-e5e4646464d1.webp",
+      "profileId": "TAP-069",
+      "name": "KillSec"
+    },
+    {
+      "file": "cdab1596-8b2a-4d9d-a70b-cc5c9fad0e1c.webp",
+      "profileId": "TAP-069",
+      "name": "KillSec"
+    },
+    {
+      "file": "7cc9f86b-b31f-4002-9ed1-d80107733859.webp",
+      "profileId": "TAP-070",
+      "name": "Stormous"
+    },
+    {
+      "file": "95983010-e339-4e31-ba6e-7f2231a5b52d.webp",
+      "profileId": "TAP-070",
+      "name": "Stormous"
+    },
+    {
+      "file": "e11a975a-626f-4424-ad04-67d7d8388a19.webp",
+      "profileId": "TAP-070",
+      "name": "Stormous"
+    },
+    {
+      "file": "1ecd626f-a888-47da-9d32-5d103fdb0c2e.webp",
+      "profileId": "TAP-072",
+      "name": "Anubis"
+    },
+    {
+      "file": "50b5a2c6-4243-46bf-9fc2-42ed8fd2f836.webp",
+      "profileId": "TAP-072",
+      "name": "Anubis"
+    },
+    {
+      "file": "8bb32ef9-579b-45c9-8e7c-42a6f217746d.webp",
+      "profileId": "TAP-072",
+      "name": "Anubis"
+    },
+    {
+      "file": "0f7bc906-9190-4bfe-9782-40a1f5d4d5ec.webp",
+      "profileId": "TAP-073",
+      "name": "SilentRansomGroup"
+    },
+    {
+      "file": "5f4e9b02-c8ad-478a-b087-d8ce91be0a3d.webp",
+      "profileId": "TAP-073",
+      "name": "SilentRansomGroup"
+    },
+    {
+      "file": "78e77674-c836-44d4-9bee-f372b4c6900b.webp",
+      "profileId": "TAP-073",
+      "name": "SilentRansomGroup"
+    },
+    {
+      "file": "030d6372-c0c7-4715-832f-48d5476737c6.webp",
+      "profileId": "TAP-074",
+      "name": "ScarCruft"
+    },
+    {
+      "file": "36ac7638-8eab-4b32-a3d6-30a43806f14e.webp",
+      "profileId": "TAP-074",
+      "name": "ScarCruft"
+    },
+    {
+      "file": "a1ac31a4-b74d-404c-89a7-22dc9f2ae97c.webp",
+      "profileId": "TAP-074",
+      "name": "ScarCruft"
+    },
+    {
+      "file": "11f1a8cb-7f5b-44a7-8c6f-9a6474dc9ac4.webp",
+      "profileId": "TAP-075",
+      "name": "Sandworm"
+    },
+    {
+      "file": "c0ad8647-5c4c-467d-b0c9-3146a63e2efb.webp",
+      "profileId": "TAP-075",
+      "name": "Sandworm"
+    },
+    {
+      "file": "ed552915-9b74-44bd-9000-13fd3a5b5ded.webp",
+      "profileId": "TAP-075",
+      "name": "Sandworm"
+    },
+    {
+      "file": "275bace2-536f-4f1c-bd0a-65ac5373b019.webp",
+      "profileId": "TAP-076",
+      "name": "Lazarus"
+    },
+    {
+      "file": "8b8ff667-4522-4f15-a8d0-946a2746e326.webp",
+      "profileId": "TAP-076",
+      "name": "Lazarus"
+    },
+    {
+      "file": "a97b2b0e-c929-4f93-80c7-9a04be8e7bd3.webp",
+      "profileId": "TAP-076",
+      "name": "Lazarus"
+    },
+    {
+      "file": "10f54b43-824f-4bf0-8979-fdced7a74f2d.webp",
+      "profileId": "TAP-077",
+      "name": "nightspire"
+    },
+    {
+      "file": "55385089-c2ec-4224-92a2-e7f9fad00e35.webp",
+      "profileId": "TAP-077",
+      "name": "nightspire"
+    },
+    {
+      "file": "c8237cf7-1709-4005-b64e-37a47efe56e3.webp",
+      "profileId": "TAP-077",
+      "name": "nightspire"
+    },
+    {
+      "file": "3742cc29-b3ed-4e14-86c0-1df13051b82b.webp",
+      "profileId": "TAP-078",
+      "name": "titan"
+    },
+    {
+      "file": "873f21ba-f727-444d-a593-6cc22700db80.webp",
+      "profileId": "TAP-078",
+      "name": "titan"
+    },
+    {
+      "file": "b776028e-4222-4c1c-8788-18da211f368a.webp",
+      "profileId": "TAP-078",
+      "name": "titan"
+    },
+    {
+      "file": "7c9776b6-04c3-4b55-933c-ce5c35e9f523.webp",
+      "profileId": "TAP-079",
+      "name": "AiLock"
+    },
+    {
+      "file": "94539d04-1b1a-4a00-b380-0e61ce92cea2.webp",
+      "profileId": "TAP-079",
+      "name": "AiLock"
+    },
+    {
+      "file": "d769d3e5-d2b2-4e00-a98c-53e5450e0040.webp",
+      "profileId": "TAP-079",
+      "name": "AiLock"
+    },
+    {
+      "file": "21fcbf2c-eae1-41df-95d0-c2de23e8e62d.webp",
+      "profileId": "TAP-080",
+      "name": "LAPSUS$"
+    },
+    {
+      "file": "d64ce78e-7a6c-4850-a82e-9dd4113e1118.webp",
+      "profileId": "TAP-080",
+      "name": "LAPSUS$"
+    },
+    {
+      "file": "ebf0ad4b-9c04-45f6-a915-4bb2d18b0e58.webp",
+      "profileId": "TAP-080",
+      "name": "LAPSUS$"
+    },
+    {
+      "file": "29c7e538-1e1d-452f-9cca-4ac7ba7a5a40.webp",
+      "profileId": "TAP-081",
+      "name": "apt73"
+    },
+    {
+      "file": "880a220a-bb03-4119-b2f0-f87db052d54f.webp",
+      "profileId": "TAP-081",
+      "name": "apt73"
+    },
+    {
+      "file": "d11d63e7-e635-4d4d-856c-abcb898a6dda.webp",
+      "profileId": "TAP-081",
+      "name": "apt73"
+    },
+    {
+      "file": "36cdd360-36c5-408e-a0ac-312974de9a99.webp",
+      "profileId": "TAP-082",
+      "name": "pear"
+    },
+    {
+      "file": "c3f142b2-3502-487b-8f1d-c095f0bd819b.webp",
+      "profileId": "TAP-082",
+      "name": "pear"
+    },
+    {
+      "file": "e60323d1-302e-4f30-970e-be0d2fae6f32.webp",
+      "profileId": "TAP-082",
+      "name": "pear"
+    },
+    {
+      "file": "83d1fe99-38e9-4c92-a083-46829eb9da2a.webp",
+      "profileId": "TAP-083",
+      "name": "BrainCipher"
+    },
+    {
+      "file": "9c221b58-2106-4b62-87da-5318df8fd8fb.webp",
+      "profileId": "TAP-083",
+      "name": "BrainCipher"
+    },
+    {
+      "file": "d7259367-dd2b-4b81-b624-1e370beee677.webp",
+      "profileId": "TAP-083",
+      "name": "BrainCipher"
+    },
+    {
+      "file": "76937f6a-3fa8-458c-af9e-e50453970fcb.webp",
+      "profileId": "TAP-084",
+      "name": "Bravox"
+    },
+    {
+      "file": "a6f6e26f-5a42-4538-87f8-339ce0130b39.webp",
+      "profileId": "TAP-084",
+      "name": "Bravox"
+    },
+    {
+      "file": "ffdf36a3-7266-491b-b7ab-768ee15e2aca.webp",
+      "profileId": "TAP-084",
+      "name": "Bravox"
+    },
+    {
+      "file": "4f470a42-03a2-492d-ae52-2c0fb096d352.webp",
+      "profileId": "TAP-085",
+      "name": "Genesis"
+    },
+    {
+      "file": "ad37b361-a5fd-4832-9967-40aeaec47b00.webp",
+      "profileId": "TAP-085",
+      "name": "Genesis"
+    },
+    {
+      "file": "fd1d5b8e-696f-4e1b-bc19-d698a40da272.webp",
+      "profileId": "TAP-085",
+      "name": "Genesis"
+    },
+    {
+      "file": "493dc287-5b4b-4f22-80c4-c0bb3ffa4335.webp",
+      "profileId": "TAP-086",
+      "name": "termite"
+    },
+    {
+      "file": "a2f17aae-f9c7-4058-a650-939fc1009d62.webp",
+      "profileId": "TAP-086",
+      "name": "termite"
+    },
+    {
+      "file": "e2aebdd0-bcc4-4115-a092-18e0d33c5999.webp",
+      "profileId": "TAP-086",
+      "name": "termite"
+    },
+    {
+      "file": "175b9003-0bb4-4156-8942-1f5302b19bb1.webp",
+      "profileId": "TAP-087",
+      "name": "gunra"
+    },
+    {
+      "file": "26279756-ca54-4940-916e-d5adddf51d42.webp",
+      "profileId": "TAP-087",
+      "name": "gunra"
+    },
+    {
+      "file": "aa816d61-19e9-423b-93c1-be2de7d8ab2a.webp",
+      "profileId": "TAP-087",
+      "name": "gunra"
+    },
+    {
+      "file": "0b646cc5-e684-4b2e-9899-712035fe10e1.webp",
+      "profileId": "TAP-088",
+      "name": "ShinyHunters"
+    },
+    {
+      "file": "a1a3bda5-cf3b-4e03-8c01-4a747ba6b63c.webp",
+      "profileId": "TAP-088",
+      "name": "ShinyHunters"
+    },
+    {
+      "file": "b897ca68-8ed2-4104-8e93-a79d66f10274.webp",
+      "profileId": "TAP-088",
+      "name": "ShinyHunters"
+    },
+    {
+      "file": "3ba3f6a9-d8cc-4175-9edd-7bc9b73e1a29.webp",
+      "profileId": "TAP-089",
+      "name": "0day Syndicate"
+    },
+    {
+      "file": "839abf2b-a443-4522-884f-e30e224a4016.webp",
+      "profileId": "TAP-089",
+      "name": "0day Syndicate"
+    },
+    {
+      "file": "e17e601c-63a3-4345-9999-f29854d151de.webp",
+      "profileId": "TAP-089",
+      "name": "0day Syndicate"
+    },
+    {
+      "file": "15b47b38-920a-444f-bc7e-4f69c99aff8a.webp",
+      "profileId": "TAP-090",
+      "name": "Everest"
+    },
+    {
+      "file": "394242ef-1dfc-4a5d-b918-7fb40394bb58.webp",
+      "profileId": "TAP-090",
+      "name": "Everest"
+    },
+    {
+      "file": "6bb658ca-fa2b-4790-bf2d-59cc00c4b8bd.webp",
+      "profileId": "TAP-090",
+      "name": "Everest"
+    },
+    {
+      "file": "0099657d-d3f6-49e7-9895-9d4ce3e6d897.webp",
+      "profileId": "TAP-091",
+      "name": "WorldLeaks"
+    },
+    {
+      "file": "1d489b07-36d8-47c3-90ed-9298242fad53.webp",
+      "profileId": "TAP-091",
+      "name": "WorldLeaks"
+    },
+    {
+      "file": "a03690ec-9ffb-4938-b0ce-f5a5d26ec651.webp",
+      "profileId": "TAP-091",
+      "name": "WorldLeaks"
+    },
+    {
+      "file": "326ce27f-2a07-42dc-a328-7eeae6a8c98b.webp",
+      "profileId": "TAP-092",
+      "name": "APT32"
+    },
+    {
+      "file": "6e607acd-91a3-46c1-9b30-d8106590b861.webp",
+      "profileId": "TAP-092",
+      "name": "APT32"
+    },
+    {
+      "file": "c6fb7c6c-43e4-445b-aa4f-42a70e01fd88.webp",
+      "profileId": "TAP-092",
+      "name": "APT32"
+    },
+    {
+      "file": "29dc84db-0370-4814-ae4e-7a1571971d5a.webp",
+      "profileId": "TAP-093",
+      "name": "APT34"
+    },
+    {
+      "file": "7b00c0b0-996c-4ea8-a911-f50ee81f2d36.webp",
+      "profileId": "TAP-093",
+      "name": "APT34"
+    },
+    {
+      "file": "a78bc86b-d4ca-4151-b965-8ec01688f6b1.webp",
+      "profileId": "TAP-093",
+      "name": "APT34"
+    },
+    {
+      "file": "31795415-69c1-4e16-bdd1-2839862c556a.webp",
+      "profileId": "TAP-094",
+      "name": "APT37"
+    },
+    {
+      "file": "8e23ca10-614a-4c02-8f01-6ba55b2e1718.webp",
+      "profileId": "TAP-094",
+      "name": "APT37"
+    },
+    {
+      "file": "fd8481de-8c6f-4b9c-a3eb-0695fbfba9d1.webp",
+      "profileId": "TAP-094",
+      "name": "APT37"
+    },
+    {
+      "file": "791b221b-4c65-421e-b4cd-7a0924f7b98c.webp",
+      "profileId": "TAP-095",
+      "name": "APT38"
+    },
+    {
+      "file": "9f42962d-4f8d-4f6e-877d-10bf78678b51.webp",
+      "profileId": "TAP-095",
+      "name": "APT38"
+    },
+    {
+      "file": "acd92448-2c3c-4e14-bec0-a1d40a655ed0.webp",
+      "profileId": "TAP-095",
+      "name": "APT38"
+    },
+    {
+      "file": "0a7d55f4-8251-46d0-8519-f3a05b4750fc.webp",
+      "profileId": "TAP-096",
+      "name": "FIN11"
+    },
+    {
+      "file": "34db3b1e-1f09-44a2-bc08-975c44c07371.webp",
+      "profileId": "TAP-096",
+      "name": "FIN11"
+    },
+    {
+      "file": "7edc8b22-3cf2-4c6e-a49f-e507a695db21.webp",
+      "profileId": "TAP-096",
+      "name": "FIN11"
+    },
+    {
+      "file": "434770b5-f51a-4c9d-b081-3fd7125df78f.webp",
+      "profileId": "TAP-097",
+      "name": "UNC4841"
+    },
+    {
+      "file": "5ea0b410-943e-450b-a141-3ba7f99bec29.webp",
+      "profileId": "TAP-097",
+      "name": "UNC4841"
+    },
+    {
+      "file": "ccff6c99-e38f-4584-ac8d-e62f04f0128b.webp",
+      "profileId": "TAP-097",
+      "name": "UNC4841"
+    },
+    {
+      "file": "2c12e670-b4e2-4726-9a89-40cfc460f2da.webp",
+      "profileId": "TAP-098",
+      "name": "UNC5174"
+    },
+    {
+      "file": "791950b3-3b40-49ba-bbd7-65d0397c2b3b.webp",
+      "profileId": "TAP-098",
+      "name": "UNC5174"
+    },
+    {
+      "file": "bc439d35-81ad-4fcd-ba89-2e2b623a7d12.webp",
+      "profileId": "TAP-098",
+      "name": "UNC5174"
+    },
+    {
+      "file": "174bc7fa-3786-4196-b63f-fbb347d7e17d.webp",
+      "profileId": "TAP-099",
+      "name": "BlueNoroff"
+    },
+    {
+      "file": "94e8f2f9-aa23-4253-8ea3-8d782317c32c.webp",
+      "profileId": "TAP-099",
+      "name": "BlueNoroff"
+    },
+    {
+      "file": "c67fad35-8236-4c9b-a5e5-690b82631b69.webp",
+      "profileId": "TAP-099",
+      "name": "BlueNoroff"
+    },
+    {
+      "file": "45332f1f-1af3-45d5-b85b-7ee232ddcd4b.webp",
+      "profileId": "TAP-100",
+      "name": "MedusaLocker"
+    },
+    {
+      "file": "90bb4477-ea3b-4f67-95f2-7482d4b4596b.webp",
+      "profileId": "TAP-100",
+      "name": "MedusaLocker"
+    },
+    {
+      "file": "f0ca719a-b22a-4fd6-af33-564799c2c6f0.webp",
+      "profileId": "TAP-100",
+      "name": "MedusaLocker"
+    },
+    {
+      "file": "254e42a5-ad44-424b-9252-009159f0bf1d.webp",
+      "profileId": "TAP-101",
+      "name": "Cuba"
+    },
+    {
+      "file": "49095da3-699a-4392-913e-2f4c5d54c68f.webp",
+      "profileId": "TAP-101",
+      "name": "Cuba"
+    },
+    {
+      "file": "aba608c8-4283-468b-b5ba-41056f1fbb58.webp",
+      "profileId": "TAP-101",
+      "name": "Cuba"
+    },
+    {
+      "file": "5057fcbd-3078-455d-b165-af2f5a42cff1.webp",
+      "profileId": "TAP-103",
+      "name": "Octo Tempest"
+    },
+    {
+      "file": "d68fba2d-a422-49c0-807c-679f04dc40bb.webp",
+      "profileId": "TAP-103",
+      "name": "Octo Tempest"
+    },
+    {
+      "file": "e3c28d4b-56c6-4e34-9f2e-a792c18687db.webp",
+      "profileId": "TAP-103",
+      "name": "Octo Tempest"
+    }
+  ],
+  "missing": []
+}

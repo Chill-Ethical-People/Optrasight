@@ -16,10 +16,10 @@
 // English-only AI output. NEVER add `relative` to Radix SheetContent — children
 // must be wrapped in `<div className="relative min-h-full">`.
 
-import { useCallback, useEffect, useMemo, useRef, useState, memo, createContext, useContext } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, memo, createContext, useContext, type CSSProperties } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient, resolveAssetUrl } from "@/lib/queryClient";
-import { startBackgroundJob, type BackgroundJobStart } from "@/lib/aiJobs";
+import { startBackgroundJob, type AiJobSummary, type BackgroundJobStart } from "@/lib/aiJobs";
 import { useAiAvailability } from "@/lib/aiAvailability";
 import { BATCH_ONE_RELEASE } from "@/lib/release";
 import {
@@ -29,7 +29,6 @@ import {
 } from "@dnd-kit/core";
 import { AppShell } from "@/components/AppShell";
 import { PageHeader } from "@/components/PageHeader";
-import { StartInvestigationButton } from "@/components/StartInvestigationButton";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -44,35 +43,39 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Calendar as DateCalendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import { relativeTime } from "@/lib/format";
 import {
   Loader2, Sparkles, Skull, Plus, Pencil, Trash2, Download, FileDown,
   Crosshair, Target, AlertTriangle, Globe2, Network, Shield, BookOpen,
-  Tag, ListChecks, MapPin, Activity, Calendar, ExternalLink, FileText,
+  Tag, ListChecks, Activity, Calendar, ExternalLink, FileText,
   LayoutGrid, List as ListIcon, CheckCircle2, Clock, AlertCircle,
   Building2, GripVertical, X, Save, RotateCcw, MoreHorizontal,
-  Camera, Upload, RefreshCw,
+  Camera, Upload, RefreshCw, Info, PlusCircle, MinusCircle,
 } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import type {
-  ThreatActorDTO, ThreatActorFullDTO, ThreatActorTtpDTO, ThreatActorToolDTO,
-  ThreatActorCampaignDTO, ThreatActorIocDTO, ThreatActorReferenceDTO,
+  ThreatActorDTO, ThreatActorFullDTO, ThreatActorTtpDTO,
+  ThreatActorIocDTO,
   ThreatActorRuleLinkDTO, ThreatActorTenantDTO, TenantRelevance,
   TapStatus, ActorType, ThreatLevel, TlpLevel,
-  SponsorshipLevel, SophisticationLevel, IntentProximity, WepConfidence,
-  AdmiraltySource, AdmiraltyInfo,
   AiProviderSummary,
 } from "@shared/schema";
 import {
   ACTOR_TYPES, SPONSORSHIP_LEVELS, TLP_LEVELS, THREAT_LEVELS,
   SOPHISTICATION_LEVELS, INTENT_PROXIMITY, WEP_CONFIDENCE,
-  ADMIRALTY_SOURCE, ADMIRALTY_INFO, TAP_STATUSES,
+  ADMIRALTY_SOURCE, ADMIRALTY_INFO, IOC_TYPES, TTP_STATUSES,
+  DETECTION_PRIORITIES,
 } from "@shared/schema";
 
 // ---- Tenant tagging types --------------------------------------------------
@@ -139,6 +142,55 @@ const TAP_STATUS_BADGE: Record<TapStatus, string> = {
   approved: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200",
   archived: "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400",
 };
+const TAP_STATUS_OPTIONS = ["draft", "reviewed", "approved", "archived"] as const;
+const TAP_PORTRAIT_STATUS_CLASS: Record<TapStatus, string> = {
+  draft: "os-tap-portrait-status-draft",
+  reviewed: "os-tap-portrait-status-reviewed",
+  approved: "os-tap-portrait-status-approved",
+  archived: "os-tap-portrait-status-archived",
+};
+type TapPortraitStatusStyle = CSSProperties & {
+  "--tap-status-ring-a": string;
+  "--tap-status-ring-b": string;
+  "--tap-status-dot": string;
+  "--tap-status-dot-soft": string;
+  "--tap-status-ring-fill": string;
+  "--tap-status-frame-shadow": string;
+};
+const TAP_PORTRAIT_STATUS_STYLE: Record<TapStatus, TapPortraitStatusStyle> = {
+  draft: {
+    "--tap-status-ring-a": "hsl(215 18% 52% / 0.84)",
+    "--tap-status-ring-b": "hsl(220 14% 72% / 0.82)",
+    "--tap-status-dot": "hsl(215 18% 42%)",
+    "--tap-status-dot-soft": "hsl(215 18% 42% / 0.18)",
+    "--tap-status-ring-fill": "conic-gradient(from 220deg, hsl(215 18% 42% / 0.95), hsl(220 12% 70% / 0.9), hsl(215 18% 42% / 0.95))",
+    "--tap-status-frame-shadow": "0 0 0 3px hsl(215 18% 42% / 0.95), 0 0 0 5px hsl(220 16% 94%), 0 10px 22px -18px hsl(215 18% 42% / 0.7)",
+  },
+  reviewed: {
+    "--tap-status-ring-a": "hsl(245 83% 58% / 0.9)",
+    "--tap-status-ring-b": "hsl(224 76% 52% / 0.86)",
+    "--tap-status-dot": "hsl(235 78% 55%)",
+    "--tap-status-dot-soft": "hsl(235 78% 55% / 0.2)",
+    "--tap-status-ring-fill": "conic-gradient(from 220deg, hsl(245 83% 58% / 0.98), hsl(224 76% 52% / 0.94), hsl(245 83% 58% / 0.98))",
+    "--tap-status-frame-shadow": "0 0 0 3px hsl(245 83% 58% / 0.98), 0 0 0 5px hsl(231 100% 96%), 0 10px 22px -18px hsl(235 78% 55% / 0.74)",
+  },
+  approved: {
+    "--tap-status-ring-a": "hsl(150 78% 28% / 0.98)",
+    "--tap-status-ring-b": "hsl(142 74% 38% / 0.94)",
+    "--tap-status-dot": "hsl(150 78% 28%)",
+    "--tap-status-dot-soft": "hsl(150 78% 28% / 0.24)",
+    "--tap-status-ring-fill": "conic-gradient(from 220deg, hsl(150 78% 28% / 1), hsl(142 74% 38% / 0.98), hsl(150 78% 28% / 1))",
+    "--tap-status-frame-shadow": "0 0 0 3px hsl(150 78% 28% / 1), 0 0 0 5px hsl(145 78% 92%), 0 10px 22px -18px hsl(150 78% 28% / 0.78)",
+  },
+  archived: {
+    "--tap-status-ring-a": "hsl(220 8% 40% / 0.84)",
+    "--tap-status-ring-b": "hsl(220 8% 62% / 0.78)",
+    "--tap-status-dot": "hsl(220 8% 40%)",
+    "--tap-status-dot-soft": "hsl(220 8% 40% / 0.18)",
+    "--tap-status-ring-fill": "conic-gradient(from 220deg, hsl(220 8% 40% / 0.96), hsl(220 8% 62% / 0.9), hsl(220 8% 40% / 0.96))",
+    "--tap-status-frame-shadow": "0 0 0 3px hsl(220 8% 40% / 0.96), 0 0 0 5px hsl(220 12% 94%), 0 10px 22px -18px hsl(220 8% 40% / 0.68)",
+  },
+};
 const THREAT_LEVEL_BADGE: Record<ThreatLevel, string> = {
   CRITICAL: "bg-red-600 text-white dark:bg-red-700",
   HIGH:     "bg-orange-500 text-white dark:bg-orange-600",
@@ -164,6 +216,70 @@ const ACTOR_TYPE_LABEL: Record<ActorType, string> = {
   "Unknown":                   "Unknown",
 };
 
+const TAP_SUGGESTIONS = {
+  aliases: ["FIN7", "Carbanak Group", "Carbon Spider", "TA505", "Lace Tempest", "Storm-1811", "Octo Tempest", "UNC3944"],
+  motivation: ["Financial", "Espionage", "Data theft", "Extortion", "Credential theft", "Disruption", "Ideological"],
+  sectors: ["Financial Services", "Technology", "Healthcare", "Manufacturing", "Government", "Defense", "Retail", "Telecommunications", "Energy"],
+  regions: ["Global", "North America", "Europe", "APAC", "Middle East", "United States", "United Kingdom", "Hong Kong", "Singapore"],
+  tech: ["Microsoft 365", "Active Directory", "VPN", "VMware ESXi", "Citrix", "RDP", "Cloud identity", "EDR", "Email gateway"],
+};
+const ASSESSED_ORIGIN_OPTIONS = [
+  "Unknown", "Global / unclear", "China", "Russia", "North Korea", "Iran", "Eastern Europe",
+  "United States", "Vietnam", "Pakistan", "India", "Middle East", "APAC", "Europe",
+] as const;
+const SPONSORING_ENTITY_OPTIONS = [
+  "Unknown", "Independent", "State-aligned", "State-sponsored", "Criminal affiliate network",
+  "Ransomware operator", "Hacktivist collective", "Mercenary operator",
+] as const;
+const ORG_SIZE_PREFERENCES = [
+  "Unknown", "Any size", "Small business", "Mid-market", "Enterprise", "Critical infrastructure", "Government and defense",
+] as const;
+const RELEVANCE_RATINGS = [
+  "Monitor", "Elevated", "Priority", "Immediate action", "Low relevance", "Unknown",
+] as const;
+const THREAT_RATIONALE_OPTIONS = [
+  "Material tenant impact through data theft, encryption, or public extortion.",
+  "Sustained exploitation of exposed edge services or identity systems.",
+  "Targeting overlaps with observed sector, geography, or technology exposure.",
+  "Tradecraft is active but current exposure is limited.",
+  "Insufficient evidence for a higher priority assessment.",
+] as const;
+const PREPARED_BY_OPTIONS = [
+  "OptraSight analyst", "Threat analyst workspace", "Platform administrator", "AI enrichment with analyst review",
+] as const;
+const CAPABILITY_TIERS = ["Advanced", "Intermediate", "Basic", "Tier 1", "Tier 2", "Tier 3", "Tier 4", "Unknown"] as const;
+const COORDINATION_LEVELS = ["Independent", "Unknown", "Low", "Moderate", "High", "Highly coordinated"] as const;
+const TOOLING_OPTIONS = [
+  "Cobalt Strike", "Sliver", "Metasploit", "Mimikatz", "Rclone", "AnyDesk", "ScreenConnect",
+  "PowerShell", "Living-off-the-land binaries", "Custom loader", "Ransomware locker", "Infostealer",
+] as const;
+const MITRE_TECHNIQUES = [
+  { tactic: "Initial Access", techniqueId: "T1566", name: "Phishing" },
+  { tactic: "Initial Access", techniqueId: "T1190", name: "Exploit Public-Facing Application" },
+  { tactic: "Execution", techniqueId: "T1059", name: "Command and Scripting Interpreter" },
+  { tactic: "Persistence", techniqueId: "T1136", name: "Create Account" },
+  { tactic: "Privilege Escalation", techniqueId: "T1068", name: "Exploitation for Privilege Escalation" },
+  { tactic: "Defense Evasion", techniqueId: "T1027", name: "Obfuscated Files or Information" },
+  { tactic: "Credential Access", techniqueId: "T1003", name: "OS Credential Dumping" },
+  { tactic: "Discovery", techniqueId: "T1087", name: "Account Discovery" },
+  { tactic: "Lateral Movement", techniqueId: "T1021", name: "Remote Services" },
+  { tactic: "Collection", techniqueId: "T1119", name: "Automated Collection" },
+  { tactic: "Command and Control", techniqueId: "T1105", name: "Ingress Tool Transfer" },
+  { tactic: "Exfiltration", techniqueId: "T1041", name: "Exfiltration Over C2 Channel" },
+  { tactic: "Impact", techniqueId: "T1486", name: "Data Encrypted for Impact" },
+] as const;
+const CAMPAIGN_ACCESS_OPTIONS = [
+  "Phishing", "VPN compromise", "Exposed RDP", "Edge appliance exploit", "Valid accounts",
+  "Supply-chain access", "Drive-by compromise", "Unknown",
+] as const;
+const CAMPAIGN_OUTCOME_OPTIONS = [
+  "Data theft", "Encryption", "Credential theft", "Extortion", "Operational disruption",
+  "Espionage collection", "Initial access sold", "Unknown",
+] as const;
+const SOURCE_TYPE_OPTIONS = ["Vendor research", "Government advisory", "Incident report", "Malware analysis", "Media report", "Confidential"] as const;
+const BUSINESS_IMPACT_OPTIONS = ["None observed", "Low", "Moderate", "High", "Critical", "Unknown"] as const;
+const FORECAST_TRAJECTORY_OPTIONS = ["Increasing", "Stable", "Decreasing", "Episodic", "Unknown"] as const;
+
 type KdotTone = "muted" | "indigo" | "cyan" | "emerald" | "amber" | "rose" | "violet";
 const KANBAN_COLS: { id: TapStatus; label: string; tone: KdotTone }[] = [
   { id: "draft",    label: "DRAFT",    tone: "muted"   },
@@ -183,7 +299,6 @@ function MetaCell({ label, value }: { label: string; value: React.ReactNode }) {
 
 // ---- Page ------------------------------------------------------------------
 export default function ThreatActors() {
-  const { toast } = useToast();
   const [view, setView] = useState<"list" | "kanban">("list");
   const [statusFilter, setStatusFilter] = useState<"all" | TapStatus>("all");
   const [clientFilter, setClientFilter] = useState<"all" | string>("all");
@@ -198,7 +313,16 @@ export default function ThreatActors() {
   // hand-off rather than a query-string because wouter's hash router treats
   // "?..." as part of the path and would 404.
   useEffect(() => {
+    const syncFocusParam = () => {
+      const raw = window.location.hash || "";
+      const qix = raw.indexOf("?");
+      if (qix < 0) return;
+      const qs = new URLSearchParams(raw.slice(qix + 1));
+      const focus = qs.get("focus");
+      if (focus) setSelectedId(focus);
+    };
     const consume = () => {
+      syncFocusParam();
       const w = window as any;
       const id: string | undefined = w.__pendingTapFocusId;
       const name: string | undefined = w.__pendingTapFocusName;
@@ -219,17 +343,17 @@ export default function ThreatActors() {
         delete w.__pendingTapFocusName;
       }
     };
-    const raw = window.location.hash || "";
-    const qix = raw.indexOf("?");
-    if (qix >= 0) {
-      const qs = new URLSearchParams(raw.slice(qix + 1));
-      const focus = qs.get("focus");
-      if (focus) setSelectedId(focus);
-    }
+    syncFocusParam();
     // Run once on mount (covers the case where the page is freshly entered).
     consume();
     window.addEventListener("tap:focus", consume);
-    return () => window.removeEventListener("tap:focus", consume);
+    window.addEventListener("hashchange", syncFocusParam);
+    window.addEventListener("optrasight:ai-job-open", syncFocusParam as EventListener);
+    return () => {
+      window.removeEventListener("tap:focus", consume);
+      window.removeEventListener("hashchange", syncFocusParam);
+      window.removeEventListener("optrasight:ai-job-open", syncFocusParam as EventListener);
+    };
   }, []);
 
   const { data, isLoading } = useQuery<ListResp>({
@@ -551,21 +675,51 @@ function useLazyPortrait(
   return { ref, resolvedUrl, busy };
 }
 
+function portraitUrlCandidates(url: string | null | undefined): string[] {
+  if (!url) return [];
+  const primary = resolveAssetUrl(url) ?? url;
+  const candidates = [primary];
+  const queryIndex = primary.indexOf("?");
+  const path = queryIndex >= 0 ? primary.slice(0, queryIndex) : primary;
+  const cacheSuffix = queryIndex >= 0 ? primary.slice(queryIndex) : "";
+  const fileName = path.split("/").filter(Boolean).pop();
+
+  if (fileName) {
+    if (path.startsWith("/portraits/")) {
+      candidates.push(`/data/portraits/${fileName}${cacheSuffix}`);
+    } else if (path.startsWith("/data/portraits/")) {
+      candidates.push(`/portraits/${fileName}${cacheSuffix}`);
+    }
+  }
+
+  return Array.from(new Set(candidates));
+}
+
 function ActorPortrait({
-  name, threatLevel, size = 64, portraitUrl, actorId, portraitStatus, editable,
+  name, threatLevel, status, size = 64, portraitUrl, actorId, portraitStatus, editable, variant = "circle",
 }: {
   name: string;
   threatLevel?: string;
+  status?: TapStatus;
   size?: number;
   portraitUrl?: string | null;
   actorId?: string;
   portraitStatus?: "idle" | "generating" | "ready" | "failed";
+  variant?: "circle" | "dossier";
   /** When true, render a hover-revealed camera button that opens a dropdown
    *  with Upload · Regenerate · Remove. The button uses stopPropagation so it
    *  doesn't trigger the surrounding card's onClick. */
   editable?: boolean;
 }) {
   const { ref, resolvedUrl, busy } = useLazyPortrait(actorId, portraitUrl, portraitStatus);
+  const imageCandidates = useMemo(() => portraitUrlCandidates(resolvedUrl), [resolvedUrl]);
+  const [imageIndex, setImageIndex] = useState(0);
+
+  useEffect(() => {
+    setImageIndex(0);
+  }, [resolvedUrl]);
+
+  const imageSrc = imageCandidates[imageIndex] ?? null;
 
   const h = hashString(name || "actor");
   // Threat-level hue bias — escalation flows from cool to hot.
@@ -600,6 +754,13 @@ function ActorPortrait({
     };
   });
   const gradId = `tap-grad-${h}`;
+  const statusKey = status ?? "draft";
+  const portraitStatusStyle = TAP_PORTRAIT_STATUS_STYLE[statusKey];
+  const portraitFrameStyle: CSSProperties = {
+    width: size,
+    height: variant === "dossier" ? Math.round(size * 1.34) : size,
+    ...portraitStatusStyle,
+  };
 
   // The SVG sigil is always rendered — either as the primary visual when no AI
   // portrait is available, or as a soft background that the AI portrait
@@ -641,25 +802,44 @@ function ActorPortrait({
   const circle = (
     <div
       ref={ref}
-      className="relative rounded-full ring-2 ring-border shadow-sm overflow-hidden"
-      style={{ width: size, height: size }}
+      className={cn(
+        "relative shadow-sm",
+        TAP_PORTRAIT_STATUS_CLASS[statusKey],
+        variant === "dossier"
+          ? "os-tap-portrait-frame os-tap-portrait-frame-dossier rounded-xl"
+          : "os-tap-portrait-frame rounded-full",
+      )}
+      style={portraitFrameStyle}
     >
-      {sigil}
-      {resolvedUrl && (
-        <img
-          src={resolveAssetUrl(resolvedUrl) ?? resolvedUrl}
-          alt={`${name} portrait`}
-          className="absolute inset-0 w-full h-full object-cover transition-opacity duration-500"
-          style={{ opacity: 1 }}
-          loading="lazy"
-          onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
-        />
-      )}
-      {busy && !resolvedUrl && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/30 backdrop-blur-[1px]">
-          <Loader2 className="animate-spin text-white" size={Math.max(14, Math.round(size * 0.28))} />
-        </div>
-      )}
+      <div
+        className={cn(
+          "os-tap-portrait-core absolute inset-0 overflow-hidden",
+          variant === "dossier" ? "rounded-xl" : "rounded-full",
+        )}
+      >
+        {sigil}
+        {imageSrc && (
+          <img
+            src={imageSrc}
+            alt={`${name} portrait`}
+            className="absolute inset-0 w-full h-full object-cover transition-opacity duration-500"
+            style={{ opacity: 1 }}
+            loading="lazy"
+            onError={(e) => {
+              if (imageIndex < imageCandidates.length - 1) {
+                setImageIndex((current) => current + 1);
+                return;
+              }
+              (e.currentTarget as HTMLImageElement).style.display = "none";
+            }}
+          />
+        )}
+        {busy && !imageSrc && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/30 backdrop-blur-[1px]">
+            <Loader2 className="animate-spin text-white" size={Math.max(14, Math.round(size * 0.28))} />
+          </div>
+        )}
+      </div>
     </div>
   );
 
@@ -668,10 +848,10 @@ function ActorPortrait({
   return (
     <div
       className="relative group/portrait"
-      style={{ width: size, height: size }}
+      style={{ width: size, height: variant === "dossier" ? Math.round(size * 1.34) : size }}
     >
       {circle}
-      <PortraitActionMenu actorId={actorId} hasPortrait={!!resolvedUrl} size={size} />
+      <PortraitActionMenu actorId={actorId} hasPortrait={imageCandidates.length > 0} size={size} />
     </div>
   );
 }
@@ -868,15 +1048,26 @@ const TapCard = memo(function TapCard({
   actor, tags, onOpen,
 }: { actor: ThreatActorDTO; tags: ThreatActorTenantDTO[]; onOpen: () => void }) {
   const isEnriched = (actor.execWhat ?? "").length > 0;
+  const dossierHint = useMemo(() => {
+    const summary = (actor.execSoWhat || actor.execWhatNow || actor.execWhat || "").trim();
+    if (summary) return summary.length > 132 ? `${summary.slice(0, 129)}...` : summary;
+    if (actor.targetSectors.length) return `Watch ${actor.targetSectors.slice(0, 2).join(", ")} targeting for new activity.`;
+    if (actor.targetRegions.length) return `Monitor ${actor.targetRegions.slice(0, 2).join(", ")} activity for fresh exposure overlap.`;
+    return "Open profile for relevance, tradecraft, and coverage context.";
+  }, [actor.execSoWhat, actor.execWhatNow, actor.execWhat, actor.targetSectors, actor.targetRegions]);
+
   return (
     <Card
-      className="p-4 hover:shadow-md transition-shadow cursor-pointer relative"
+      className="os-tap-card p-4 hover:shadow-md transition-shadow cursor-pointer relative"
       onClick={onOpen}
       data-testid={`card-tap-${actor.id}`}
     >
       {/* Top row: profile id (left) + last-updated stamp + status (right) */}
-      <div className="flex items-start justify-between gap-2 mb-2">
-        <div className="text-[10px] font-mono text-muted-foreground">{actor.profileId}</div>
+      <div className="os-tap-card-top flex items-start justify-between gap-2 mb-3">
+        <div className="min-w-0">
+          <div className="text-[9px] uppercase text-muted-foreground">Dossier</div>
+          <div className="text-[10px] font-mono text-muted-foreground">{actor.profileId}</div>
+        </div>
         <div className="flex items-center gap-2">
           <span className="text-[10px] font-mono text-muted-foreground/80 tabular-nums" title="Last updated">
             {formatStamp(actor.updatedAt)}
@@ -885,36 +1076,48 @@ const TapCard = memo(function TapCard({
         </div>
       </div>
 
-      {/* Portrait — center-aligned, AI-style stylized sigil with a hover-
-          revealed camera button for upload / regenerate / remove. */}
-      <div className="flex justify-center mb-3">
-        <ActorPortrait
-          name={actor.primaryName}
-          threatLevel={actor.threatLevel}
-          portraitUrl={actor.portraitUrl}
-          portraitStatus={actor.portraitStatus}
-          actorId={actor.id}
-          size={72}
-          editable
-        />
-      </div>
-
-      {/* Name + aliases row */}
-      <div className="text-center mb-2">
-        <div className="font-semibold truncate" data-testid={`text-tap-name-${actor.id}`}>{actor.primaryName}</div>
-        {actor.mitreGroupId && (
-          <div className="text-[11px] text-muted-foreground font-mono">{actor.mitreGroupId}</div>
-        )}
-      </div>
-
-      {actor.aliases.length > 0 && (
-        <div className="flex flex-wrap gap-1 mb-2 justify-center">
-          {actor.aliases.slice(0, 4).map((a) => (
-            <Badge key={a} variant="outline" className="text-[10px] font-normal">{a}</Badge>
-          ))}
-          {actor.aliases.length > 4 && (
-            <Badge variant="outline" className="text-[10px] font-normal">+{actor.aliases.length - 4}</Badge>
+      <div className="mb-3 flex items-start gap-3">
+        <div className="shrink-0">
+          <ActorPortrait
+            name={actor.primaryName}
+            threatLevel={actor.threatLevel}
+            status={actor.status}
+            portraitUrl={actor.portraitUrl}
+            portraitStatus={actor.portraitStatus}
+            actorId={actor.id}
+            size={64}
+            editable
+          />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="os-tap-card-name font-semibold leading-tight truncate" data-testid={`text-tap-name-${actor.id}`}>{actor.primaryName}</div>
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            {actor.mitreGroupId && (
+              <span className="font-mono text-[11px] text-muted-foreground">{actor.mitreGroupId}</span>
+            )}
+            <span className="text-[10px] uppercase text-muted-foreground">{ACTOR_TYPE_LABEL[actor.actorType]}</span>
+          </div>
+          {actor.aliases.length > 0 && (
+            <div className="os-tap-alias-row mt-2 flex flex-wrap gap-1">
+              {actor.aliases.slice(0, 3).map((a) => (
+                <Badge key={a} variant="outline" className="text-[10px] font-normal">{a}</Badge>
+              ))}
+              {actor.aliases.length > 3 && (
+                <Badge variant="outline" className="text-[10px] font-normal">+{actor.aliases.length - 3}</Badge>
+              )}
+            </div>
           )}
+        </div>
+      </div>
+
+      {(actor.targetSectors.length > 0 || actor.targetRegions.length > 0) && (
+        <div className="mb-3 flex flex-wrap gap-1">
+          {actor.targetSectors.slice(0, 2).map((sector) => (
+            <Badge key={sector} variant="outline" className="os-tap-scope-chip">{sector}</Badge>
+          ))}
+          {actor.targetRegions.slice(0, 2).map((region) => (
+            <Badge key={region} variant="outline" className="os-tap-scope-chip">{region}</Badge>
+          ))}
         </div>
       )}
 
@@ -925,21 +1128,28 @@ const TapCard = memo(function TapCard({
       )}
 
       <div className="grid grid-cols-3 gap-2 text-xs">
-        <div>
+        <div className="os-tap-meta-cell">
           <div className="text-[9px] uppercase tracking-wider text-muted-foreground">Threat</div>
           <Badge className={cn("text-[10px] mt-0.5", THREAT_LEVEL_BADGE[actor.threatLevel])}>{actor.threatLevel}</Badge>
         </div>
-        <div>
+        <div className="os-tap-meta-cell">
           <div className="text-[9px] uppercase tracking-wider text-muted-foreground">TLP</div>
           <Badge className={cn("text-[10px] mt-0.5", TLP_BADGE[actor.tlp])}>{actor.tlp}</Badge>
         </div>
-        <div>
-          <div className="text-[9px] uppercase tracking-wider text-muted-foreground">Type</div>
-          <div className="text-[11px] mt-0.5 truncate">{ACTOR_TYPE_LABEL[actor.actorType]}</div>
+        <div className="os-tap-meta-cell">
+          <div className="text-[9px] uppercase tracking-wider text-muted-foreground">Updated</div>
+          <div className="text-[11px] mt-0.5 truncate tabular-nums">{relativeTime(actor.updatedAt)}</div>
         </div>
       </div>
 
-      <div className="mt-3 pt-3 border-t flex items-center justify-between text-[11px] text-muted-foreground">
+      <div
+        className="os-tap-triage-note mt-3 rounded-md border border-primary/15 bg-primary/5 px-2.5 py-2 text-[11px] leading-snug text-muted-foreground"
+        data-testid={`note-tap-dossier-context-${actor.id}`}
+      >
+        <span className="font-medium text-foreground">Analyst context: </span>{dossierHint}
+      </div>
+
+      <div className="os-tap-card-footer mt-3 pt-3 border-t flex items-center justify-between text-[11px] text-muted-foreground">
         <span>v{actor.version} · {relativeTime(actor.updatedAt)}</span>
         {isEnriched ? (
           <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
@@ -951,18 +1161,6 @@ const TapCard = memo(function TapCard({
           </span>
         )}
       </div>
-      {!BATCH_ONE_RELEASE && (
-        <div className="mt-2" onClick={(e) => e.stopPropagation()}>
-          <StartInvestigationButton
-            entityType="threat_actor"
-            entityId={actor.id}
-            title={actor.primaryName}
-            severity={actor.threatLevel}
-            summary={actor.execWhat}
-            className="h-7 px-2 text-[11px]"
-          />
-        </div>
-      )}
     </Card>
   );
 });
@@ -1274,7 +1472,6 @@ function KanbanBoard({
 function CreateTapDialog({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (aid: string) => void }) {
   const { toast } = useToast();
   const provider = useEnrichProviderLabel();
-  const exerciseProvider = useAiTaskProviderLabel("exercise_generation");
   const aiAvailability = useAiAvailability();
   const aiDisabled = !aiAvailability.hasUsableProvider;
   const [primaryName, setPrimaryName] = useState("");
@@ -1433,8 +1630,6 @@ const ACTIVE_TAB_GROUPS: TabGroupDef[] = BATCH_ONE_RELEASE
       tabs: g.tabs.filter((t) => t.id !== "relevance"),
     })).filter((g) => g.tabs.length > 0)
   : TAB_GROUPS;
-
-const ALL_TAB_IDS: string[] = ACTIVE_TAB_GROUPS.flatMap((g) => g.tabs.map((t) => t.id));
 
 const TAB_CONTEXT: Record<string, { title: string; purpose: string; principle: string }> = {
   exec: {
@@ -1596,10 +1791,12 @@ function TapDossierAside({ a }: { a: ThreatActorFullDTO }) {
         <ActorPortrait
           name={a.primaryName}
           threatLevel={a.threatLevel}
+          status={a.status}
           portraitUrl={a.portraitUrl}
           portraitStatus={a.portraitStatus}
           actorId={a.id}
-          size={112}
+          size={168}
+          variant="dossier"
           editable
         />
         <div className="mt-3 font-semibold leading-tight">{a.primaryName}</div>
@@ -1801,6 +1998,7 @@ function DetailSheet({ actorId, onClose }: { actorId: string | null; onClose: ()
   const aiDisabled = !aiAvailability.hasUsableProvider;
   const [activeTab, setActiveTab] = useState("exec");
   const [overrideProviderId, setOverrideProviderId] = useState<string | null>(null);
+  const [activeEnrichJobId, setActiveEnrichJobId] = useState<string | null>(null);
 
   // v2.30.7: full inline edit mode — one toggle, all tabs editable, one PATCH on save.
   const [editMode, setEditMode] = useState(false);
@@ -1853,6 +2051,37 @@ function DetailSheet({ actorId, onClose }: { actorId: string | null; onClose: ()
   });
   const providers = providersResp?.providers ?? [];
 
+  const { data: activeEnrichJob } = useQuery<AiJobSummary>({
+    queryKey: ["/api/v1/ai-jobs", activeEnrichJobId],
+    queryFn: async () => {
+      const r = await apiRequest("GET", `/api/v1/ai-jobs/${activeEnrichJobId}`);
+      return r.json();
+    },
+    enabled: !!activeEnrichJobId,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "completed" || status === "succeeded" || status === "failed" || status === "cancelled" ? false : 2500;
+    },
+  });
+  const enrichJobRunning = !!activeEnrichJobId && !["completed", "succeeded", "failed", "cancelled"].includes(activeEnrichJob?.status ?? "queued");
+
+  useEffect(() => {
+    if (!activeEnrichJob) return;
+    if (activeEnrichJob.status === "completed" || activeEnrichJob.status === "succeeded") {
+      queryClient.invalidateQueries({ queryKey: ["/api/v1/threat-actors"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/v1/threat-actors", actorId, "full"] });
+      toast({ title: "TAP analysis complete", description: activeEnrichJob.targetLabel ?? full?.primaryName });
+      setActiveEnrichJobId(null);
+    } else if (activeEnrichJob.status === "failed" || activeEnrichJob.status === "cancelled") {
+      toast({
+        title: activeEnrichJob.status === "cancelled" ? "TAP analysis cancelled" : "TAP analysis failed",
+        description: activeEnrichJob.errorMessage ?? activeEnrichJob.targetLabel ?? full?.primaryName,
+        variant: activeEnrichJob.status === "failed" ? "destructive" : undefined,
+      });
+      setActiveEnrichJobId(null);
+    }
+  }, [activeEnrichJob?.id, activeEnrichJob?.status, activeEnrichJob?.errorMessage, activeEnrichJob?.targetLabel, actorId, full?.primaryName, toast]);
+
   const enrich = useMutation({
     mutationFn: async (vars: { force: boolean; providerId: string | null }) => {
       const body: Record<string, unknown> = { force: vars.force };
@@ -1860,9 +2089,10 @@ function DetailSheet({ actorId, onClose }: { actorId: string | null; onClose: ()
       return startBackgroundJob(`/api/v1/threat-actors/${actorId}/enrich`, body) as Promise<EnrichResp>;
     },
     onSuccess: (resp) => {
+      setActiveEnrichJobId(resp.jobId);
       queryClient.invalidateQueries({ queryKey: ["/api/v1/threat-actors"] });
       toast({
-        title: "TAP re-analysis queued",
+        title: "TAP analysis started",
         description: resp.targetLabel ?? "The background jobs tray and Job control will show progress.",
       });
     },
@@ -1935,6 +2165,7 @@ function DetailSheet({ actorId, onClose }: { actorId: string | null; onClose: ()
               <Loader2 className="animate-spin mr-2" size={16} /> Loading profile…
             </div>
           ) : (
+            <EditCtx.Provider value={{ editMode, draft, set: setField }}>
             <>
               {/* Hero band — round-6 redesign:
                   Single-row layout at lg+ with title on the left and a tight,
@@ -1949,6 +2180,7 @@ function DetailSheet({ actorId, onClose }: { actorId: string | null; onClose: ()
                     <ActorPortrait
                       name={full.primaryName}
                       threatLevel={full.threatLevel}
+                      status={full.status}
                       portraitUrl={full.portraitUrl}
                       portraitStatus={full.portraitStatus}
                       actorId={full.id}
@@ -1968,14 +2200,7 @@ function DetailSheet({ actorId, onClose }: { actorId: string | null; onClose: ()
                         </SheetDescription>
                       )}
                     </div>
-                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                      <Badge className={cn("text-[10px]", TAP_STATUS_BADGE[full.status])}>{full.status}</Badge>
-                      <Badge className={cn("text-[10px]", THREAT_LEVEL_BADGE[full.threatLevel])}>{full.threatLevel}</Badge>
-                      <Badge className={cn("text-[10px]", TLP_BADGE[full.tlp])}>TLP:{full.tlp}</Badge>
-                      <Badge variant="outline" className="text-[10px]">{ACTOR_TYPE_LABEL[full.actorType]}</Badge>
-                      <Badge variant="outline" className="text-[10px]">{full.sponsorship}</Badge>
-                      <Badge variant="outline" className="text-[10px]">Admiralty {full.admiraltySource}/{full.admiraltyInfo} · WEP {full.wepConfidence}</Badge>
-                    </div>
+                    <HeaderTagStrip a={full} />
                   </SheetHeader>
 
                   {/* Action cluster — fixed to right; single row at lg+, wraps gracefully below. */}
@@ -1987,17 +2212,17 @@ function DetailSheet({ actorId, onClose }: { actorId: string | null; onClose: ()
                           providers={providers}
                           value={overrideProviderId}
                           onChange={setOverrideProviderId}
-                          disabled={enrich.isPending || aiDisabled}
+                          disabled={enrich.isPending || enrichJobRunning || aiDisabled}
                         />
                         <Button
                           size="sm"
                           onClick={() => enrich.mutate({ force: true, providerId: overrideProviderId })}
-                          disabled={enrich.isPending || aiDisabled}
+                          disabled={enrich.isPending || enrichJobRunning || aiDisabled}
                           title={aiAvailability.disabledReason}
                           data-testid="button-reenrich"
                         >
-                          {enrich.isPending ? (
-                            <><Loader2 className="animate-spin mr-1" size={14} /> Queuing…</>
+                          {enrich.isPending || enrichJobRunning ? (
+                            <><Loader2 className="animate-spin mr-1" size={14} /> Analysing…</>
                           ) : (
                             <><Sparkles size={14} className="mr-1" /> Re-enrich</>
                           )}
@@ -2032,33 +2257,6 @@ function DetailSheet({ actorId, onClose }: { actorId: string | null; onClose: ()
                             >
                               <FileDown size={14} className="mr-2" /> Export DOCX
                             </DropdownMenuItem>
-                            {!BATCH_ONE_RELEASE && (
-                              <>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem
-                                  data-testid="menuitem-generate-exercise"
-                                  onClick={async () => {
-                                    try {
-                                      const r = await apiRequest("POST", "/api/v1/exercises", {
-                                        title: `TTX — ${full.primaryName}`,
-                                        framework: "hkma",
-                                        scenarioType: "ransomware-affiliate",
-                                        severity: full.threatLevel === "low" ? "MODERATE" : "HIGH",
-                                        durationMin: 120,
-                                        sourceTapIds: [full.id],
-                                      });
-                                      const ex = await r.json();
-                                      toast({ title: "Exercise created", description: `${ex.code} — open the Generator tab to populate with ${exerciseProvider}.` });
-                                      window.location.hash = "#/exercises";
-                                    } catch (e: any) {
-                                      toast({ title: "Could not create exercise", description: String(e?.message ?? e), variant: "destructive" });
-                                    }
-                                  }}
-                                >
-                                  <Sparkles size={14} className="mr-2" /> Generate exercise
-                                </DropdownMenuItem>
-                              </>
-                            )}
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
                               className="text-destructive focus:text-destructive"
@@ -2081,6 +2279,7 @@ function DetailSheet({ actorId, onClose }: { actorId: string | null; onClose: ()
                         <Button
                           size="sm" variant="outline"
                           onClick={() => { setDraft({}); setEditMode(true); }}
+                          disabled={enrichJobRunning}
                           data-testid="button-edit-tap"
                         >
                           <Pencil size={14} className="mr-1" /> Edit
@@ -2133,7 +2332,6 @@ function DetailSheet({ actorId, onClose }: { actorId: string | null; onClose: ()
               </div>
 
               {/* Tabs — grouped vertical rail on lg+, compact group pills below lg */}
-              <EditCtx.Provider value={{ editMode, draft, set: setField }}>
               <Tabs value={activeTab} onValueChange={setActiveTab}>
                 <div className="lg:hidden">
                   <TabRailCompact activeTab={activeTab} onSelect={setActiveTab} />
@@ -2166,12 +2364,91 @@ function DetailSheet({ actorId, onClose }: { actorId: string | null; onClose: ()
                   </div>
                 </div>
               </Tabs>
-              </EditCtx.Provider>
+              {enrichJobRunning && (
+                <TapAnalysisOverlay
+                  actorName={full.primaryName}
+                  providerLabel={activeEnrichJob?.providerLabel ?? providers.find((p) => p.id === overrideProviderId)?.label ?? "configured AI provider"}
+                  progressPct={activeEnrichJob?.progressPct ?? 0}
+                  status={activeEnrichJob?.status ?? "queued"}
+                />
+              )}
             </>
+            </EditCtx.Provider>
           )}
         </div>
       </SheetContent>
     </Sheet>
+  );
+}
+
+function HeaderTagStrip({ a }: { a: ThreatActorFullDTO }) {
+  const { editMode } = useEditCtx();
+  if (!editMode) {
+    return (
+      <div className="flex flex-wrap items-center gap-1.5 pt-1">
+        <Badge className={cn("text-[10px]", TAP_STATUS_BADGE[a.status])}>{a.status}</Badge>
+        <Badge className={cn("text-[10px]", THREAT_LEVEL_BADGE[a.threatLevel])}>{a.threatLevel}</Badge>
+        <Badge className={cn("text-[10px]", TLP_BADGE[a.tlp])}>TLP:{a.tlp}</Badge>
+        <Badge variant="outline" className="text-[10px]">{ACTOR_TYPE_LABEL[a.actorType]}</Badge>
+        <Badge variant="outline" className="text-[10px]">{a.sponsorship}</Badge>
+        <Badge variant="outline" className="text-[10px]">Admiralty {a.admiraltySource}/{a.admiraltyInfo} · WEP {a.wepConfidence}</Badge>
+      </div>
+    );
+  }
+  return (
+    <div className="grid grid-cols-2 gap-2 pt-1 sm:grid-cols-3 xl:grid-cols-4">
+      <ESelect a={a} k="status" label="Status" options={TAP_STATUS_OPTIONS} />
+      <ESelect a={a} k="threatLevel" label="Threat" options={THREAT_LEVELS} />
+      <ESelect a={a} k="tlp" label="TLP" options={TLP_LEVELS} />
+      <ESelect a={a} k="actorType" label="Actor type" options={ACTOR_TYPES} />
+      <ESelect a={a} k="sponsorship" label="Sponsorship" options={SPONSORSHIP_LEVELS} />
+      <ESelect a={a} k="admiraltySource" label="Admiralty source" options={ADMIRALTY_SOURCE} />
+      <ESelect a={a} k="admiraltyInfo" label="Admiralty info" options={ADMIRALTY_INFO} />
+      <ESelect a={a} k="wepConfidence" label="WEP confidence" options={WEP_CONFIDENCE} />
+    </div>
+  );
+}
+
+function TapAnalysisOverlay({
+  actorName, providerLabel, progressPct, status,
+}: {
+  actorName: string;
+  providerLabel: string;
+  progressPct: number;
+  status: string;
+}) {
+  const pct = Math.max(3, Math.min(98, Math.round(progressPct || (status === "running" ? 18 : 6))));
+  return (
+    <div className="absolute inset-0 z-30 flex items-start justify-center bg-background/72 px-4 py-28 backdrop-blur-sm">
+      <Card className="w-full max-w-xl overflow-hidden border-primary/20 shadow-xl">
+        <div className="p-6">
+          <div className="flex items-start gap-4">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 text-primary">
+              <Loader2 className="animate-spin" size={20} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-semibold">TAP analysis running</div>
+              <div className="mt-1 text-sm text-muted-foreground">
+                OptraSight is rebuilding the dossier for <span className="font-medium text-foreground">{actorName}</span> with {providerLabel}.
+              </div>
+              <div className="mt-4 h-2 overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full rounded-full bg-primary transition-all duration-500"
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+              <div className="mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
+                <span className="capitalize">{status}</span>
+                <span>{pct}%</span>
+              </div>
+              <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
+                Keep this profile open for the live result, or continue elsewhere and return from the background jobs tray.
+              </p>
+            </div>
+          </div>
+        </div>
+      </Card>
+    </div>
   );
 }
 
@@ -2505,14 +2782,32 @@ function useField<K extends keyof ThreatActorFullDTO>(a: ThreatActorFullDTO, key
   return Object.prototype.hasOwnProperty.call(draft, key) ? (draft as any)[key] : a[key];
 }
 
-function EFieldLabel({ children }: { children: React.ReactNode }) {
-  return <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">{children}</label>;
+function EFieldLabel({ children, help }: { children: React.ReactNode; help?: string }) {
+  return (
+    <label className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1 flex items-center gap-1">
+      <span>{children}</span>
+      {help && (
+        <TooltipProvider delayDuration={150}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex cursor-help text-muted-foreground/70">
+                <Info size={11} />
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-xs text-xs leading-relaxed">
+              {help}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )}
+    </label>
+  );
 }
 
 /** Single-line text input bound to `key`. */
 function EText({
-  a, k, label, placeholder, type = "text",
-}: { a: ThreatActorFullDTO; k: keyof ThreatActorFullDTO; label: string; placeholder?: string; type?: "text" | "number" }) {
+  a, k, label, placeholder, type = "text", help,
+}: { a: ThreatActorFullDTO; k: keyof ThreatActorFullDTO; label: string; placeholder?: string; type?: "text" | "number" | "date"; help?: string }) {
   const ctx = useEditCtx();
   const v = useField(a, k);
   if (!ctx.editMode) {
@@ -2520,7 +2815,7 @@ function EText({
   }
   return (
     <div>
-      <EFieldLabel>{label}</EFieldLabel>
+      <EFieldLabel help={help}>{label}</EFieldLabel>
       <Input
         value={v == null ? "" : String(v)}
         type={type}
@@ -2540,8 +2835,8 @@ function EText({
 
 /** Multi-line prose textarea. */
 function ETextarea({
-  a, k, label, rows = 4, placeholder,
-}: { a: ThreatActorFullDTO; k: keyof ThreatActorFullDTO; label: string; rows?: number; placeholder?: string }) {
+  a, k, label, rows = 4, placeholder, help,
+}: { a: ThreatActorFullDTO; k: keyof ThreatActorFullDTO; label: string; rows?: number; placeholder?: string; help?: string }) {
   const ctx = useEditCtx();
   const v = useField(a, k);
   if (!ctx.editMode) {
@@ -2550,7 +2845,7 @@ function ETextarea({
   }
   return (
     <div>
-      <EFieldLabel>{label}</EFieldLabel>
+      <EFieldLabel help={help}>{label}</EFieldLabel>
       <Textarea
         value={(v as string | null | undefined) ?? ""}
         rows={rows}
@@ -2564,10 +2859,19 @@ function ETextarea({
 
 /** Comma-separated string-array input. */
 function EArray({
-  a, k, label, placeholder,
-}: { a: ThreatActorFullDTO; k: keyof ThreatActorFullDTO; label: string; placeholder?: string }) {
+  a, k, label, placeholder, suggestions = [], help,
+}: { a: ThreatActorFullDTO; k: keyof ThreatActorFullDTO; label: string; placeholder?: string; suggestions?: string[]; help?: string }) {
   const ctx = useEditCtx();
   const v = useField(a, k) as string[] | undefined;
+  const [entry, setEntry] = useState("");
+  const values = v ?? [];
+  const addValue = (raw: string) => {
+    const next = raw.trim();
+    if (!next) return;
+    const merged = Array.from(new Set([...values, next]));
+    ctx.set({ [k]: merged } as EditDraft);
+    setEntry("");
+  };
   if (!ctx.editMode) {
     return (
       <div>
@@ -2582,33 +2886,76 @@ function EArray({
   }
   return (
     <div>
-      <EFieldLabel>{label}</EFieldLabel>
-      <Input
-        value={(v ?? []).join(", ")}
-        placeholder={placeholder ?? "comma separated"}
-        onChange={(e) => {
-          const arr = e.target.value.split(",").map((s) => s.trim()).filter(Boolean);
-          ctx.set({ [k]: arr } as EditDraft);
-        }}
-        data-testid={`edit-${String(k)}`}
-      />
+      <EFieldLabel help={help}>{label}</EFieldLabel>
+      <div className="rounded-md border bg-background p-2">
+        <div className="flex flex-wrap gap-1.5">
+          {values.map((x) => (
+            <Badge key={x} variant="secondary" className="gap-1 pr-1">
+              {x}
+              <button
+                type="button"
+                className="rounded-sm text-muted-foreground hover:text-foreground"
+                onClick={() => ctx.set({ [k]: values.filter((item) => item !== x) } as EditDraft)}
+                aria-label={`Remove ${x}`}
+              >
+                <X size={11} />
+              </button>
+            </Badge>
+          ))}
+          {values.length === 0 && <span className="text-xs italic text-muted-foreground">No values yet.</span>}
+        </div>
+        <div className="mt-2 flex gap-1.5">
+          <Input
+            value={entry}
+            placeholder={placeholder ?? "Add value"}
+            onChange={(e) => setEntry(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === ",") {
+                e.preventDefault();
+                addValue(entry);
+              }
+            }}
+            data-testid={`edit-${String(k)}`}
+          />
+          <Button type="button" size="sm" variant="outline" onClick={() => addValue(entry)}>
+            Add
+          </Button>
+        </div>
+        {suggestions.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1">
+            {suggestions.filter((s) => !values.includes(s)).slice(0, 10).map((s) => (
+              <button
+                key={s}
+                type="button"
+                className="rounded-full border px-2 py-0.5 text-[10px] text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+                onClick={() => addValue(s)}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
 /** Select dropdown bound to one of the enum constants. */
 function ESelect<T extends string>({
-  a, k, label, options, allowNone = false,
-}: { a: ThreatActorFullDTO; k: keyof ThreatActorFullDTO; label: string; options: readonly T[]; allowNone?: boolean }) {
+  a, k, label, options, allowNone = false, help,
+}: { a: ThreatActorFullDTO; k: keyof ThreatActorFullDTO; label: string; options: readonly T[]; allowNone?: boolean; help?: string }) {
   const ctx = useEditCtx();
   const v = useField(a, k);
   if (!ctx.editMode) {
     return <MetaCell label={label} value={v as any} />;
   }
   const cur = (v as string | null | undefined) ?? "";
+  const displayOptions = cur && cur !== "__none__" && !options.includes(cur as T)
+    ? ([cur, ...options] as readonly string[])
+    : options;
   return (
     <div>
-      <EFieldLabel>{label}</EFieldLabel>
+      <EFieldLabel help={help}>{label}</EFieldLabel>
       <Select
         value={cur === "" ? "__none__" : cur}
         onValueChange={(nv) => ctx.set({ [k]: nv === "__none__" ? null : (nv as any) } as EditDraft)}
@@ -2616,7 +2963,7 @@ function ESelect<T extends string>({
         <SelectTrigger data-testid={`edit-${String(k)}`}><SelectValue /></SelectTrigger>
         <SelectContent>
           {allowNone && <SelectItem value="__none__">— not set —</SelectItem>}
-          {options.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+          {displayOptions.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
         </SelectContent>
       </Select>
     </div>
@@ -2651,10 +2998,10 @@ function EBool({
  *  leaves the previous value untouched (so a slip doesn't clobber the field).
  */
 function EJson({
-  a, k, label, emptyText, inline,
+  a, k, label, emptyText, inline, buttonOnly,
 }: {
   a: ThreatActorFullDTO; k: keyof ThreatActorFullDTO; label?: string;
-  emptyText: string; inline?: boolean;
+  emptyText: string; inline?: boolean; buttonOnly?: boolean;
 }) {
   const { toast } = useToast();
   const ctx = useEditCtx();
@@ -2670,34 +3017,538 @@ function EJson({
     return <SimpleObjectGrid obj={v ?? {}} emptyText={emptyText} inline={inline} />;
   }
   return (
+    <ObjectRecordEditor
+      label={label}
+      value={v ?? {}}
+      text={text}
+      setText={setText}
+      onChange={(next) => ctx.set({ [k]: next } as EditDraft)}
+      onInvalid={(err) => {
+        toast({
+          title: `Invalid object in ${String(k)}`,
+          description: String(err?.message ?? err),
+          variant: "destructive",
+        });
+        setText(JSON.stringify(v ?? {}, null, 2));
+      }}
+      testId={`edit-${String(k)}`}
+      buttonOnly={buttonOnly}
+    />
+  );
+}
+
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
+function parseLocalDateTime(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const trimmed = String(value).trim();
+  if (!trimmed) return null;
+  const match = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2})(?::\d{2}(?:\.\d{1,3})?)?)?/);
+  if (match) {
+    const [, y, m, d, h = "00", min = "00"] = match;
+    const parsed = new Date(Number(y), Number(m) - 1, Number(d), Number(h), Number(min), 0, 0);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  const parsed = new Date(trimmed);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function formatLocalDateTime(date: Date): string {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}T${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}
+
+function formatLocalDateTimeDisplay(date: Date): string {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}
+
+function timeParts(date: Date): { hour12: string; minute: string; meridiem: "AM" | "PM" } {
+  const hour = date.getHours();
+  const hour12 = hour % 12 || 12;
+  return { hour12: pad2(hour12), minute: pad2(date.getMinutes()), meridiem: hour >= 12 ? "PM" : "AM" };
+}
+
+function dateWithTime(date: Date, parts: { hour12: string; minute: string; meridiem: "AM" | "PM" }): Date {
+  const hour12 = Number(parts.hour12);
+  const minute = Number(parts.minute);
+  const hour24 = parts.meridiem === "PM" ? (hour12 % 12) + 12 : hour12 % 12;
+  const next = new Date(date);
+  next.setHours(hour24, minute, 0, 0);
+  return next;
+}
+
+function BrandedDateTimePicker({
+  value,
+  onChange,
+  placeholder = "Select date and time",
+}: {
+  value?: string | null;
+  onChange: (next: string | null) => void;
+  placeholder?: string;
+}) {
+  const selected = useMemo(() => parseLocalDateTime(value), [value]);
+  const fallback = selected ?? new Date();
+  const [month, setMonth] = useState<Date>(fallback);
+  const [parts, setParts] = useState(timeParts(fallback));
+
+  useEffect(() => {
+    const next = parseLocalDateTime(value) ?? new Date();
+    setMonth(next);
+    setParts(timeParts(next));
+  }, [value]);
+
+  const minuteOptions = useMemo(() => {
+    const base = Array.from({ length: 12 }, (_, i) => pad2(i * 5));
+    return base.includes(parts.minute) ? base : [...base, parts.minute].sort();
+  }, [parts.minute]);
+
+  const commit = useCallback((date: Date, nextParts = parts) => {
+    onChange(formatLocalDateTime(dateWithTime(date, nextParts)));
+  }, [onChange, parts]);
+
+  const updateTime = (nextParts: typeof parts) => {
+    setParts(nextParts);
+    commit(selected ?? new Date(), nextParts);
+  };
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          className={cn(
+            "h-10 w-full justify-between rounded-md border-border/80 bg-background/80 px-3 text-left font-normal",
+            "shadow-sm transition-colors hover:border-primary/40 hover:bg-accent/30",
+            "focus-visible:ring-2 focus-visible:ring-primary/25 dark:bg-slate-950/70",
+            !selected && "text-muted-foreground"
+          )}
+        >
+          <span className="truncate">{selected ? formatLocalDateTimeDisplay(selected) : placeholder}</span>
+          <Calendar size={15} className="ml-2 shrink-0 text-primary" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        className={cn(
+          "w-[352px] overflow-hidden rounded-xl border border-border/80 bg-popover p-0 text-popover-foreground shadow-2xl",
+          "dark:border-slate-700/80 dark:bg-slate-950"
+        )}
+      >
+        <div className="border-b border-border/70 bg-gradient-to-r from-primary/10 via-cyan-400/10 to-transparent px-4 py-3 dark:from-primary/20 dark:via-cyan-400/10">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-primary">Timestamp</div>
+          <div className="mt-1 text-xs text-muted-foreground">Use source-observed local time for this profile field.</div>
+        </div>
+        <DateCalendar
+          mode="single"
+          month={month}
+          selected={selected ?? undefined}
+          onMonthChange={setMonth}
+          onSelect={(day) => {
+            if (!day) return;
+            setMonth(day);
+            commit(day);
+          }}
+          className="px-4 pb-2 pt-3"
+          classNames={{
+            caption_label: "text-sm font-semibold text-foreground",
+            head_cell: "w-10 rounded-md text-[11px] font-medium uppercase text-muted-foreground",
+            cell: "h-9 w-10 p-0 text-center text-sm",
+            day: "h-8 w-8 rounded-md p-0 text-sm font-medium hover:bg-primary/10 hover:text-primary",
+            day_selected: "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground",
+            day_today: "border border-cyan-400/70 bg-cyan-400/10 text-foreground",
+            day_outside: "text-muted-foreground/45",
+          }}
+        />
+        <div className="border-t border-border/70 bg-muted/20 px-4 py-3 dark:bg-slate-900/55">
+          <div className="mb-2 flex items-center justify-between">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Time</div>
+            <div className="rounded-full border border-cyan-400/35 bg-cyan-400/10 px-2 py-0.5 text-[10px] font-semibold text-cyan-700 dark:text-cyan-200">
+              Local
+            </div>
+          </div>
+          <div className="grid grid-cols-[1fr_1fr_auto] gap-2">
+            <Select value={parts.hour12} onValueChange={(hour12) => updateTime({ ...parts, hour12 })}>
+              <SelectTrigger className="h-9 bg-background/90"><SelectValue /></SelectTrigger>
+              <SelectContent>{Array.from({ length: 12 }, (_, i) => pad2(i + 1)).map((hour) => <SelectItem key={hour} value={hour}>{hour}</SelectItem>)}</SelectContent>
+            </Select>
+            <Select value={parts.minute} onValueChange={(minute) => updateTime({ ...parts, minute })}>
+              <SelectTrigger className="h-9 bg-background/90"><SelectValue /></SelectTrigger>
+              <SelectContent>{minuteOptions.map((minute) => <SelectItem key={minute} value={minute}>{minute}</SelectItem>)}</SelectContent>
+            </Select>
+            <div className="flex rounded-md border border-border bg-background/90 p-0.5">
+              {(["AM", "PM"] as const).map((meridiem) => (
+                <Button
+                  key={meridiem}
+                  type="button"
+                  variant={parts.meridiem === meridiem ? "default" : "ghost"}
+                  className="h-8 px-3 text-xs"
+                  onClick={() => updateTime({ ...parts, meridiem })}
+                >
+                  {meridiem}
+                </Button>
+              ))}
+            </div>
+          </div>
+          <div className="mt-3 flex items-center justify-between">
+            <Button type="button" variant="ghost" size="sm" className="h-8 px-2 text-xs text-muted-foreground" onClick={() => onChange(null)}>
+              Clear
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 border-primary/30 px-3 text-xs text-primary hover:bg-primary/10"
+              onClick={() => {
+                const now = new Date();
+                setMonth(now);
+                setParts(timeParts(now));
+                onChange(formatLocalDateTime(now));
+              }}
+            >
+              Today
+            </Button>
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function EObjectValue({
+  a, k, field, label, kind = "text", options, rows = 3, placeholder, help,
+}: {
+  a: ThreatActorFullDTO;
+  k: keyof ThreatActorFullDTO;
+  field: string;
+  label: string;
+  kind?: "text" | "textarea" | "select" | "number" | "datetime";
+  options?: readonly string[];
+  rows?: number;
+  placeholder?: string;
+  help?: string;
+}) {
+  const ctx = useEditCtx();
+  const obj = (useField(a, k) as Record<string, any> | null | undefined) ?? {};
+  const value = obj[field];
+  const setValue = (next: any) => ctx.set({ [k]: { ...obj, [field]: next } } as EditDraft);
+  if (!ctx.editMode) {
+    return <MetaCell label={label} value={Array.isArray(value) ? value.join(", ") : value} />;
+  }
+  return (
     <div>
-      {label && <EFieldLabel>{label}</EFieldLabel>}
-      <Textarea
-        value={text}
-        rows={10}
-        className="font-mono text-[11px]"
-        onChange={(e) => setText(e.target.value)}
-        onBlur={() => {
-          if (text.trim() === "") { ctx.set({ [k]: {} } as EditDraft); return; }
-          try {
-            const parsed = JSON.parse(text);
-            if (typeof parsed !== "object" || Array.isArray(parsed) || parsed === null) {
-              throw new Error("Expected a JSON object");
-            }
-            ctx.set({ [k]: parsed } as EditDraft);
-          } catch (err: any) {
-            toast({
-              title: `Invalid JSON in ${String(k)}`,
-              description: String(err?.message ?? err),
-              variant: "destructive",
-            });
-            // Reset local text to the last good value so the field doesn't stay corrupted.
-            setText(JSON.stringify(v ?? {}, null, 2));
-          }
-        }}
-        data-testid={`edit-${String(k)}`}
-      />
-      <p className="text-[10px] text-muted-foreground mt-1">JSON object. Validated on blur.</p>
+      <EFieldLabel help={help}>{label}</EFieldLabel>
+      {kind === "select" ? (
+        <Select value={value == null || value === "" ? "__none__" : String(value)} onValueChange={(v) => setValue(v === "__none__" ? null : v)}>
+          <SelectTrigger><SelectValue placeholder={placeholder ?? "Select"} /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__none__">— not set —</SelectItem>
+            {(() => {
+              const current = value == null || value === "" ? null : String(value);
+              const items = current && !(options ?? []).includes(current)
+                ? [current, ...(options ?? [])]
+                : [...(options ?? [])];
+              return items.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>);
+            })()}
+          </SelectContent>
+        </Select>
+      ) : kind === "textarea" ? (
+        <Textarea value={value == null ? "" : String(value)} rows={rows} placeholder={placeholder} onChange={(e) => setValue(e.target.value || null)} />
+      ) : kind === "datetime" ? (
+        <BrandedDateTimePicker
+          value={value == null ? "" : String(value)}
+          placeholder={placeholder}
+          onChange={(next) => setValue(next)}
+        />
+      ) : (
+        <Input
+          value={value == null ? "" : String(value)}
+          type={kind === "number" ? "number" : "text"}
+          placeholder={placeholder}
+          onChange={(e) => {
+            const raw = e.target.value;
+            setValue(kind === "number" ? (raw === "" ? null : Number(raw)) : (raw || null));
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function EObjectArray({
+  a, k, field, label, suggestions = [], placeholder,
+}: {
+  a: ThreatActorFullDTO;
+  k: keyof ThreatActorFullDTO;
+  field: string;
+  label: string;
+  suggestions?: readonly string[];
+  placeholder?: string;
+}) {
+  const ctx = useEditCtx();
+  const obj = (useField(a, k) as Record<string, any> | null | undefined) ?? {};
+  const value = Array.isArray(obj[field]) ? obj[field].map(String) : [];
+  const [entry, setEntry] = useState("");
+  const setValue = (next: string[]) => ctx.set({ [k]: { ...obj, [field]: next } } as EditDraft);
+  const add = (raw: string) => {
+    const v = raw.trim();
+    if (!v) return;
+    setValue(Array.from(new Set([...value, v])));
+    setEntry("");
+  };
+  if (!ctx.editMode) {
+    return <MetaCell label={label} value={value.length ? value.join(", ") : "—"} />;
+  }
+  return (
+    <div>
+      <EFieldLabel>{label}</EFieldLabel>
+      <div className="rounded-md border bg-background p-2">
+        <div className="flex flex-wrap gap-1.5">
+          {value.length === 0 && <span className="text-xs italic text-muted-foreground">No values yet.</span>}
+          {value.map((item) => (
+            <Badge key={item} variant="secondary" className="gap-1 pr-1">
+              {item}
+              <button type="button" onClick={() => setValue(value.filter((v) => v !== item))} className="text-muted-foreground hover:text-foreground" aria-label={`Remove ${item}`}>
+                <X size={11} />
+              </button>
+            </Badge>
+          ))}
+        </div>
+        <div className="mt-2 flex gap-1.5">
+          <Input
+            value={entry}
+            placeholder={placeholder ?? "Add value"}
+            onChange={(e) => setEntry(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === ",") {
+                e.preventDefault();
+                add(entry);
+              }
+            }}
+          />
+          <Button type="button" size="sm" variant="outline" onClick={() => add(entry)}>Add</Button>
+        </div>
+        {suggestions.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1">
+            {suggestions.filter((s) => !value.includes(s)).slice(0, 14).map((s) => (
+              <button key={s} type="button" className="rounded-full border px-2 py-0.5 text-[10px] text-muted-foreground hover:border-primary hover:text-primary" onClick={() => add(s)}>
+                {s}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function VendorNamingEditor({ a }: { a: ThreatActorFullDTO }) {
+  const ctx = useEditCtx();
+  const { toast } = useToast();
+  const value = useField(a, "vendorNames") as Record<string, any>;
+  const [jsonText, setJsonText] = useState(JSON.stringify(value ?? {}, null, 2));
+  useEffect(() => {
+    setJsonText(JSON.stringify(value ?? {}, null, 2));
+  }, [value]);
+  const vendors = Object.entries(value ?? {});
+  const [vendor, setVendor] = useState("");
+  const [alias, setAlias] = useState("");
+  const setVendorAliases = (name: string, aliases: string[]) => {
+    const next = { ...(value ?? {}) };
+    if (aliases.length === 0) delete next[name];
+    else next[name] = aliases;
+    ctx.set({ vendorNames: next });
+  };
+  if (!ctx.editMode) return <SimpleObjectGrid obj={value ?? {}} emptyText="None" />;
+  return (
+    <div className="space-y-2">
+      <EFieldLabel help="Each vendor can hold multiple aliases. Example: Mandiant -> UNC1234, APT sample name.">Vendor naming</EFieldLabel>
+      <div className="rounded-md border bg-background p-2 space-y-2">
+        {vendors.length === 0 && <div className="rounded border border-dashed p-3 text-xs text-muted-foreground">No vendor naming yet.</div>}
+        {vendors.map(([name, raw]) => {
+          const aliases = Array.isArray(raw) ? raw.map(String) : [String(raw)].filter(Boolean);
+          return (
+            <div key={name} className="rounded-md border p-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-xs font-semibold">{name}</div>
+                <Button type="button" size="sm" variant="ghost" className="h-7 text-destructive" onClick={() => setVendorAliases(name, [])}>Remove</Button>
+              </div>
+              <div className="mt-1 flex flex-wrap gap-1">
+                {aliases.map((item) => (
+                  <Badge key={item} variant="secondary" className="gap-1 pr-1">
+                    {item}
+                    <button type="button" onClick={() => setVendorAliases(name, aliases.filter((a) => a !== item))} aria-label={`Remove ${item}`}><X size={11} /></button>
+                  </Badge>
+                ))}
+              </div>
+              <Input
+                className="mt-2 h-8 text-xs"
+                placeholder="Add alias for this vendor"
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter") return;
+                  e.preventDefault();
+                  const next = e.currentTarget.value.trim();
+                  if (!next) return;
+                  setVendorAliases(name, Array.from(new Set([...aliases, next])));
+                  e.currentTarget.value = "";
+                }}
+              />
+            </div>
+          );
+        })}
+        <div className="grid gap-2 md:grid-cols-[0.8fr_1fr_auto]">
+          <Input value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder="Vendor name" />
+          <Input value={alias} onChange={(e) => setAlias(e.target.value)} placeholder="Alias" />
+          <Button type="button" variant="outline" onClick={() => {
+            const name = vendor.trim();
+            const item = alias.trim();
+            if (!name || !item) return;
+            const existing = Array.isArray(value?.[name]) ? value[name].map(String) : [];
+            setVendorAliases(name, Array.from(new Set([...existing, item])));
+            setVendor("");
+            setAlias("");
+          }}>
+            Add
+          </Button>
+        </div>
+        <ObjectRecordEditor
+          label="Advanced JSON"
+          value={value ?? {}}
+          text={jsonText}
+          setText={setJsonText}
+          onChange={(next) => ctx.set({ vendorNames: next })}
+          onInvalid={(err) => toast({ title: "Invalid vendor naming JSON", description: String(err?.message ?? err), variant: "destructive" })}
+          testId="edit-vendorNames-json"
+          buttonOnly
+        />
+      </div>
+    </div>
+  );
+}
+
+function parseObjectEditorValue(raw: string): any {
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+    return JSON.parse(trimmed);
+  }
+  if (trimmed.includes(",")) return trimmed.split(",").map((s) => s.trim()).filter(Boolean);
+  if (/^(true|false)$/i.test(trimmed)) return /^true$/i.test(trimmed);
+  if (/^-?\d+(?:\.\d+)?$/.test(trimmed)) return Number(trimmed);
+  return trimmed;
+}
+
+function formatObjectEditorValue(value: any): string {
+  if (Array.isArray(value)) return value.join(", ");
+  if (value && typeof value === "object") return JSON.stringify(value);
+  return value == null ? "" : String(value);
+}
+
+function ObjectRecordEditor({
+  label, value, text, setText, onChange, onInvalid, testId, buttonOnly = false,
+}: {
+  label?: string;
+  value: Record<string, any>;
+  text: string;
+  setText: (v: string) => void;
+  onChange: (v: Record<string, any>) => void;
+  onInvalid: (e: any) => void;
+  testId: string;
+  buttonOnly?: boolean;
+}) {
+  const [advanced, setAdvanced] = useState(false);
+  const rows = Object.entries(value ?? {});
+  const patchAt = (oldKey: string, nextKey: string, rawValue: string) => {
+    try {
+      const next: Record<string, any> = { ...(value ?? {}) };
+      delete next[oldKey];
+      if (nextKey.trim()) next[nextKey.trim()] = parseObjectEditorValue(rawValue);
+      onChange(next);
+    } catch (e) {
+      onInvalid(e);
+    }
+  };
+  const addRow = () => {
+    const key = `note_${rows.length + 1}`;
+    onChange({ ...(value ?? {}), [key]: "" });
+  };
+
+  return (
+    <div>
+      {label && <EFieldLabel help="Use key/value rows for normal edits. Switch to JSON only for nested objects that need exact structure.">{label}</EFieldLabel>}
+      {!advanced && buttonOnly ? (
+        <div className="flex justify-end">
+          <Button type="button" size="sm" variant="ghost" onClick={() => setAdvanced(true)}>
+            Advanced JSON
+          </Button>
+        </div>
+      ) : !advanced ? (
+        <div className="space-y-2 rounded-md border bg-background p-2" data-testid={testId}>
+          {rows.length === 0 && <div className="rounded border border-dashed p-3 text-xs text-muted-foreground">No entries yet. Add a row to capture structured analysis.</div>}
+          {rows.map(([key, val]) => (
+            <div key={key} className="grid grid-cols-[0.8fr_1.4fr_auto] gap-2">
+              <Input
+                value={key}
+                className="text-xs"
+                aria-label="Field name"
+                onChange={(e) => patchAt(key, e.target.value, formatObjectEditorValue(val))}
+              />
+              <Input
+                value={formatObjectEditorValue(val)}
+                className="text-xs"
+                aria-label="Field value"
+                placeholder="Value, comma list, number, boolean, or JSON"
+                onChange={(e) => patchAt(key, key, e.target.value)}
+              />
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="h-9 w-9 text-muted-foreground hover:text-destructive"
+                onClick={() => patchAt(key, "", "")}
+                aria-label={`Remove ${key}`}
+              >
+                <MinusCircle size={14} />
+              </Button>
+            </div>
+          ))}
+          <div className="flex items-center justify-between gap-2 pt-1">
+            <Button type="button" size="sm" variant="outline" onClick={addRow}>
+              <PlusCircle size={13} className="mr-1" /> Add row
+            </Button>
+            <Button type="button" size="sm" variant="ghost" onClick={() => setAdvanced(true)}>
+              Advanced JSON
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div>
+          <Textarea
+            value={text}
+            rows={10}
+            className="font-mono text-[11px]"
+            onChange={(e) => setText(e.target.value)}
+            onBlur={() => {
+              if (text.trim() === "") { onChange({}); return; }
+              try {
+                const parsed = JSON.parse(text);
+                if (typeof parsed !== "object" || Array.isArray(parsed) || parsed === null) {
+                  throw new Error("Expected a JSON object");
+                }
+                onChange(parsed);
+              } catch (err: any) {
+                onInvalid(err);
+              }
+            }}
+            data-testid={testId}
+          />
+          <div className="mt-1 flex items-center justify-between gap-2">
+            <p className="text-[10px] text-muted-foreground">JSON object. Validated on blur.</p>
+            <Button type="button" size="sm" variant="ghost" onClick={() => setAdvanced(false)}>
+              {buttonOnly ? "Hide advanced JSON" : "Key/value editor"}
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2720,34 +3571,65 @@ function ExecTab({ a }: { a: ThreatActorFullDTO }) {
           ? <ESelect a={a} k="threatLevel" label="Threat level" options={THREAT_LEVELS} />
           : <MetaCell label="Threat level" value={<Badge className={cn(THREAT_LEVEL_BADGE[a.threatLevel])}>{a.threatLevel}</Badge>} />}
         <EBool a={a} k="sectorActivelyTargeted" label="Sector actively targeted" />
-        <EText a={a} k="threatLevelRationale" label="Rationale" />
+        <ESelect
+          a={a}
+          k="threatLevelRationale"
+          label="Rationale"
+          options={THREAT_RATIONALE_OPTIONS}
+          allowNone
+          help="Choose the closest assessment driver. Existing custom wording remains selectable for review."
+        />
       </div>
     </div>
   );
+}
+
+function useTapSubresourceActions(a: ThreatActorFullDTO) {
+  const { toast } = useToast();
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ["/api/v1/threat-actors"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/v1/threat-actors", a.id, "full"] });
+  };
+  const post = useMutation({
+    mutationFn: async ({ path, body }: { path: string; body: Record<string, any> }) => {
+      const r = await apiRequest("POST", `/api/v1/threat-actors/${a.id}/${path}`, body);
+      return r.json();
+    },
+    onSuccess: invalidate,
+    onError: (e: any) => toast({ title: "Add failed", description: String(e?.message ?? e), variant: "destructive" }),
+  });
+  const del = useMutation({
+    mutationFn: async ({ path, id }: { path: string; id: string }) => {
+      await apiRequest("DELETE", `/api/v1/threat-actors/${a.id}/${path}/${id}`);
+    },
+    onSuccess: invalidate,
+    onError: (e: any) => toast({ title: "Remove failed", description: String(e?.message ?? e), variant: "destructive" }),
+  });
+  return { post, del };
 }
 
 function IdentityTab({ a }: { a: ThreatActorFullDTO }) {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-        <EText a={a} k="primaryName" label="Primary name" />
-        <EText a={a} k="mitreGroupId" label="MITRE Group" placeholder="G1037" />
+        <EText a={a} k="primaryName" label="Primary name" help="Canonical actor name used in headers, exports, and portrait prompts." />
+        <EText a={a} k="mitreGroupId" label="MITRE Group" placeholder="G1037" help="Optional MITRE ATT&CK group identifier when a public mapping exists." />
         <EText a={a} k="activeSince" label="Active since" type="number" placeholder="2019" />
         <ESelect a={a} k="sophistication" label="Sophistication" options={SOPHISTICATION_LEVELS} />
-        <ESelect a={a} k="actorType" label="Actor type" options={ACTOR_TYPES} />
+        <ESelect a={a} k="actorType" label="Actor type" options={ACTOR_TYPES} help="Use the closest operational category; uncertain assessments can remain Unknown." />
         <ESelect a={a} k="sponsorship" label="Sponsorship" options={SPONSORSHIP_LEVELS} />
-        <EText a={a} k="assessedOrigin" label="Assessed origin" placeholder="China" />
-        <ESelect a={a} k="originConfidence" label="Origin confidence" options={WEP_CONFIDENCE} allowNone />
-        <EText a={a} k="sponsoringEntity" label="Sponsoring entity" />
+        <ESelect a={a} k="assessedOrigin" label="Assessed origin" options={ASSESSED_ORIGIN_OPTIONS} allowNone />
+        <ESelect a={a} k="originConfidence" label="Origin confidence" options={WEP_CONFIDENCE} allowNone help="Confidence in assessed origin, not confidence in the actor's existence." />
+        <ESelect a={a} k="sponsoringEntity" label="Sponsoring entity" options={SPONSORING_ENTITY_OPTIONS} allowNone />
       </div>
       <Section title="Aliases">
-        <EArray a={a} k="aliases" label="Aliases" placeholder="Brass Typhoon, UNC3944, 0ktapus" />
+        <EArray a={a} k="aliases" label="Aliases" placeholder="Add alias" suggestions={TAP_SUGGESTIONS.aliases} help="Names used by vendors, reporting clusters, or public communities." />
       </Section>
       <Section title="Vendor naming">
-        <EJson a={a} k="vendorNames" label="Vendor naming (object: vendor -> aliases[])" emptyText="None" />
+        <VendorNamingEditor a={a} />
       </Section>
       <Section title="Motivation">
-        <EArray a={a} k="motivation" label="Motivation" placeholder="Espionage, Geopolitical, Financial" />
+        <EArray a={a} k="motivation" label="Motivation" placeholder="Add motivation" suggestions={TAP_SUGGESTIONS.motivation} />
       </Section>
     </div>
   );
@@ -2757,18 +3639,18 @@ function VictimTab({ a }: { a: ThreatActorFullDTO }) {
   return (
     <div className="space-y-4">
       <Section title="Target sectors" icon={<Target size={14} />}>
-        <EArray a={a} k="targetSectors" label="Target sectors" placeholder="Financial, Government, Healthcare" />
+        <EArray a={a} k="targetSectors" label="Target sectors" placeholder="Add sector" suggestions={TAP_SUGGESTIONS.sectors} />
       </Section>
       <Section title="Target regions" icon={<Globe2 size={14} />}>
-        <EArray a={a} k="targetRegions" label="Target regions" placeholder="APAC, Hong Kong, Singapore" />
+        <EArray a={a} k="targetRegions" label="Target regions" placeholder="Add region" suggestions={TAP_SUGGESTIONS.regions} />
       </Section>
       <Section title="Target tech stack" icon={<Network size={14} />}>
-        <EArray a={a} k="targetTechStack" label="Target tech stack" placeholder="Microsoft 365, VMware ESXi, Citrix" />
+        <EArray a={a} k="targetTechStack" label="Target tech stack" placeholder="Add technology" suggestions={TAP_SUGGESTIONS.tech} />
       </Section>
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4 pt-2 border-t">
-        <EText a={a} k="orgSizePreference" label="Org size preference" />
+        <ESelect a={a} k="orgSizePreference" label="Org size preference" options={ORG_SIZE_PREFERENCES} allowNone />
         <ESelect a={a} k="intentProximity" label="Intent proximity" options={INTENT_PROXIMITY} />
-        <EText a={a} k="relevanceRating" label="Relevance rating" />
+        <ESelect a={a} k="relevanceRating" label="Relevance rating" options={RELEVANCE_RATINGS} allowNone />
       </div>
     </div>
   );
@@ -2778,42 +3660,27 @@ function CapabilityTab({ a }: { a: ThreatActorFullDTO }) {
   return (
     <div className="space-y-4">
       <Section title="Capability profile">
-        <EJson a={a} k="capabilityProfile" label="Capability profile (JSON object)" emptyText="Not yet populated — run enrichment." />
-      </Section>
-      <Section title="Tools / malware">
-        {a.tools.length === 0 ? <span className="text-muted-foreground italic text-sm">No tools listed</span> : (
-          <div className="space-y-2">
-            {a.tools.map((t) => <ToolRow key={t.id} t={t} />)}
+        <div className="grid gap-3 md:grid-cols-2">
+          <EObjectValue a={a} k="capabilityProfile" field="tier" label="Tier" kind="select" options={CAPABILITY_TIERS} />
+          <EObjectValue a={a} k="capabilityProfile" field="coordination" label="Coordination" kind="select" options={COORDINATION_LEVELS} />
+          <div className="md:col-span-2">
+            <EObjectArray a={a} k="capabilityProfile" field="tooling" label="Tooling" suggestions={TOOLING_OPTIONS} placeholder="Select or add tooling" />
           </div>
-        )}
-        <p className="text-[10px] text-muted-foreground mt-2">Tools are managed on a separate endpoint — add or edit them outside edit mode.</p>
+          <div className="md:col-span-2">
+            <EObjectValue a={a} k="capabilityProfile" field="evidence" label="Evidence" kind="textarea" rows={5} placeholder="Evidence supporting capability and tooling assessment..." />
+          </div>
+        </div>
+        <div className="mt-3">
+          <EJson a={a} k="capabilityProfile" label="Advanced JSON" emptyText="Not yet populated — run enrichment." buttonOnly />
+        </div>
       </Section>
     </div>
   );
 }
 
-function ToolRow({ t }: { t: ThreatActorToolDTO }) {
-  return (
-    <Card className="p-3">
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="font-semibold text-sm">{t.name}</div>
-          {t.category && <div className="text-[11px] text-muted-foreground">{t.category}</div>}
-        </div>
-        <Badge variant="outline" className="text-[10px]">{t.confidence}</Badge>
-      </div>
-      {t.purpose && <div className="text-xs mt-1">{t.purpose}</div>}
-      {t.variants.length > 0 && (
-        <div className="flex flex-wrap gap-1 mt-1.5">
-          {t.variants.map((v) => <Badge key={v} variant="secondary" className="text-[9px]">{v}</Badge>)}
-        </div>
-      )}
-      {t.hashOrRule && <div className="text-[10px] font-mono mt-1 text-muted-foreground break-all">{t.hashOrRule}</div>}
-    </Card>
-  );
-}
-
 function TtpsTab({ a }: { a: ThreatActorFullDTO }) {
+  const { editMode } = useEditCtx();
+  const actions = useTapSubresourceActions(a);
   // Group by tactic for matrix display
   const byTactic = useMemo(() => {
     const m = new Map<string, ThreatActorTtpDTO[]>();
@@ -2825,12 +3692,10 @@ function TtpsTab({ a }: { a: ThreatActorFullDTO }) {
   }, [a.ttps]);
   const coverageByTtp = useMemo(() => buildTtpCoverage(a), [a]);
 
-  if (a.ttps.length === 0) {
-    return <p className="text-sm text-muted-foreground italic">No TTPs yet — run enrichment to populate the MITRE ATT&CK matrix.</p>;
-  }
-
   return (
     <div className="space-y-3">
+      {editMode && <AddTtpForm onAdd={(body) => actions.post.mutate({ path: "ttps", body })} saving={actions.post.isPending} />}
+      {a.ttps.length === 0 && <p className="text-sm text-muted-foreground italic">No TTPs yet — run enrichment or add observed ATT&CK procedures.</p>}
       <div className="text-xs text-muted-foreground">{a.ttps.length} technique{a.ttps.length === 1 ? "" : "s"} across {byTactic.length} tactic{byTactic.length === 1 ? "" : "s"}</div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
         {byTactic.map(([tactic, techs]) => (
@@ -2843,6 +3708,11 @@ function TtpsTab({ a }: { a: ThreatActorFullDTO }) {
                     <span className="font-mono font-semibold">{tapTtpId(t)}</span>
                     <Badge variant="outline" className="text-[9px] px-1 py-0">{t.detectionPriority}</Badge>
                     <CoverageBadge coverage={coverageByTtp.get(t.id)} />
+                    {editMode && (
+                      <button type="button" className="ml-auto text-muted-foreground hover:text-destructive" onClick={() => actions.del.mutate({ path: "ttps", id: t.id })} aria-label={`Remove ${tapTtpId(t)}`}>
+                        <Trash2 size={11} />
+                      </button>
+                    )}
                   </div>
                   <div className="text-[11px]">{t.techniqueName}</div>
                   {t.evidence && <div className="text-[10px] text-muted-foreground mt-0.5 italic">{t.evidence}</div>}
@@ -2853,6 +3723,42 @@ function TtpsTab({ a }: { a: ThreatActorFullDTO }) {
         ))}
       </div>
     </div>
+  );
+}
+
+function AddTtpForm({ onAdd, saving }: { onAdd: (body: Record<string, any>) => void; saving?: boolean }) {
+  const [technique, setTechnique] = useState(`${MITRE_TECHNIQUES[0].techniqueId}|${MITRE_TECHNIQUES[0].name}`);
+  const [evidence, setEvidence] = useState("");
+  const [status, setStatus] = useState<(typeof TTP_STATUSES)[number]>("suspected");
+  const [priority, setPriority] = useState<(typeof DETECTION_PRIORITIES)[number]>("P3");
+  const selected = MITRE_TECHNIQUES.find((t) => `${t.techniqueId}|${t.name}` === technique) ?? MITRE_TECHNIQUES[0];
+  return (
+    <Card className="p-3 border-dashed">
+      <div className="text-sm font-semibold mb-2">Add ATT&CK procedure</div>
+      <div className="grid gap-2 md:grid-cols-[1.4fr_0.7fr_0.7fr_auto]">
+        <Select value={technique} onValueChange={setTechnique}>
+          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {MITRE_TECHNIQUES.map((t) => <SelectItem key={`${t.techniqueId}|${t.name}`} value={`${t.techniqueId}|${t.name}`}>{t.techniqueId} · {t.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={status} onValueChange={(v) => setStatus(v as any)}>
+          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectContent>{TTP_STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+        </Select>
+        <Select value={priority} onValueChange={(v) => setPriority(v as any)}>
+          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectContent>{DETECTION_PRIORITIES.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+        </Select>
+        <Button type="button" disabled={saving} onClick={() => {
+          onAdd({ tactic: selected.tactic, techniqueId: selected.techniqueId, techniqueName: selected.name, evidence: evidence || null, status, detectionPriority: priority });
+          setEvidence("");
+        }}>
+          {saving ? <Loader2 size={13} className="mr-1 animate-spin" /> : <Plus size={13} className="mr-1" />} Add
+        </Button>
+      </div>
+      <Textarea className="mt-2" rows={3} value={evidence} onChange={(e) => setEvidence(e.target.value)} placeholder="Evidence / analyst note for this ATT&CK mapping..." />
+    </Card>
   );
 }
 const TTP_STATUS_COLOR: Record<string, string> = {
@@ -3010,9 +3916,17 @@ function DiamondTab({ a }: { a: ThreatActorFullDTO }) {
       ))}
       <Card className={cn("p-4 md:col-span-2", !editMode && Object.keys(a.diamondMeta ?? {}).length === 0 && "hidden")}>
         <div className="text-sm font-semibold mb-2">Meta-features</div>
-        {editMode
-          ? <EJson a={a} k="diamondMeta" emptyText="—" />
-          : <div className="text-xs whitespace-pre-wrap">{renderAny(a.diamondMeta)}</div>}
+        {editMode ? (
+          <div className="space-y-3">
+            <div className="grid gap-3 md:grid-cols-4">
+              <EObjectValue a={a} k="diamondMeta" field="confidence" label="Confidence" kind="select" options={WEP_CONFIDENCE} />
+              <EObjectValue a={a} k="diamondMeta" field="rank" label="Rank" kind="select" options={["Priority", "Elevated", "Monitor", "Low", "Unknown"]} />
+              <EObjectValue a={a} k="diamondMeta" field="cutoff" label="Cutoff" kind="datetime" />
+              <EObjectValue a={a} k="diamondMeta" field="sourceCount" label="Source count" kind="number" />
+            </div>
+            <EJson a={a} k="diamondMeta" label="Advanced JSON" emptyText="—" buttonOnly />
+          </div>
+        ) : <div className="text-xs whitespace-pre-wrap">{renderAny(a.diamondMeta)}</div>}
       </Card>
     </div>
   );
@@ -3051,11 +3965,12 @@ function DiamondNode({
 }
 
 function CampaignsTab({ a }: { a: ThreatActorFullDTO }) {
-  if (a.campaigns.length === 0) {
-    return <p className="text-sm text-muted-foreground italic">No campaigns logged — run enrichment or add manually.</p>;
-  }
+  const { editMode } = useEditCtx();
+  const actions = useTapSubresourceActions(a);
   return (
     <div className="space-y-2">
+      {editMode && <AddCampaignForm onAdd={(body) => actions.post.mutate({ path: "campaigns", body })} saving={actions.post.isPending} />}
+      {a.campaigns.length === 0 && <p className="text-sm text-muted-foreground italic">No campaigns logged — run enrichment or add manually.</p>}
       {a.campaigns.map((c) => (
         <Card key={c.id} className="p-3">
           <div className="flex items-start justify-between gap-2">
@@ -3066,10 +3981,16 @@ function CampaignsTab({ a }: { a: ThreatActorFullDTO }) {
               </div>
               {c.period && <div className="text-[11px] text-muted-foreground font-mono">{c.period}</div>}
             </div>
-            {c.sourceUrl && (
+            {c.sourceUrl && c.sourceUrl !== "Confidential" && (
               <a href={c.sourceUrl} target="_blank" rel="noreferrer" className="text-xs inline-flex items-center gap-0.5 text-primary hover:underline">
                 source <ExternalLink size={10} />
               </a>
+            )}
+            {c.sourceUrl === "Confidential" && <Badge variant="outline" className="text-[10px]">Confidential</Badge>}
+            {editMode && (
+              <Button type="button" size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={() => actions.del.mutate({ path: "campaigns", id: c.id })}>
+                <Trash2 size={13} />
+              </Button>
             )}
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2 text-[11px]">
@@ -3084,11 +4005,81 @@ function CampaignsTab({ a }: { a: ThreatActorFullDTO }) {
   );
 }
 
+function AddCampaignForm({ onAdd, saving }: { onAdd: (body: Record<string, any>) => void; saving?: boolean }) {
+  const [name, setName] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [sector, setSector] = useState("");
+  const [geo, setGeo] = useState("");
+  const [access, setAccess] = useState<string>(CAMPAIGN_ACCESS_OPTIONS[0]);
+  const [outcome, setOutcome] = useState<string>(CAMPAIGN_OUTCOME_OPTIONS[0]);
+  const [sourceUrl, setSourceUrl] = useState("");
+  const [confidential, setConfidential] = useState(false);
+  const period = [from, to].filter(Boolean).join(" to ");
+  return (
+    <Card className="p-3 border-dashed">
+      <div className="text-sm font-semibold mb-2">Add campaign</div>
+      <div className="grid gap-2 md:grid-cols-2">
+        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Campaign name" />
+        <div className="grid grid-cols-2 gap-2">
+          <Input value={from} onChange={(e) => setFrom(e.target.value)} placeholder="From date or year" />
+          <Input value={to} onChange={(e) => setTo(e.target.value)} placeholder="To date or year" />
+        </div>
+        <EFreeSelect value={sector} onChange={setSector} options={TAP_SUGGESTIONS.sectors} placeholder="Sector" />
+        <EFreeSelect value={geo} onChange={setGeo} options={TAP_SUGGESTIONS.regions} placeholder="Geography" />
+        <EFreeSelect value={access} onChange={setAccess} options={CAMPAIGN_ACCESS_OPTIONS} placeholder="Initial access" />
+        <EFreeSelect value={outcome} onChange={setOutcome} options={CAMPAIGN_OUTCOME_OPTIONS} placeholder="Outcome" />
+        <div className="md:col-span-2 grid gap-2 md:grid-cols-[1fr_auto_auto]">
+          <Input value={sourceUrl} onChange={(e) => setSourceUrl(e.target.value)} placeholder="Source URL" disabled={confidential} />
+          <label className="flex items-center gap-2 text-xs text-muted-foreground rounded-md border px-3">
+            <Checkbox checked={confidential} onCheckedChange={(v) => setConfidential(!!v)} /> Confidential
+          </label>
+          <Button type="button" disabled={saving || !name.trim()} onClick={() => {
+            onAdd({ name: name.trim(), period: period || null, targetSector: sector || null, targetGeography: geo || null, initialAccess: access || null, outcome: outcome || null, sourceUrl: confidential ? "Confidential" : (sourceUrl || null) });
+            setName(""); setFrom(""); setTo(""); setSourceUrl(""); setConfidential(false);
+          }}>
+            {saving ? <Loader2 size={13} className="mr-1 animate-spin" /> : <Plus size={13} className="mr-1" />} Add
+          </Button>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function EFreeSelect({ value, onChange, options, placeholder }: { value: string; onChange: (v: string) => void; options: readonly string[]; placeholder: string }) {
+  const [custom, setCustom] = useState("");
+  return (
+    <div className="grid grid-cols-[1fr_0.9fr] gap-1.5">
+      <Select value={value || "__none__"} onValueChange={(v) => onChange(v === "__none__" ? "" : v)}>
+        <SelectTrigger><SelectValue placeholder={placeholder} /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value="__none__">{placeholder}</SelectItem>
+          {options.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+        </SelectContent>
+      </Select>
+      <Input value={custom} onChange={(e) => setCustom(e.target.value)} onBlur={() => { if (custom.trim()) { onChange(custom.trim()); setCustom(""); } }} placeholder="Custom" />
+    </div>
+  );
+}
+
 function InfraTab({ a }: { a: ThreatActorFullDTO }) {
   return <EJson a={a} k="infrastructureProfile" emptyText="Infrastructure profile not populated." />;
 }
 function IrTab({ a }: { a: ThreatActorFullDTO }) {
-  return <EJson a={a} k="irActions" emptyText="IR actions not populated." />;
+  return (
+    <div className="space-y-4">
+      <Section title="Immediate phase">
+        <EObjectValue a={a} k="irActions" field="immediate" label="Immediate actions" kind="textarea" rows={7} placeholder="Markdown-supported actions for the first hours..." />
+      </Section>
+      <Section title="Short-term phase">
+        <EObjectValue a={a} k="irActions" field="shortTerm" label="Short-term actions" kind="textarea" rows={7} placeholder="Markdown-supported actions for the next days..." />
+      </Section>
+      <Section title="Medium-term phase">
+        <EObjectValue a={a} k="irActions" field="mediumTerm" label="Medium-term actions" kind="textarea" rows={7} placeholder="Markdown-supported actions for the next weeks..." />
+      </Section>
+      <EJson a={a} k="irActions" label="Advanced JSON" emptyText="IR actions not populated." buttonOnly />
+    </div>
+  );
 }
 function CounterTab({ a }: { a: ThreatActorFullDTO }) {
   return <EJson a={a} k="countermeasures" emptyText="Countermeasures not populated." />;
@@ -3099,12 +4090,27 @@ function ForecastTab({ a }: { a: ThreatActorFullDTO }) {
     <div className="space-y-4">
       <Section title="Forecast" icon={<Activity size={14} className="text-primary" />}>
         <ETextarea a={a} k="forecast" label="Forecast" rows={5} placeholder="12-month forecast…" />
+        <div className="mt-3 grid gap-3 md:grid-cols-3">
+          <EObjectValue a={a} k="extortionTactics" field="trajectory" label="Trajectory" kind="select" options={FORECAST_TRAJECTORY_OPTIONS} />
+          <EObjectValue a={a} k="extortionTactics" field="confidence" label="Forecast confidence" kind="select" options={WEP_CONFIDENCE} />
+          <EObjectValue a={a} k="extortionTactics" field="priority" label="Priority" kind="select" options={RELEVANCE_RATINGS} />
+        </div>
       </Section>
       <Section title="Extortion tactics">
-        <EJson a={a} k="extortionTactics" emptyText="Not applicable." inline />
+        <EJson a={a} k="extortionTactics" label="Advanced JSON" emptyText="Not applicable." inline buttonOnly />
       </Section>
       <Section title="Business impact">
-        <EJson a={a} k="businessImpact" emptyText="Not populated." inline />
+        <div className="grid gap-3 md:grid-cols-3">
+          <EObjectValue a={a} k="businessImpact" field="confidentiality" label="Confidentiality" kind="select" options={BUSINESS_IMPACT_OPTIONS} />
+          <EObjectValue a={a} k="businessImpact" field="integrity" label="Integrity" kind="select" options={BUSINESS_IMPACT_OPTIONS} />
+          <EObjectValue a={a} k="businessImpact" field="availability" label="Availability" kind="select" options={BUSINESS_IMPACT_OPTIONS} />
+          <EObjectValue a={a} k="businessImpact" field="regulatory" label="Regulatory" kind="select" options={BUSINESS_IMPACT_OPTIONS} />
+          <EObjectValue a={a} k="businessImpact" field="reputation" label="Reputation" kind="select" options={BUSINESS_IMPACT_OPTIONS} />
+          <EObjectValue a={a} k="businessImpact" field="executivePriority" label="Executive priority" kind="select" options={RELEVANCE_RATINGS} />
+        </div>
+        <div className="mt-3">
+          <EJson a={a} k="businessImpact" label="Advanced JSON" emptyText="Not populated." inline buttonOnly />
+        </div>
       </Section>
     </div>
   );
@@ -3154,8 +4160,8 @@ function ConfidenceTab({ a }: { a: ThreatActorFullDTO }) {
         {editMode
           ? <ESelect a={a} k="threatLevel" label="Threat level" options={THREAT_LEVELS} />
           : <MetaCell label="Threat level" value={<Badge className={cn(THREAT_LEVEL_BADGE[a.threatLevel])}>{a.threatLevel}</Badge>} />}
-        <EText a={a} k="cutoffDate" label="Cut-off date" placeholder="2025-04-15" />
-        <EText a={a} k="preparedBy" label="Prepared by" />
+        <EText a={a} k="cutoffDate" label="Cut-off date" type="date" placeholder="2025-04-15" />
+        <ESelect a={a} k="preparedBy" label="Prepared by" options={PREPARED_BY_OPTIONS} allowNone />
         <MetaCell label="AI provider" value={a.aiProviderLabel} />
       </div>
       {!editMode && (
@@ -3189,9 +4195,6 @@ function DetectionTab({ a }: { a: ThreatActorFullDTO }) {
   const uncovered = a.ttps.filter((t) => coverageByTtp.get(t.id)?.state === "no_rule")
     .sort((x, y) => x.detectionPriority.localeCompare(y.detectionPriority))
     .slice(0, 8);
-  const openTechnique = (techniqueId: string) => {
-    window.location.hash = `#/detection-rules?technique=${encodeURIComponent(techniqueId)}`;
-  };
 
   if (a.ruleLinks.length === 0) {
     return (
@@ -3199,31 +4202,23 @@ function DetectionTab({ a }: { a: ThreatActorFullDTO }) {
         <Card className="p-6 text-center text-sm text-muted-foreground">
           <Shield className="mx-auto mb-2 text-muted-foreground" size={24} />
           <div className="font-medium text-foreground">No detection rules linked yet</div>
-          <div className="mt-1">Open Detection Rules filtered to a priority TTP, generate coverage, then attach reviewed rules back to this profile.</div>
-          {uncovered[0] && (
-            <Button className="mt-4" size="sm" onClick={() => openTechnique(tapTtpId(uncovered[0]))}>
-              <ExternalLink size={13} className="mr-1.5" /> Open top gap: {tapTtpId(uncovered[0])}
-            </Button>
-          )}
+          <div className="mt-1">Batch One keeps linked coverage visible here without exposing the full detection-rule module.</div>
         </Card>
         {uncovered.length > 0 && (
           <Card className="p-4">
             <div className="text-sm font-semibold mb-2">Top uncovered TTPs</div>
             <div className="grid gap-2 md:grid-cols-2">
               {uncovered.map((t) => (
-                <button
+                <div
                   key={t.id}
-                  type="button"
-                  onClick={() => openTechnique(tapTtpId(t))}
-                  className="rounded-md border p-2 text-left text-xs hover:bg-muted/50"
-                  data-testid={`button-open-ttp-gap-${tapTtpId(t)}`}
+                  className="rounded-md border p-2 text-left text-xs"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-mono font-semibold">{tapTtpId(t)}</span>
                     <Badge variant="outline" className="text-[9px]">{t.detectionPriority}</Badge>
                   </div>
                   <div className="mt-0.5 truncate text-muted-foreground">{t.techniqueName}</div>
-                </button>
+                </div>
               ))}
             </div>
           </Card>
@@ -3240,20 +4235,15 @@ function DetectionTab({ a }: { a: ThreatActorFullDTO }) {
               <div className="text-sm font-semibold">Coverage gaps</div>
               <div className="text-xs text-muted-foreground">{uncovered.length} priority TTP{uncovered.length === 1 ? "" : "s"} still have no linked rule.</div>
             </div>
-            <Button size="sm" variant="outline" onClick={() => openTechnique(tapTtpId(uncovered[0]))}>
-              <ExternalLink size={13} className="mr-1.5" /> Open top gap
-            </Button>
           </div>
           <div className="mt-3 flex flex-wrap gap-1.5">
             {uncovered.map((t) => (
-              <button
+              <span
                 key={t.id}
-                type="button"
-                onClick={() => openTechnique(tapTtpId(t))}
-                className="rounded-full border px-2 py-1 text-[10px] font-mono hover:bg-muted"
+                className="rounded-full border px-2 py-1 text-[10px] font-mono"
               >
                 {tapTtpId(t)}
-              </button>
+              </span>
             ))}
           </div>
         </Card>
@@ -3273,13 +4263,6 @@ function DetectionTab({ a }: { a: ThreatActorFullDTO }) {
           <div className="flex items-center gap-1 shrink-0">
             <Badge variant="outline" className="text-[10px]">{l.priority}</Badge>
             {l.ruleStatus && <Badge variant="outline" className="text-[10px]">{l.ruleStatus}</Badge>}
-            <Button
-              size="sm" variant="ghost"
-              onClick={() => { window.location.hash = `#/detection-rules`; }}
-              data-testid={`link-detection-rule-${l.ruleId}`}
-            >
-              <ExternalLink size={12} />
-            </Button>
           </div>
         </Card>
       ))}
@@ -3288,11 +4271,12 @@ function DetectionTab({ a }: { a: ThreatActorFullDTO }) {
 }
 
 function IocsTab({ a }: { a: ThreatActorFullDTO }) {
-  if (a.iocs.length === 0) {
-    return <p className="text-sm text-muted-foreground italic">No IOCs catalogued — run enrichment.</p>;
-  }
+  const { editMode } = useEditCtx();
+  const actions = useTapSubresourceActions(a);
   return (
-    <div className="space-y-1">
+    <div className="space-y-3">
+      {editMode && <AddIocForm a={a} onAdd={(body) => actions.post.mutate({ path: "iocs", body })} saving={actions.post.isPending} />}
+      {a.iocs.length === 0 && <p className="text-sm text-muted-foreground italic">No IOCs catalogued — run enrichment or add validated indicators.</p>}
       <div className="text-xs text-muted-foreground mb-2">{a.iocs.length} indicators</div>
       <div className="overflow-x-auto border rounded-md">
         <table className="w-full text-xs">
@@ -3305,6 +4289,7 @@ function IocsTab({ a }: { a: ThreatActorFullDTO }) {
               <th className="px-2 py-1.5 font-semibold">Conf.</th>
               <th className="px-2 py-1.5 font-semibold">TLP</th>
               <th className="px-2 py-1.5 font-semibold">Action</th>
+              {editMode && <th className="px-2 py-1.5 font-semibold">Remove</th>}
             </tr>
           </thead>
           <tbody>
@@ -3317,12 +4302,63 @@ function IocsTab({ a }: { a: ThreatActorFullDTO }) {
                 <td className="px-2 py-1">{i.confidence}</td>
                 <td className="px-2 py-1"><Badge className={cn("text-[9px] px-1 py-0", TLP_BADGE[i.tlp])}>{i.tlp}</Badge></td>
                 <td className="px-2 py-1">{i.recommendedAction ?? "—"}</td>
+                {editMode && (
+                  <td className="px-2 py-1">
+                    <Button type="button" size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={() => actions.del.mutate({ path: "iocs", id: i.id })}>
+                      <Trash2 size={13} />
+                    </Button>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
     </div>
+  );
+}
+
+function AddIocForm({ a, onAdd, saving }: { a: ThreatActorFullDTO; onAdd: (body: Record<string, any>) => void; saving?: boolean }) {
+  const [iocType, setIocType] = useState(String(IOC_TYPES[0]));
+  const [value, setValue] = useState("");
+  const [firstSeen, setFirstSeen] = useState("");
+  const [lastConfirmed, setLastConfirmed] = useState("");
+  const [confidence, setConfidence] = useState(String(WEP_CONFIDENCE[2] ?? WEP_CONFIDENCE[0]));
+  const [tlp, setTlp] = useState<TlpLevel>("AMBER");
+  const [source, setSource] = useState("");
+  const [mitreTtps, setMitreTtps] = useState("");
+  const [recommendedAction, setRecommendedAction] = useState("");
+  const ttpSuggestions = a.ttps.map(tapTtpId);
+  return (
+    <Card className="p-3 border-dashed">
+      <div className="text-sm font-semibold mb-2">Add indicator</div>
+      <div className="grid gap-2 md:grid-cols-4">
+        <Select value={iocType} onValueChange={setIocType}>
+          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectContent>{IOC_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
+        </Select>
+        <Input className="md:col-span-3" value={value} onChange={(e) => setValue(e.target.value)} placeholder="Indicator value" />
+        <BrandedDateTimePicker value={firstSeen} onChange={(next) => setFirstSeen(next ?? "")} placeholder="First seen" />
+        <BrandedDateTimePicker value={lastConfirmed} onChange={(next) => setLastConfirmed(next ?? "")} placeholder="Last confirmed" />
+        <Select value={confidence} onValueChange={setConfidence}>
+          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectContent>{WEP_CONFIDENCE.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+        </Select>
+        <Select value={tlp} onValueChange={(v) => setTlp(v as TlpLevel)}>
+          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectContent>{TLP_LEVELS.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
+        </Select>
+        <Input value={source} onChange={(e) => setSource(e.target.value)} placeholder="Source" />
+        <Input value={mitreTtps} onChange={(e) => setMitreTtps(e.target.value)} placeholder={`MITRE TTPs${ttpSuggestions.length ? ` e.g. ${ttpSuggestions[0]}` : ""}`} />
+        <Input className="md:col-span-2" value={recommendedAction} onChange={(e) => setRecommendedAction(e.target.value)} placeholder="Recommended action" />
+        <Button type="button" disabled={saving || !value.trim()} onClick={() => {
+          onAdd({ iocType, value: value.trim(), firstSeen: firstSeen || null, lastConfirmed: lastConfirmed || null, confidence, tlp, source: source || null, mitreTtps: mitreTtps.split(",").map((s) => s.trim()).filter(Boolean), recommendedAction: recommendedAction || null });
+          setValue(""); setSource(""); setMitreTtps(""); setRecommendedAction("");
+        }}>
+          {saving ? <Loader2 size={13} className="mr-1 animate-spin" /> : <Plus size={13} className="mr-1" />} Add IOC
+        </Button>
+      </div>
+    </Card>
   );
 }
 
@@ -3354,15 +4390,17 @@ function StixTab({ a }: { a: ThreatActorFullDTO }) {
 }
 
 function RefsTab({ a }: { a: ThreatActorFullDTO }) {
-  if (a.references.length === 0) {
-    return <p className="text-sm text-muted-foreground italic">No references — run enrichment.</p>;
-  }
+  const { editMode } = useEditCtx();
+  const actions = useTapSubresourceActions(a);
   return (
-    <ol className="space-y-2 list-none">
+    <div className="space-y-3">
+      {editMode && <AddReferenceForm onAdd={(body) => actions.post.mutate({ path: "references", body })} saving={actions.post.isPending} />}
+      {a.references.length === 0 && <p className="text-sm text-muted-foreground italic">No references — run enrichment or add source reporting.</p>}
+      <ol className="space-y-2 list-none">
       {a.references.map((r) => (
         <li key={r.id} className="text-sm flex items-start gap-2">
           <span className="font-mono text-[10px] text-muted-foreground shrink-0 w-6">[{r.refNum}]</span>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="font-medium">{r.title}</div>
             <div className="text-xs text-muted-foreground flex flex-wrap gap-2">
               {r.sourceType && <span>{r.sourceType}</span>}
@@ -3371,9 +4409,48 @@ function RefsTab({ a }: { a: ThreatActorFullDTO }) {
               {r.archiveUrl && <a href={r.archiveUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline inline-flex items-center gap-0.5">archive <ExternalLink size={10} /></a>}
             </div>
           </div>
+          {editMode && (
+            <Button type="button" size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={() => actions.del.mutate({ path: "references", id: r.id })}>
+              <Trash2 size={13} />
+            </Button>
+          )}
         </li>
       ))}
-    </ol>
+      </ol>
+    </div>
+  );
+}
+
+function AddReferenceForm({ onAdd, saving }: { onAdd: (body: Record<string, any>) => void; saving?: boolean }) {
+  const [title, setTitle] = useState("");
+  const [sourceType, setSourceType] = useState(SOURCE_TYPE_OPTIONS[0]);
+  const [date, setDate] = useState("");
+  const [url, setUrl] = useState("");
+  const [archiveUrl, setArchiveUrl] = useState("");
+  const [confidential, setConfidential] = useState(false);
+  return (
+    <Card className="p-3 border-dashed">
+      <div className="text-sm font-semibold mb-2">Add source</div>
+      <div className="grid gap-2 md:grid-cols-2">
+        <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Source title" />
+        <Select value={sourceType} onValueChange={(v) => { setSourceType(v as any); if (v === "Confidential") setConfidential(true); }}>
+          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectContent>{SOURCE_TYPE_OPTIONS.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+        </Select>
+        <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        <label className="flex items-center gap-2 text-xs text-muted-foreground rounded-md border px-3">
+          <Checkbox checked={confidential} onCheckedChange={(v) => setConfidential(!!v)} /> Confidential source
+        </label>
+        <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="Source URL" disabled={confidential} />
+        <Input value={archiveUrl} onChange={(e) => setArchiveUrl(e.target.value)} placeholder="Archive URL" disabled={confidential} />
+        <Button className="md:col-span-2" type="button" disabled={saving || !title.trim()} onClick={() => {
+          onAdd({ title: title.trim(), sourceType: confidential ? "Confidential" : sourceType, date: date || null, url: confidential ? null : (url || null), archiveUrl: confidential ? null : (archiveUrl || null) });
+          setTitle(""); setUrl(""); setArchiveUrl(""); setDate("");
+        }}>
+          {saving ? <Loader2 size={13} className="mr-1 animate-spin" /> : <Plus size={13} className="mr-1" />} Add source
+        </Button>
+      </div>
+    </Card>
   );
 }
 

@@ -142,19 +142,15 @@ async function runAutoAnalyzeForTenant(tid: string): Promise<void> {
       return;
     }
 
-    // Profile context once.
-    const profile = (storage as any).getClientProfile ? (storage as any).getClientProfile(tid) : null;
-    const clientProfile = profile
-      ? {
-          industries: profile.industries || [],
-          geos: profile.geos || [],
-          technologies: profile.monitoredTechnologies || profile.technologies || [],
-        }
-      : { industries: [], geos: [], technologies: [] };
+    const clientProfile = {
+      industries: ["security-operations"],
+      geos: ["Global"],
+      technologies: ["osint", "threat-intelligence", "detection-engineering"],
+    };
 
     // Pre-fetch source bodies for the whole batch (concurrent under the hood
     // via sourceFetch's existing batching).
-    const fetched = await fetchSourcesBatch(batch.map((f: OsintFindingDTO) => f.url));
+    const fetched = await fetchSourcesBatch(batch.map((f: OsintFindingDTO) => f.url), { includeReferences: true, maxReferenceLinks: 5 });
     const sourceByIdx = new Map<number, string | null>();
     fetched.forEach((r, i) => sourceByIdx.set(i, r.content));
 

@@ -18,7 +18,7 @@ const allTenants = args.has("--all-tenants");
 const limitArg = process.argv.find((a) => a.startsWith("--limit="));
 const limit = limitArg ? Math.max(1, Number(limitArg.split("=")[1]) || 0) : Infinity;
 const tenantArg = process.argv.find((a) => a.startsWith("--tenant="));
-const tenantSlug = tenantArg ? tenantArg.split("=")[1] : "acme-bank";
+const tenantSlug = tenantArg ? tenantArg.split("=")[1] : "batchone-workspace";
 
 const db = new Database("data.db");
 const PORTRAITS_DIR = resolve(process.cwd(), "data", "portraits");

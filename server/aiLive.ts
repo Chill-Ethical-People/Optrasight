@@ -16,11 +16,17 @@
  * error (missing key, HTTP failure, timeout, JSON parse failure). The caller
  * is expected to fall back to its deterministic mock so the demo never crashes.
  */
-import { spawnSync } from "node:child_process";
 import { createDecipheriv, createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import type { AiProvider } from "@shared/schema";
+import type { AiProvider, AiProviderKind } from "@shared/schema";
+import { aiProviderBaseUrlSyncFailure } from "./aiProviderSecurity";
+import { aiProviderProtocolArgs, curlRequestSync, type CurlHttpResult } from "./httpClient";
+
+const GEMINI_SAFE_FALLBACK_MODEL = "gemini-flash-latest";
+const OPENAI_PORTRAIT_MODEL = "gpt-image-2";
+const GEMINI_PORTRAIT_MODEL = "gemini-3.1-flash-image";
+const GEMINI_PORTRAIT_FALLBACK_MODELS = ["gemini-3.1-flash-image", "gemini-3-pro-image"] as const;
 
 function loadKekForDecrypt(): Buffer {
   const env = process.env.OPTRASIGHT_KEY_ENCRYPTION_KEY || process.env.OPTRASIGHT_KEK;
@@ -54,6 +60,20 @@ function dec(b64: string | null | undefined): string | null {
   } catch { return null; }
 }
 
+function normaliseProviderApiKey(kind: AiProviderKind, raw: string | null): string | null {
+  if (!raw) return raw;
+  let key = raw.trim();
+  key = key.replace(/^["']|["']$/g, "").trim();
+  key = key.replace(/^\{(.+)\}$/s, "$1").trim();
+  key = key.replace(/^bearer\s+/i, "").trim();
+  if (kind === "gemini") {
+    key = key.replace(/^x-goog-api-key\s*:\s*/i, "").trim();
+    const m = key.match(/\bAIza[0-9A-Za-z_-]{20,}\b/);
+    if (m) return m[0];
+  }
+  return key;
+}
+
 // Default 12-second wall-clock timeout for most AI calls. The chat triage /
 // deep-dive endpoints (v2.15) override this to 90s because they ship much
 // larger payloads (full pre-fetched article bodies) and produce much longer
@@ -66,37 +86,30 @@ const TIMEOUT_SECONDS = 12;
 // browser made already returned in milliseconds.
 const MAX_TIMEOUT_SECONDS = 600;
 
-interface CurlResult { ok: boolean; status: number; body: string; error?: string }
+type CurlResult = Omit<CurlHttpResult, "latencyMs">;
 
 /** Run curl synchronously. Returns body and HTTP status. */
-function curlPost(url: string, headers: Record<string, string>, body: string, timeoutSeconds?: number): CurlResult {
+function curlPost(
+  url: string,
+  headers: Record<string, string>,
+  body: string,
+  timeoutSeconds?: number,
+  opts?: { httpVersion?: "1.1" | "auto"; protocolGuard?: boolean },
+): CurlResult {
   const t = Math.max(1, Math.min(MAX_TIMEOUT_SECONDS, timeoutSeconds ?? TIMEOUT_SECONDS));
-  const args: string[] = [
-    "-sS",                            // silent + show errors
-    "--http1.1",
-    "-X", "POST",
-    "--max-time", String(t),
-    "-w", "\n__BG_HTTP_STATUS__:%{http_code}",
-    "-H", "Content-Type: application/json",
-  ];
-  for (const [k, v] of Object.entries(headers)) {
-    args.push("-H", `${k}: ${v}`);
-  }
-  args.push("--data-binary", "@-");
-  args.push(url);
-  const r = spawnSync("curl", args, { input: body, encoding: "utf8", timeout: (t + 2) * 1000 });
-  if (r.error) return { ok: false, status: 0, body: "", error: r.error.message };
-  if (r.status !== 0 && !r.stdout) return { ok: false, status: 0, body: "", error: r.stderr || `curl exit ${r.status}` };
-  const out = r.stdout || "";
-  const marker = out.lastIndexOf("\n__BG_HTTP_STATUS__:");
-  let status = 0;
-  let payload = out;
-  if (marker >= 0) {
-    status = parseInt(out.slice(marker + "\n__BG_HTTP_STATUS__:".length), 10) || 0;
-    payload = out.slice(0, marker);
-  }
-  const ok = status >= 200 && status < 300;
-  return { ok, status, body: payload, error: ok ? undefined : (r.stderr || `HTTP ${status}`) };
+  const { latencyMs: _latencyMs, ...result } = curlRequestSync({
+    method: "POST",
+    url,
+    headers,
+    body,
+    timeoutSeconds: t,
+    maxTimeoutSeconds: MAX_TIMEOUT_SECONDS,
+    contentType: "application/json",
+    protocolArgs: opts?.protocolGuard === false ? undefined : aiProviderProtocolArgs(url),
+    statusMarker: "__BG_HTTP_STATUS__",
+    httpVersion: opts?.httpVersion,
+  });
+  return result;
 }
 
 function isGemini3Model(model: string): boolean {
@@ -105,12 +118,85 @@ function isGemini3Model(model: string): boolean {
 
 function geminiApiModel(model: string): string {
   const m = (model || "").trim();
-  if (/^gemini-3\.5-flash$/i.test(m) || /^gemini-3-flash-preview$/i.test(m)) return "gemini-2.5-flash";
-  return m || "gemini-2.5-flash";
+  if (
+    !m
+    || /^gemini-1(?:\.|$|-)/i.test(m)
+    || /^gemini-2(?:\.|$|-)/i.test(m)
+    || /^gemini-pro$/i.test(m)
+  ) return "gemini-flash-latest";
+  return m;
 }
 
 function supportsGeminiUrlContext(model: string): boolean {
-  return /^gemini-3(?:\.5)?-flash/i.test(model) || /^gemini-2\.5-(?:pro|flash)/i.test(model);
+  return /^gemini-(?:flash-latest|3\.5-flash|3\.1-pro|3\.1-flash-lite|3-flash|2\.5-(?:pro|flash|flash-lite))/i.test(geminiApiModel(model));
+}
+
+function geminiFallbackModel(model: string): string | null {
+  const effective = geminiApiModel(model);
+  if (effective === GEMINI_SAFE_FALLBACK_MODEL) return null;
+  return GEMINI_SAFE_FALLBACK_MODEL;
+}
+
+function geminiConnectivityAttempts(model: string): string[] {
+  const fallback = geminiFallbackModel(model);
+  return Array.from(new Set([model, model, fallback].filter(Boolean) as string[]));
+}
+
+function isRetryableGeminiTransportFailure(r: CurlResult): boolean {
+  return r.status === 0 || r.status === 503 || /timed out|timeout|empty reply|connection reset/i.test(r.error || "");
+}
+
+function providerApiModel(kind: AiProviderKind, model: string): string {
+  const m = (model || "").trim();
+  if (kind === "gemini") return geminiApiModel(m);
+  const key = m.toLowerCase();
+  if (kind === "openai" || kind === "azure-openai") {
+    if (/^gpt-5\./.test(key) || key === "gpt-5") return "gpt-4.1-mini";
+    return m || "gpt-4.1-mini";
+  }
+  if (kind === "anthropic") {
+    const aliases: Record<string, string> = {
+      "claude-opus-4-7": "claude-opus-4-1-20250805",
+      "claude-sonnet-4-6": "claude-sonnet-4-20250514",
+      "claude-haiku-4-5": "claude-3-5-haiku-20241022",
+      "claude-3-5-sonnet": "claude-3-7-sonnet-20250219",
+      "claude-3-5-sonnet-latest": "claude-3-7-sonnet-20250219",
+      "claude-3-5-haiku-latest": "claude-3-5-haiku-20241022",
+    };
+    return aliases[key] || m || "claude-sonnet-4-20250514";
+  }
+  if (kind === "deepseek") {
+    if (key === "deepseek-v4-pro") return "deepseek-reasoner";
+    if (key === "deepseek-v4-flash") return "deepseek-chat";
+    return m || "deepseek-chat";
+  }
+  if (kind === "perplexity") {
+    if (key === "sonar-large") return "sonar-pro";
+    return m || "sonar-pro";
+  }
+  if (kind === "kimi") {
+    if (key === "kimi-latest") return "moonshot-v1-128k";
+    if (key === "kimi-k2-instruct") return "kimi-k2-0711-preview";
+    return m || "moonshot-v1-128k";
+  }
+  return m;
+}
+
+function portraitModelForProvider(kind: AiProviderKind, model: string): string {
+  const m = (model || "").trim();
+  if (kind === "openai" || kind === "azure-openai") {
+    return /^gpt-image-/i.test(m) ? m : OPENAI_PORTRAIT_MODEL;
+  }
+  if (kind === "gemini") {
+    return /image/i.test(m) ? m : GEMINI_PORTRAIT_MODEL;
+  }
+  return m;
+}
+
+function portraitModelAttempts(kind: AiProviderKind, model: string): string[] {
+  const primary = portraitModelForProvider(kind, model);
+  if (kind === "gemini") return Array.from(new Set([primary, ...GEMINI_PORTRAIT_FALLBACK_MODELS]));
+  return [primary];
 }
 
 function geminiThinkingLevel(model: string, images: LiveChatImage[], useUrlContext: boolean): "low" | "medium" | "high" {
@@ -120,6 +206,18 @@ function geminiThinkingLevel(model: string, images: LiveChatImage[], useUrlConte
 
 function hasHttpUrl(text: string): boolean {
   return /\bhttps?:\/\/[^\s<>"'`]+/i.test(text);
+}
+
+function extractGeminiText(parsed: any): string | null {
+  const candidates = Array.isArray(parsed?.candidates) ? parsed.candidates : [];
+  const chunks: string[] = [];
+  for (const candidate of candidates) {
+    const parts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
+    for (const part of parts) {
+      if (typeof part?.text === "string" && part.text.trim()) chunks.push(part.text);
+    }
+  }
+  return chunks.length > 0 ? chunks.join("") : null;
 }
 
 /**
@@ -139,37 +237,26 @@ function hasHttpUrl(text: string): boolean {
  */
 function curlPostStreaming(url: string, headers: Record<string, string>, body: string, timeoutSeconds?: number): CurlResult {
   const t = Math.max(1, Math.min(MAX_TIMEOUT_SECONDS, timeoutSeconds ?? TIMEOUT_SECONDS));
-  const args: string[] = [
-    "-sS",
-    "--http1.1",
-    "-X", "POST",
-    "--max-time", String(t),
-    "--no-buffer",
-    "-w", "\n__BG_HTTP_STATUS__:%{http_code}",
-    "-H", "Content-Type: application/json",
-    "-H", "Accept: text/event-stream",
-  ];
-  for (const [k, v] of Object.entries(headers)) {
-    args.push("-H", `${k}: ${v}`);
-  }
-  args.push("--data-binary", "@-");
-  args.push(url);
-  const r = spawnSync("curl", args, { input: body, encoding: "utf8", timeout: (t + 2) * 1000, maxBuffer: 64 * 1024 * 1024 });
-  if (r.error) return { ok: false, status: 0, body: "", error: r.error.message };
-  if (r.status !== 0 && !r.stdout) return { ok: false, status: 0, body: "", error: r.stderr || `curl exit ${r.status}` };
-
-  const raw = r.stdout || "";
-  const marker = raw.lastIndexOf("\n__BG_HTTP_STATUS__:");
-  let status = 0;
-  let stream = raw;
-  if (marker >= 0) {
-    status = parseInt(raw.slice(marker + "\n__BG_HTTP_STATUS__:".length), 10) || 0;
-    stream = raw.slice(0, marker);
-  }
+  const { latencyMs: _latencyMs, ...r } = curlRequestSync({
+    method: "POST",
+    url,
+    headers,
+    body,
+    timeoutSeconds: t,
+    maxTimeoutSeconds: MAX_TIMEOUT_SECONDS,
+    contentType: "application/json",
+    accept: "text/event-stream",
+    protocolArgs: aiProviderProtocolArgs(url),
+    noBuffer: true,
+    maxBuffer: 64 * 1024 * 1024,
+    statusMarker: "__BG_HTTP_STATUS__",
+  });
+  const status = r.status;
+  const stream = r.body;
   const ok = status >= 200 && status < 300;
 
   // If the call failed the body is usually a plain JSON error envelope.
-  if (!ok) return { ok, status, body: stream, error: r.stderr || `HTTP ${status}` };
+  if (!ok) return { ok, status, body: stream, error: r.error || `HTTP ${status}` };
 
   // Assemble content from every `data: { ... }` SSE chunk.
   const contentChunks: string[] = [];
@@ -213,29 +300,17 @@ function curlPostStreaming(url: string, headers: Record<string, string>, body: s
   return { ok: true, status, body: JSON.stringify(envelope) };
 }
 
-function curlGet(url: string, headers: Record<string, string>): CurlResult {
-  const args: string[] = [
-    "-sS",
-    "--http1.1",
-    "--max-time", String(TIMEOUT_SECONDS),
-    "-w", "\n__BG_HTTP_STATUS__:%{http_code}",
-  ];
-  for (const [k, v] of Object.entries(headers)) {
-    args.push("-H", `${k}: ${v}`);
-  }
-  args.push(url);
-  const r = spawnSync("curl", args, { encoding: "utf8", timeout: (TIMEOUT_SECONDS + 2) * 1000 });
-  if (r.error) return { ok: false, status: 0, body: "", error: r.error.message };
-  const out = r.stdout || "";
-  const marker = out.lastIndexOf("\n__BG_HTTP_STATUS__:");
-  let status = 0;
-  let payload = out;
-  if (marker >= 0) {
-    status = parseInt(out.slice(marker + "\n__BG_HTTP_STATUS__:".length), 10) || 0;
-    payload = out.slice(0, marker);
-  }
-  const ok = status >= 200 && status < 300;
-  return { ok, status, body: payload, error: ok ? undefined : (r.stderr || `HTTP ${status}`) };
+function curlGet(url: string, headers: Record<string, string>, opts?: { httpVersion?: "1.1" | "auto"; protocolGuard?: boolean }): CurlResult {
+  const { latencyMs: _latencyMs, ...result } = curlRequestSync({
+    method: "GET",
+    url,
+    headers,
+    timeoutSeconds: TIMEOUT_SECONDS,
+    protocolArgs: opts?.protocolGuard === false ? undefined : aiProviderProtocolArgs(url),
+    statusMarker: "__BG_HTTP_STATUS__",
+    httpVersion: opts?.httpVersion,
+  });
+  return result;
 }
 
 // ---------- per-provider base URL resolution ----------
@@ -449,10 +524,10 @@ export function liveChatJson(provider: AiProvider, opts: LiveChatOptions): Recor
  *  silent mock fallback. */
 export function liveChatJsonDiagnostic(provider: AiProvider, opts: LiveChatOptions): LiveChatDiagnostic {
   const start = Date.now();
-  const kind = provider.provider;
-  const apiKey = dec(provider.apiKeyEnc);
+  const kind = provider.provider as AiProviderKind;
+  const apiKey = normaliseProviderApiKey(kind, dec(provider.apiKeyEnc));
   const base = stripTrailingSlash(provider.baseUrl || defaultBaseUrl(kind));
-  const model = provider.model;
+  const model = providerApiModel(kind, provider.model);
   const temperature = opts.temperature ?? 0.3;
   // v2.26 — unbounded token budget. When the caller passes maxTokens we honor
   // it verbatim (no upper cap); when omitted we don't send max_tokens at all
@@ -468,6 +543,8 @@ export function liveChatJsonDiagnostic(provider: AiProvider, opts: LiveChatOptio
   // Ollama is the only family that can run keyless; everyone else needs a key.
   if (!apiKey && kind !== "ollama") return out("missing API key on configured provider");
   if (!base) return out("provider has no base URL");
+  const baseUrlFailure = aiProviderBaseUrlSyncFailure(base);
+  if (baseUrlFailure) return out(baseUrlFailure);
   if (!model) return out("provider has no model configured");
 
   try {
@@ -509,8 +586,8 @@ export function liveChatJsonDiagnostic(provider: AiProvider, opts: LiveChatOptio
       if (kind === "openai" || kind === "deepseek" || kind === "azure-openai" || kind === "kimi") {
         requestBody.response_format = { type: "json_object" };
       }
-      // v2.28 — switch long-running calls (chat/triage, chat/deep-dive,
-      // exercise/generate; all pass timeoutSeconds > 60) to SERVER-SENT
+      // v2.28 — switch long-running calls (CIRT triage, deep-dive, TAP
+      // enrichment; all pass timeoutSeconds > 60) to SERVER-SENT
       // EVENTS streaming. DeepSeek's non-streaming endpoint enforces a hard
       // ~60s edge timeout that closes the connection with HTTP 200 and a
       // single "\n" byte when the reasoning model is still thinking. With
@@ -618,9 +695,9 @@ export function liveChatJsonDiagnostic(provider: AiProvider, opts: LiveChatOptio
     }
 
     if (kind === "gemini") {
-      const effectiveModel = geminiApiModel(model);
-      const url = `${base}/v1beta/models/${encodeURIComponent(effectiveModel)}:generateContent?key=${encodeURIComponent(apiKey || "")}`;
-      const headers: Record<string, string> = {};
+      const effectiveModel = providerApiModel(kind, model);
+      const url = `${base}/v1beta/models/${encodeURIComponent(effectiveModel)}:generateContent`;
+      const headers: Record<string, string> = { "X-goog-api-key": apiKey || "" };
       const geminiImages = filterImages(opts.images);
       const canUseUrlContext = supportsGeminiUrlContext(effectiveModel) && hasHttpUrl(opts.user);
       const geminiParts: any[] = [{
@@ -647,21 +724,22 @@ export function liveChatJsonDiagnostic(provider: AiProvider, opts: LiveChatOptio
         generationConfig,
       };
       if (canUseUrlContext) requestBody.tools = [{ url_context: {} }];
-      let r = curlPost(url, headers, JSON.stringify(requestBody), timeoutSeconds);
-      if (!r.ok && r.status === 503 && effectiveModel !== "gemini-2.5-flash-lite") {
-        const retryModel = "gemini-2.5-flash-lite";
-        const retryUrl = `${base}/v1beta/models/${encodeURIComponent(retryModel)}:generateContent?key=${encodeURIComponent(apiKey || "")}`;
-        r = curlPost(retryUrl, headers, JSON.stringify(requestBody), timeoutSeconds);
+      let r = curlPost(url, headers, JSON.stringify(requestBody), timeoutSeconds, { httpVersion: "auto" });
+      if (!r.ok && isRetryableGeminiTransportFailure(r)) {
+        const retryModel = geminiFallbackModel(effectiveModel);
+        if (!retryModel) {
+          const preview = (r.body || "").slice(0, 400);
+          return out(`HTTP ${r.status || "network"}${r.error ? " — " + r.error : ""}`, r.status, preview);
+        }
+        const retryUrl = `${base}/v1beta/models/${encodeURIComponent(retryModel)}:generateContent`;
+        r = curlPost(retryUrl, headers, JSON.stringify(requestBody), timeoutSeconds, { httpVersion: "auto" });
       }
       const preview = (r.body || "").slice(0, 400);
       if (!r.ok) return out(`HTTP ${r.status || "network"}${r.error ? " — " + r.error : ""}`, r.status, preview);
       const parsed = tryParseJsonObject(r.body);
       if (!parsed) return out("gemini returned non-JSON envelope", r.status, preview);
-      const parts = parsed.candidates?.[0]?.content?.parts;
-      const text = Array.isArray(parts)
-        ? parts.map((p: any) => (typeof p?.text === "string" ? p.text : "")).join("")
-        : null;
-      if (typeof text !== "string") return out("gemini response missing candidates[0].content.parts[0].text", r.status, preview);
+      const text = extractGeminiText(parsed);
+      if (typeof text !== "string") return out("gemini response missing candidate text", r.status, preview);
       const json = tryParseJsonObject(text);
       if (!json) return out("model response was not valid JSON", r.status, text.slice(0, 400));
       return out("ok", r.status, text.slice(0, 400), json);
@@ -687,8 +765,8 @@ export interface LivePingResult {
  *   • Gemini: GET /v1beta/models?key=… (lists models)
  */
 export function livePing(provider: AiProvider): LivePingResult {
-  const kind = provider.provider;
-  const apiKey = dec(provider.apiKeyEnc);
+  const kind = provider.provider as AiProviderKind;
+  const apiKey = normaliseProviderApiKey(kind, dec(provider.apiKeyEnc));
   const base = stripTrailingSlash(provider.baseUrl || defaultBaseUrl(kind));
 
   if (!apiKey && kind !== "ollama") {
@@ -696,6 +774,10 @@ export function livePing(provider: AiProvider): LivePingResult {
   }
   if (!base) {
     return { ok: false, latencyMs: 0, message: `${provider.label}: missing base URL` };
+  }
+  const baseUrlFailure = aiProviderBaseUrlSyncFailure(base);
+  if (baseUrlFailure) {
+    return { ok: false, latencyMs: 0, message: `${provider.label}: ${baseUrlFailure}` };
   }
 
   const t0 = Date.now();
@@ -724,11 +806,9 @@ export function livePing(provider: AiProvider): LivePingResult {
         }));
         const lat = Date.now() - t1;
         if (probe.ok) return { ok: true, latencyMs: lat, message: `${provider.label} (${provider.model}) — connected via chat` };
-        const why = (probe.body || probe.error || "no response").slice(0, 180).replace(/\s+/g, " ").trim();
-        return { ok: false, latencyMs: lat, message: `${provider.label}: ${probe.status ? `HTTP ${probe.status}` : "network"}${why ? ` — ${why}` : ""}` };
+        return { ok: false, latencyMs: lat, message: `${provider.label}: ${probe.status ? `HTTP ${probe.status}` : "network"}${probe.error ? ` — ${probe.error}` : ""}` };
       }
-      const why = (r.body || r.error || "no response").slice(0, 180).replace(/\s+/g, " ").trim();
-      return { ok: false, latencyMs, message: `${provider.label}: ${r.status ? `HTTP ${r.status}` : "network"}${why ? ` — ${why}` : ""}` };
+      return { ok: false, latencyMs, message: `${provider.label}: ${r.status ? `HTTP ${r.status}` : "network"}${r.error ? ` — ${r.error}` : ""}` };
     }
 
     if (kind === "anthropic") {
@@ -749,33 +829,45 @@ export function livePing(provider: AiProvider): LivePingResult {
     }
 
     if (kind === "gemini") {
-      const effectiveModel = geminiApiModel(provider.model);
-      const url = `${base}/v1beta/models/${encodeURIComponent(effectiveModel)}:generateContent?key=${encodeURIComponent(apiKey || "")}`;
+      const effectiveModel = providerApiModel(kind, provider.model);
+      const modelAttempts = geminiConnectivityAttempts(effectiveModel);
+      // Keep this probe aligned with Google's REST quickstart shape. A
+      // connection test should prove auth/model reachability; task-specific
+      // JSON validation happens in liveChatJsonDiagnostic().
       const body = JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: "Output only this JSON object and no prose: {\"ok\":true}" }] }],
+        contents: [{ parts: [{ text: "Explain how AI works in a few words" }] }],
         generationConfig: {
-          responseMimeType: "application/json",
-          maxOutputTokens: 128,
-          ...(isGemini3Model(effectiveModel)
-            ? { thinkingConfig: { thinkingLevel: geminiThinkingLevel(effectiveModel, [], false) } }
-            : { temperature: 0 }),
+          maxOutputTokens: 64,
+          temperature: 0,
         },
       });
-      const r = curlPost(url, {}, body, 30);
-      const latencyMs = Date.now() - t0;
-      if (r.ok) {
-        const parsed = tryParseJsonObject(r.body);
-        const text = Array.isArray(parsed?.candidates?.[0]?.content?.parts)
-          ? parsed.candidates[0].content.parts.map((p: any) => (typeof p?.text === "string" ? p.text : "")).join("")
-          : "";
-        const json = tryParseJsonObject(text);
-        if (json) {
-          const modelLabel = effectiveModel === provider.model ? provider.model : `${provider.model} -> ${effectiveModel}`;
-          return { ok: true, latencyMs, message: `${provider.label} (${modelLabel}) — connected via generateContent` };
+      let lastFailure: CurlResult | null = null;
+      for (const attemptModel of modelAttempts) {
+        const url = `${base}/v1beta/models/${encodeURIComponent(attemptModel)}:generateContent`;
+        const r = curlPost(url, { "X-goog-api-key": apiKey || "" }, body, 18, { httpVersion: "auto" });
+        const latencyMs = Date.now() - t0;
+        if (r.ok) {
+          const parsed = tryParseJsonObject(r.body);
+          const text = parsed ? (extractGeminiText(parsed) ?? "") : "";
+          if (text.trim().length > 0) {
+            const modelLabel = attemptModel === provider.model
+              ? provider.model
+              : `${provider.model} -> ${attemptModel}`;
+            return { ok: true, latencyMs, message: `${provider.label} (${modelLabel}) — connected via generateContent` };
+          }
+          const finishReason = String(parsed?.candidates?.[0]?.finishReason || "");
+          if (finishReason === "MAX_TOKENS") {
+            lastFailure = r;
+            continue;
+          }
+          return { ok: false, latencyMs, message: `${provider.label}: HTTP ${r.status} but response had no candidate text` };
         }
+        lastFailure = r;
+        if (!isRetryableGeminiTransportFailure(r)) break;
       }
-      const why = (r.body || r.error || "no response").slice(0, 180).replace(/\s+/g, " ").trim();
-      return { ok: false, latencyMs, message: `${provider.label}: ${r.status ? `HTTP ${r.status}` : "network"}${why ? ` — ${why}` : ""}` };
+      const latencyMs = Date.now() - t0;
+      const r = lastFailure;
+      return { ok: false, latencyMs, message: `${provider.label}: ${r?.status ? `HTTP ${r.status}` : "network"}${r?.error ? ` — ${r.error}` : ""}` };
     }
   } catch (e: any) {
     return { ok: false, latencyMs: Date.now() - t0, message: `${provider.label}: ${e?.message ?? String(e)}` };
@@ -787,4 +879,105 @@ export function livePing(provider: AiProvider): LivePingResult {
 export function providerHasUsableKey(provider: AiProvider): boolean {
   if (provider.provider === "ollama") return true;
   return !!dec(provider.apiKeyEnc);
+}
+
+export interface LiveImageResult {
+  ok: boolean;
+  status?: number;
+  mimeType?: string;
+  data?: Buffer;
+  message: string;
+}
+
+function firstImageFromGeminiEnvelope(parsed: any): { mimeType: string; dataBase64: string } | null {
+  const candidates = Array.isArray(parsed?.candidates) ? parsed.candidates : [];
+  for (const candidate of candidates) {
+    const parts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
+    for (const part of parts) {
+      const inline = part?.inlineData ?? part?.inline_data;
+      const data = inline?.data;
+      if (typeof data === "string" && data.trim()) {
+        return {
+          mimeType: String(inline?.mimeType ?? inline?.mime_type ?? "image/png"),
+          dataBase64: data,
+        };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Generate one TAP portrait image through the encrypted AI Setup provider row.
+ * Supported in BatchOne:
+ *   - OpenAI Image API: gpt-image-2 / gpt-image-1.5 / gpt-image-1
+ *   - Gemini native image models: gemini-3.1-flash-image / gemini-3-pro-image
+ *
+ * Text-only providers return a clear unsupported message so the UI can route
+ * them to TAP enrichment without implying portrait capability.
+ */
+export function liveGenerateImage(provider: AiProvider, prompt: string, opts?: { timeoutSeconds?: number }): LiveImageResult {
+  const kind = provider.provider as AiProviderKind;
+  const apiKey = normaliseProviderApiKey(kind, dec(provider.apiKeyEnc));
+  const base = stripTrailingSlash(provider.baseUrl || defaultBaseUrl(kind));
+  const timeoutSeconds = opts?.timeoutSeconds ?? 300;
+
+  if (!apiKey) return { ok: false, message: `${provider.label}: missing API key` };
+  const baseUrlFailure = aiProviderBaseUrlSyncFailure(base);
+  if (baseUrlFailure) return { ok: false, message: `${provider.label}: ${baseUrlFailure}` };
+
+  if (kind === "openai" || kind === "azure-openai") {
+    const model = portraitModelForProvider(kind, provider.model);
+    const url = kind === "azure-openai" && base
+      ? `${base}/images/generations`
+      : "https://api.openai.com/v1/images/generations";
+    const headers: Record<string, string> = { Authorization: `Bearer ${apiKey}` };
+    const r = curlPost(url, headers, JSON.stringify({
+      model,
+      prompt,
+      n: 1,
+      size: "1024x1024",
+      quality: "medium",
+    }), timeoutSeconds);
+    const preview = (r.body || "").slice(0, 400);
+    if (!r.ok) return { ok: false, status: r.status, message: `${provider.label}: HTTP ${r.status || "network"}${r.error ? ` — ${r.error}` : ""}` };
+    const parsed = tryParseJsonObject(r.body);
+    const b64 = parsed?.data?.[0]?.b64_json;
+    if (typeof b64 !== "string" || !b64.trim()) {
+      return { ok: false, status: r.status, message: `${provider.label}: image response did not include base64 data: ${preview}` };
+    }
+    return { ok: true, status: r.status, mimeType: "image/png", data: Buffer.from(b64, "base64"), message: "ok" };
+  }
+
+  if (kind === "gemini") {
+    let last: CurlResult | null = null;
+    for (const model of portraitModelAttempts(kind, provider.model)) {
+      const url = `${base}/v1/models/${encodeURIComponent(model)}:generateContent`;
+      const r = curlPost(url, { "X-goog-api-key": apiKey }, JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: {
+          responseFormat: {
+            image: {
+              aspectRatio: "1:1",
+              imageSize: "1K",
+            },
+          },
+        },
+      }), timeoutSeconds, { httpVersion: "auto" });
+      last = r;
+      const parsed = tryParseJsonObject(r.body);
+      if (r.ok && parsed) {
+        const image = firstImageFromGeminiEnvelope(parsed);
+        if (image) return { ok: true, status: r.status, mimeType: image.mimeType, data: Buffer.from(image.dataBase64, "base64"), message: `ok (${model})` };
+      }
+      if (!isRetryableGeminiTransportFailure(r) && r.status !== 404 && r.status !== 400) break;
+    }
+    const preview = (last?.body || "").slice(0, 400);
+    if (!last?.ok) return { ok: false, status: last?.status, message: `${provider.label}: HTTP ${last?.status || "network"}${last?.error ? ` — ${last.error}` : ""}` };
+    const parsed = tryParseJsonObject(last.body);
+    if (!parsed) return { ok: false, status: last.status, message: `${provider.label}: image response was not valid JSON` };
+    return { ok: false, status: last.status, message: `${provider.label}: image response did not include inline image data: ${preview}` };
+  }
+
+  return { ok: false, message: `${provider.label}: ${kind} is text-only for BatchOne TAP portrait generation` };
 }

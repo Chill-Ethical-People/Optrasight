@@ -1,131 +1,228 @@
-# OptraSight
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="branding/logos/optrasight-logo-lockup-dark-surface.svg">
+    <img src="branding/logos/optrasight-logo-lockup-light-surface.svg" alt="OptraSight logo" width="440">
+  </picture>
+</p>
 
-OptraSight, also known as 全向預警台, is an evidence-led blue-team platform for OSINT triage, threat actor profiling, and threat-hunting query generation.
+<h1 align="center">OptraSight</h1>
 
-This `main` branch is the **Batch 1 release line**: a single-tenant threat-intel workstation focused on Intel Inbox, Threat Actor Profiles, AI Setup, and Job Control. The full multi-module platform is preserved on `backup/full-platform-before-batch1`.
+<p align="center">Open-source cyber threat intelligence workstation for OSINT triage, threat actor profiles, AI-assisted analysis, and hunt-query generation.</p>
 
-## What It Does
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0"></a>
+  <img src="https://img.shields.io/badge/node-20.x%20%7C%2022.x-339933.svg?logo=node.js&logoColor=white" alt="Node 20.x | 22.x">
+  <img src="https://img.shields.io/badge/stack-React%2018%20%C2%B7%20Express%205%20%C2%B7%20SQLite-4F46E5.svg" alt="Stack">
+</p>
 
-| Area | Capability |
+<p align="center">
+  <img src="branding/logos/chill-ethical-people-lockup-bg-depth.svg" alt="Chill Ethical People" width="260">
+  <br>
+  <sub>Maintained by Kensho under Chill Ethical People · contact@chillethicalpeople.com</sub>
+</p>
+
+OptraSight Batch One is an open-source cyber threat intelligence (CTI) workstation for security analysts, threat-intelligence teams, detection engineers, and managed security service providers. It connects open-source intelligence (OSINT) monitoring, evidence review, threat actor profiles, AI-assisted triage, and defensive hunt-query drafting in one local analyst workspace.
+
+The core workflow is simple: collect public threat signals, review the evidence, enrich actor context, draft hunt logic for SIEM and detection platforms, and keep source traceability visible from intake to action.
+
+Before running a downloaded release archive, verify its checksum and signature with [VERIFYING.md](./VERIFYING.md).
+
+This release is deliberately focused: a clean, inspectable workstation for open-source intelligence review and threat-actor analysis. It is built to be useful on day one, while leaving the product room to grow through future public releases.
+
+## Repository Summary
+
+| Field | Details |
 | --- | --- |
-| OSINT monitoring | Source inventory, finding ingestion, ATT&CK scoping, AI triage, deep-dive analysis, email drafts, and STIX preview. |
-| Threat-hunting queries | AI-generated Splunk/KQL/Sigma-style hunting queries from selected OSINT findings. |
-| Threat Actor Profiles | TAP dossiers with identity, TTPs, Diamond Model, IOCs, campaigns, references, detection coverage, confidence drivers, portraits, DOCX/STIX export, and async AI re-analysis. |
-| AI Setup | Per-tenant AI provider configuration, task assignment, provider tests, Gemini compatibility routing, and provider-aware job visibility. |
-| Job Control | Background AI/OSINT job visibility and cancellation controls for Batch 1 workflows. |
+| Product category | Open-source CTI workstation, OSINT triage tool, threat actor profile manager, AI-assisted threat-intelligence workspace |
+| Primary users | SOC analysts, CTI analysts, detection engineers, incident-response teams, MSSP analysts, security researchers |
+| Core workflow | OSINT finding -> evidence review -> actor context -> hunt-query draft -> analyst action |
+| AI posture | Bring your own provider key; strict mode surfaces real provider errors instead of mock output |
+| Data posture | Public seed data ships in git; runtime databases, API keys, uploaded portraits, and secrets stay local |
+| Deployment model | Local Express + React app backed by SQLite |
 
-## Design Principles
+OptraSight is relevant if you are searching for:
 
-- **Truthful capability states:** unavailable actions are disabled and explain why.
-- **No silent mock fallback in production:** strict mode surfaces real provider/configuration errors.
-- **Traceability first:** OSINT, TAP, ATT&CK techniques, and generated hunt queries remain linked.
-- **Single tenant in Batch 1:** backend tenant scoping remains intact, but tenant switching and global views are hidden from this release line.
-- **In-memory UI state:** the browser app avoids localStorage, sessionStorage, indexedDB, and cookies for application state.
-- **Operational density:** UI favors restrained enterprise controls over marketing-style layouts.
+- an open-source threat intelligence platform for OSINT triage;
+- a cyber threat intelligence tool for threat actor profiles and actor dossiers;
+- an AI-assisted SOC analyst workstation that keeps evidence traceability visible;
+- a hunt-query generator for Splunk SPL, Elastic KQL, Microsoft Sentinel KQL, Google Chronicle YARA-L, Palo Alto Cortex XQL, Sigma, and YARA;
+- a local-first security operations tool for evaluating public threat reports, indicators, tactics, techniques, procedures, and analyst notes.
 
-## Contributors
+## Key Capabilities
 
-See [CONTRIBUTORS.md](./CONTRIBUTORS.md) for maintainer and AI-assisted
-contribution credits, including OpenAI Codex and Anthropic Claude.
+Batch One focuses on the analyst workflow from signal intake to defense-ready output:
 
-## Current UX Notes
+- **Intel Inbox** for parsed OSINT findings, source review, AI triage, CIRT-style deep dive, and finding-level analysis.
+- **Actor Observatory** for Threat Actor Profiles, actor aliases, TTPs, IOCs, campaigns, evidence, portraits, and exports.
+- **Hunting queries** generated from selected intelligence for defensive validation across common SIEM and detection languages.
+- **AI Setup** for your own DeepSeek, OpenAI, Anthropic, or Google Gemini provider keys.
+- **Job Control** for background AI and ingestion work.
+- **Platform Users** for local admin and reviewer accounts.
 
-Recent platform updates include:
+## Release Scope
 
-- Batch 1 release gating narrows `main` to OSINT, TAP, threat-hunting queries, AI Setup, and Job Control.
-- Route-aware and idle-aware cache warming so initial load is faster while preserving warm TAP/OSINT navigation.
-- Gemini compatibility routing for saved `gemini-3.5-flash` rows to Gemini 2.5 where supported.
-- TAP re-analysis as async `threat_actor_enrichment` jobs visible in Job Control and the background jobs tray.
-- Failed provider jobs preserve `provider_label` for easier Job Control triage.
-- Coverage Radar actions are capability-aware: zero-rule techniques show `No detections yet`; observed techniques keep `Open intel` enabled.
-- `#/osint?tech=<TTP>` shows an ATT&CK scope banner with count, remove action, and detection-draft pivot.
-- Investigation detail now uses a standalone modal cockpit rather than a cramped side sheet.
+Batch One is intentionally focused on the analyst workstation experience: Intel Inbox, Actor Observatory, Threat Actor Profiles, Hunting Queries, AI Setup, Job Control, and local platform access controls. It is designed to be useful as a public open-source release while keeping the operating surface clear, inspectable, and easy to run locally.
 
-## Tech Stack
+Some broader platform capabilities are outside this public release. Rather than exposing every internal module or future direction, this repository keeps the Batch One boundary simple: threat-intelligence intake, actor analysis, and evidence-led hunting workflows.
 
-| Layer | Stack |
-| --- | --- |
-| Frontend | React 18, Vite, TypeScript, Tailwind CSS, Radix/shadcn UI, Wouter hash routing, TanStack Query |
-| Backend | Express 5, TypeScript, better-sqlite3, Drizzle ORM, Zod |
-| AI | Live provider dispatcher for DeepSeek, OpenAI, Anthropic, and Google Gemini |
-| Storage | SQLite database under `data/` with tenant-scoped records |
-| Exports | DOCX, PPTX, STIX preview/export, Markdown/HTML-style report flows |
-
-## Repository Layout
-
-```text
-client/
-  src/
-    App.tsx                 Route wiring and providers
-    components/             App shell, command palette, job tray, shared controls
-    components/ui/          Radix/shadcn UI primitives
-    lib/                    auth, query client, warm cache, jobs, formatting
-    pages/                  Product routes
-
-server/
-  index.ts                  Express boot, strict-mode banner, Vite/static serving
-  routes.ts                 HTTP API surface
-  storage.ts                SQLite persistence and business logic
-  aiClient.ts               Task-level AI orchestration
-  aiLive.ts                 Provider-specific live AI calls
-  osintFetcher.ts           OSINT source ingestion
-  osintChat.ts              AI triage/deep-dive jobs
-  backgroundJobs.ts         OSINT scheduler and startup job maintenance
-  tapDocx.ts                TAP DOCX export
-  tapPortrait.ts            TAP portrait generation/upload handling
-  pptxExercise.ts           Exercise PPTX export
-  queryGrammars/            SIEM/rule language guidance used by AI generation
-
-shared/
-  schema.ts                 Drizzle schema, DTOs, and Zod validation
-
-data/
-  data.db                   Runtime SQLite database (git-ignored)
-  public/                   Sanitized GitHub-shareable CTI/TAP SQLite exports
-  private/                  Local-only client workspace export (git-ignored)
-  portraits/                Generated or uploaded TAP portraits (git-ignored)
-
-spec/
-  openapi.yaml              API contract snapshot
-  integrations.json         Connector catalogue
-```
+Follow the repository for future public releases as the project expands its evidence-led security operations workflows.
 
 ## Quick Start
 
-### Prerequisites
-
-- Node.js 18+ or 20+
-- npm 9+
-- SQLite-compatible local filesystem
-- Optional native tools for richer scans: `dnstwist`, `opensquat`, `whois`
-
-### Install
+### 1. Clone and install
 
 ```bash
+git clone https://github.com/<org>/optrasight.git
+cd optrasight
 npm install
 ```
 
-### Run Development Server
+### 2. Restore the public BatchOne dataset
+
+```bash
+npm run db:restore-public
+```
+
+This creates a local git-ignored `data.db` from the sanitized public release assets:
+
+```text
+data/public/optrasight-threat-intel-public.db
+data/public/optrasight-threat-actors-public.db
+data/public/portraits/
+```
+
+The restore step copies public threat-intel findings, Threat Actor Profiles, and watermarked Threat Actor Profile portraits into local runtime paths. It does **not** restore API keys or private secrets.
+
+If you intentionally want to rebuild an existing local runtime database:
+
+```bash
+npm run db:restore-public -- --force
+```
+
+### 3. Start the platform
 
 ```bash
 npm run dev
 ```
 
-The app serves Express and Vite together. By default it listens on:
+Open:
 
 ```text
 http://localhost:5000
 ```
 
-### Build Production Bundle
+### 4. Sign in with a local seed account
+
+These credentials are public knowledge and exist only for local first-run access. Rotate, disable, or delete them before using OptraSight with real data.
+
+| Role | Email | Temporary password |
+| --- | --- | --- |
+| Platform admin | `admin@cep.com` | `ChangeMe!2026Admin` |
+| Read-only reviewer | `reviewer@cep.com` | `ChangeMe!2026Review` |
+
+Seed accounts must change the temporary password and enroll MFA before platform functions unlock.
+
+### 5. Add your AI provider key
+
+Open `/#/ai-setup` and add your own AI provider key. OptraSight supports live routing for DeepSeek, OpenAI, Anthropic, and Google Gemini.
+
+AI provider keys are stored separately from public seed data. They are not bundled with the repository and are not restored from the public seed data. When strict mode is enabled, unavailable or misconfigured providers return real setup errors instead of silent mock output.
+
+## What Ships In Git
+
+The public repository is designed to be cloned without private runtime state.
+
+Tracked public seed assets:
+
+```text
+data/public/optrasight-threat-intel-public.db
+data/public/optrasight-threat-actors-public.db
+data/public/portraits/
+```
+
+Local-only runtime and secret paths stay git-ignored:
+
+```text
+data.db
+data/data.db
+data/secrets/
+data/private/
+data/portraits/
+.env
+dist/
+node_modules/
+```
+
+In practical terms: a fresh GitHub clone will not look exactly like the maintainer machine until the user runs `npm run db:restore-public` and adds their own AI keys.
+
+## Core Workflows
+
+### Intel Inbox
+
+Review parsed OSINT findings, filter advertisements and low-actionability items, inspect source and ingestion timestamps, run AI analysis on individual findings, and queue CIRT triage or deep-dive jobs.
+
+### Actor Observatory
+
+Inspect and maintain Threat Actor Profiles with aliases, sector and region targeting, TTPs, IOCs, campaigns, confidence drivers, evidence references, portraits, and exportable dossiers.
+
+### Hunting Queries
+
+Generate defensive hunt queries from selected intelligence. The goal is practical validation content that remains linked to source findings and actor context.
+
+### Analyst Chat
+
+Use the floating analyst chat for general security questions, threat-intel reasoning, Threat Actor Profile context, hunt-query guidance, or source URL review. When a URL is supplied, the server fetches source context before asking the configured AI provider to analyze it.
+
+## Security Model
+
+- **Authorized use only:** use OptraSight only for defensive security work on systems, data, and sources you are allowed to assess.
+- **Strict mode:** production blocks silent mock fallbacks and surfaces provider/configuration errors.
+- **No bundled secrets:** AI keys and secret databases are not committed.
+- **No durable browser storage:** the app avoids localStorage, sessionStorage, IndexedDB, cookies, and URL tokens for session/application state.
+- **Server-side session expiry:** bearer sessions are validated against the server database.
+
+Default session lifetimes:
+
+| Account type | Idle timeout | Absolute timeout |
+| --- | ---: | ---: |
+| Platform admin | 1 hour | 12 hours |
+| Read-only reviewer / non-admin | 12 hours | 24 hours |
+
+Override with:
+
+```text
+OPTRASIGHT_ADMIN_SESSION_IDLE_MS
+OPTRASIGHT_ADMIN_SESSION_ABSOLUTE_MS
+OPTRASIGHT_SESSION_IDLE_MS
+OPTRASIGHT_SESSION_ABSOLUTE_MS
+```
+
+Report security issues through the process in [SECURITY.md](./SECURITY.md). Please do not file public issues for vulnerabilities.
+
+## Scripts
+
+```bash
+npm run dev                # start local Express + Vite development server
+npm run build              # build production client/server bundle
+npm start                  # run the built server
+npm run db:restore-public  # create local data.db from public BatchOne seed assets
+npm run setup:batchone     # compatibility alias for the same restore workflow
+npm run db:export-public   # export sanitized public seed DBs from a populated workspace
+npm run lint               # ESLint
+npm test                   # Vitest
+npm run typecheck          # full TypeScript check
+npm run check              # lint + tests + typecheck baseline gate
+```
+
+## Requirements
+
+- Node.js 20+; CI targets Node 20.x and 22.x.
+- npm 9+.
+- SQLite-compatible local filesystem.
+## Production Build
 
 ```bash
 npm run build
-```
-
-### Run Production Bundle
-
-```bash
 NODE_ENV=production npm start
 ```
 
@@ -135,218 +232,53 @@ or:
 NODE_ENV=production node dist/index.cjs
 ```
 
-## Demo Accounts
-
-Seeded accounts may exist in local demo data. Rotate them immediately before using the platform with real data.
-
-| Role | Email | Password |
-| --- | --- | --- |
-| Admin | `admin@brandguard.local` | `admin1234` |
-| Analyst | `analyst@acmebank.com` | `demo1234` |
-
-Additional tenant-specific demo accounts may exist depending on the bundled `data/data.db`.
+When `NODE_ENV=production`, strict mode is enabled by default. Missing AI providers or blocked mock fallbacks return explicit errors rather than synthetic results.
 
 ## Environment Variables
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `NODE_ENV` | `development` | Switches dev/prod behavior. Production serves `dist/`. |
+| `NODE_ENV` | `development` | Switches development/production behavior. |
 | `PORT` | `5000` | HTTP listen port. |
-| `OPTRASIGHT_STRICT` | `1` in production, `0` otherwise | Blocks mock fallbacks and surfaces real missing-provider/upstream errors. |
-| `BRANDGUARD_AI_LIVE` | `1` | Historical live-AI kill switch retained for compatibility. |
-| `HOSTING_MODE` | unset | Enables selected multi-hosting behaviors when configured. |
-| `PORT_REUSE` | platform-dependent | Allows server reusePort behavior when explicitly enabled. |
+| `OPTRASIGHT_STRICT` | `1` in production | Blocks mock fallback paths and surfaces real missing-provider/upstream errors. |
+| `OPTRASIGHT_AI_LIVE` | `1` | Emergency live-AI kill switch for offline development. |
+| `OPTRASIGHT_ADMIN_SESSION_IDLE_MS` | `3600000` | Admin idle session timeout. |
+| `OPTRASIGHT_ADMIN_SESSION_ABSOLUTE_MS` | `43200000` | Admin absolute session lifetime. |
+| `OPTRASIGHT_SESSION_IDLE_MS` | `43200000` | Reviewer/non-admin idle session timeout. |
+| `OPTRASIGHT_SESSION_ABSOLUTE_MS` | `86400000` | Reviewer/non-admin absolute session lifetime. |
 
-AI provider keys are configured inside the platform at `/#/ai-setup`. They are stored per tenant rather than read from environment variables.
-
-## Strict Production Mode
-
-When `NODE_ENV=production`, OptraSight is strict by default:
-
-- AI routes do not silently return synthetic content when no live provider is configured.
-- OSINT/mock-mode paths return explicit errors when strict mode blocks fallback.
-- Provider failures surface diagnostic details instead of pretending success.
-- Job Control and the background tray retain job kind, target labels, target URLs, provider labels, timestamps, and structured error details where available.
-
-Common strict-mode outcomes:
-
-| HTTP | Meaning |
-| --- | --- |
-| `409` | Mock fallback was blocked because strict mode requires a real provider or real upstream path. |
-| `502` | A live provider/upstream was reached but failed, timed out, returned invalid JSON, or violated schema. |
-| `4xx` | Validation, auth, tenant mismatch, missing entity, or unsupported action. |
-| `5xx` | Unexpected server failure; inspect server logs. |
-
-## Scripts
-
-```bash
-npm run dev        # development server
-npm run build      # production client/server build
-npm start          # run built server
-npm run check      # TypeScript check
-npm run db:push    # apply Drizzle schema updates
-```
-
-Useful diagnostics:
-
-```bash
-node scripts/diag-ai-live.cjs
-node scripts/diag-chat-live.cjs
-```
-
-## Important Routes
-
-| Route | Purpose |
-| --- | --- |
-| `/#/` | Overview |
-| `/#/osint` | Intel Inbox / OSINT monitoring |
-| `/#/osint?tech=T1190` | ATT&CK-scoped OSINT view |
-| `/#/sources-analytics` | Source quality and health analytics |
-| `/#/threat-actors` | Threat Actor Profiles |
-| `/#/coverage-radar` | ATT&CK coverage readiness |
-| `/#/detection-rules` | Detection rule workspace |
-| `/#/investigations` | Investigation case cockpit |
-| `/#/operations-audit` | Job control and operational audit |
-| `/#/ai-setup` | AI providers and assignments |
-| `/#/settings` | Client settings, profile, assets, contacts, and watchlists |
-
-## Selected API Surface
-
-Authentication:
+## Repository Map
 
 ```text
-POST /api/v1/auth/login
-POST /api/v1/auth/logout
-GET  /api/v1/auth/me
+client/                 React, Vite, Tailwind, shadcn/Radix UI
+server/                 Express API, SQLite storage, AI dispatch, OSINT ingestion
+shared/                 Shared schema, DTOs, validation, access policy
+data/public/            Sanitized public BatchOne seed DBs and portraits
+scripts/                Seed restore/export, diagnostics, maintenance scripts
+spec/                   API and connector metadata snapshots
+tests/                  Security and regression tests
 ```
 
-Tenant and settings:
+## Contributing
 
-```text
-GET  /api/v1/tenants
-GET  /api/v1/tenant/scope
-PUT  /api/v1/tenant/scope
-GET  /api/v1/client-profile
-PUT  /api/v1/client-profile
-GET  /api/v1/client-profile/contacts
-POST /api/v1/client-profile/contacts
-```
+Read [CONTRIBUTING.md](./CONTRIBUTING.md) before opening a pull request.
 
-AI and jobs:
+Useful guardrails:
 
-```text
-GET  /api/v1/ai/providers
-POST /api/v1/ai/providers
-POST /api/v1/ai/providers/:id/test
-GET  /api/v1/ai-jobs/active
-GET  /api/v1/ai-jobs/history
-```
-
-OSINT:
-
-```text
-GET  /api/v1/osint/findings
-GET  /api/v1/osint/findings/:id
-POST /api/v1/osint/findings/ai-analyze
-POST /api/v1/osint/findings/email-draft
-GET  /api/v1/osint/sources
-```
-
-Threat actors:
-
-```text
-GET    /api/v1/threat-actors
-POST   /api/v1/threat-actors
-GET    /api/v1/threat-actors/:id/full
-PATCH  /api/v1/threat-actors/:id
-POST   /api/v1/threat-actors/:id/enrich
-GET    /api/v1/threat-actors/:id/tenants
-POST   /api/v1/threat-actors/:id/tenants
-POST   /api/v1/threat-actors/:id/portrait
-POST   /api/v1/threat-actors/:id/portrait/upload
-DELETE /api/v1/threat-actors/:id/portrait
-```
-
-Detections, investigations, reports, exercises:
-
-```text
-GET   /api/v1/detection-rules
-POST  /api/v1/detection-rules/generate
-POST  /api/v1/detection-rules/:id/deploy
-GET   /api/v1/investigations
-POST  /api/v1/investigations
-GET   /api/v1/investigations/:id/full
-PATCH /api/v1/investigations/:id
-POST  /api/v1/investigations/:id/notes
-GET   /api/v1/reports
-POST  /api/v1/reports/generate
-GET   /api/v1/exercises
-POST  /api/v1/exercises
-```
-
-See `spec/openapi.yaml` for the broader contract.
-
-## Data and Seed Content
-
-Runtime data lives under `data/`. The local workspace may contain seeded tenants, findings, TAPs, portraits, rules, reports, exercises, and job history.
-
-Public/shareable intelligence exports are generated with:
-
-```bash
-npm run db:export-public
-```
-
-That command writes:
-
-- `data/public/optrasight-threat-intel-public.db`
-- `data/public/optrasight-threat-actors-public.db`
-- `data/private/optrasight-client-workspace-private.db` (git-ignored)
-
-Before publishing or sharing a build:
-
-- Remove or rotate seeded account credentials.
-- Clear real AI provider keys.
-- Check `data.db` and `data/data.db` for sensitive tenant data.
-- Commit only the sanitized `data/public/*.db` exports unless intentionally shipping a private demo snapshot.
-- Review `data/README.md` for restore notes.
-
-## Security Notes
-
-- Authentication uses bearer session tokens.
-- Admins can pivot tenants; analysts remain tenant-scoped.
-- Strict mode prevents accidental demo/mock answers in production.
-- Unsupported connectors must remain visibly disabled until real implementation exists.
-- Browser storage should not be used for app state.
-- Secrets should not be committed. AI keys belong in tenant provider configuration, not `.env`.
-
-See `SECURITY.md` for more detail.
-
-## Development Guidance
-
-- Prefer existing app patterns: React Query, `apiRequest`, Radix/shadcn UI, Wouter hash routes.
-- Keep tenant-scoped cache keys consistent.
-- Use async jobs for long AI/provider work.
-- When adding unavailable functions, disable actions visibly and explain the requirement.
-- Keep enterprise tool surfaces dense but readable.
-- Avoid nested cards inside cards.
-- For local visual validation, test at desktop, tablet, and narrow mobile widths.
-
-## Known Local Constraints
-
-- This version-1 snapshot is intended to be committed without runtime databases, uploaded portraits, generated screenshots, logs, or local secrets.
-- Some sandboxed environments block `tsx` IPC during build. Re-run with proper local permissions if `npm run build` fails with `listen EPERM` for a `tsx-*.pipe`.
-- Browser automation may require installed Playwright browser binaries, not just the package.
+- Keep BatchOne scoped to Intel Inbox, Actor Observatory, AI Setup, Job Control, Platform Users, and supporting APIs.
+- Do not expand the release surface without an explicit BatchOne scope decision.
+- Use `apiRequest` on the client rather than raw `fetch`.
+- Keep long AI work asynchronous and visible in Job Control.
+- Do not commit runtime databases, secret stores, generated screenshots, logs, or uploaded private portraits.
 
 ## Further Reading
 
-- `ARCHITECTURE.md` - system architecture and data flow
-- `DEPLOYMENT.md` - deployment notes
-- `SECURITY.md` - security and secret-handling notes
-- `CONTRIBUTING.md` - contribution workflow
-- `CHANGELOG.md` - historical implementation notes
-- `data/README.md` - seeded data handling
-- `CONTRIBUTORS.md` - maintainer and AI-assisted contribution credits
+- [ARCHITECTURE.md](./ARCHITECTURE.md) - system architecture and refactor notes.
+- [SECURITY.md](./SECURITY.md) - security model, secret handling, and responsible disclosure.
+- [DEPLOYMENT.md](./DEPLOYMENT.md) - deployment guidance.
+- [data/README.md](./data/README.md) - public seed data and restore notes.
+- [CONTRIBUTORS.md](./CONTRIBUTORS.md) - maintainer and AI-assisted contribution credits.
 
 ## License
 
-MIT. See [package.json](./package.json) for the repository license metadata.
+Apache License 2.0. See [LICENSE](./LICENSE) and [NOTICE](./NOTICE).

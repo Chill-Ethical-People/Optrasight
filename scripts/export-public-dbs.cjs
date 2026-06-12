@@ -155,8 +155,8 @@ function exportThreatIntel() {
         id, source_id, title, url, published_at, severity, cve_ids, affected_tech,
         threat_actors, intel_category, attack_techniques, sectors, regions,
         cluster_id, iocs, content_hash, summary, raw_snippet, ai_summary,
-        ai_analyzed_at, ai_provider_label, source_fetched_at, cirt_analysis,
-        cirt_analyzed_at, cirt_provider_label, created_at
+        ai_analyzed_at, ai_provider_label, NULL AS source_fetched_at, NULL AS cirt_analysis,
+        NULL AS cirt_analyzed_at, NULL AS cirt_provider_label, created_at
       FROM osint_findings
       WHERE COALESCE(intel_category, 'threat_intel') != 'advertisement'
       ORDER BY published_at DESC, created_at DESC
@@ -422,7 +422,7 @@ function exportPrivateWorkspace() {
   db.pragma("journal_mode = DELETE");
   createManifest(db, "private_client_workspace");
   const tables = [
-    "tenants", "tenant_scopes", "users", "auth_sessions", "client_contacts",
+    "tenants", "tenant_scopes", "users", "auth_sessions",
     "client_assets", "assets", "scans", "findings", "evidence", "integrations",
     "ai_providers", "ai_task_assignments", "ai_jobs", "tenant_osint_settings",
     "osint_reanalyze_jobs", "osint_findings", "hunt_queries", "threat_landscapes",

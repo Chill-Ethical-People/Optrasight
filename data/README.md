@@ -9,9 +9,8 @@ sanitized public exports are intended for GitHub.
 | `data.db` | ignored | Optional runtime SQLite database when running with a mounted `data/` directory. May contain tenant/client data. |
 | `public/optrasight-threat-intel-public.db` | tracked | Sanitized public OSINT source catalog and threat-intel findings. |
 | `public/optrasight-threat-actors-public.db` | tracked | Sanitized public threat actor profiles and appendices. |
-| `private/optrasight-client-workspace-private.db` | ignored | Reconstructed local client workspace export. Contains tenant/client data. |
 | `portraits/` | ignored | Generated or uploaded TAP portraits. |
-| `dnstwist_screenshots/` | ignored | Runtime malicious-site scanner screenshots. |
+| `public/portraits/` | tracked when present | Watermarked curated TAP portraits prepared for public release. |
 | `.optrasight-kek` | ignored | Local encryption key material. Never commit. |
 
 ## Refresh Public Exports
@@ -28,6 +27,19 @@ not exist. You can also pass an explicit source:
 ```bash
 node scripts/export-public-dbs.cjs data/data.db
 ```
+
+To restore the public demo dataset into a local runtime workspace on a fresh
+clone:
+
+```bash
+npm run db:restore-public
+```
+
+That command creates the git-ignored root `data.db`, imports the sanitized
+public OSINT/TAP exports, and copies watermarked portraits from
+`data/public/portraits/` into `data/portraits/` so Actor Observatory cards render
+locally. It refuses to overwrite an existing runtime DB unless called with
+`npm run db:restore-public -- --force`.
 
 ## Public Export Privacy Rules
 

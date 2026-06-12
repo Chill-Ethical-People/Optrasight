@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { Command, CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandShortcut } from "@/components/ui/command";
+import { useQuery } from "@tanstack/react-query";
+import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandShortcut } from "@/components/ui/command";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Search, ExternalLink, BriefcaseBusiness, Copy, ShieldCheck } from "lucide-react";
+import { apiRequest } from "@/lib/queryClient";
+import { Search, ExternalLink, Copy } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 type SearchResult = {
@@ -19,16 +19,6 @@ type SearchResult = {
   action?: string;
   copyValue?: string | null;
 };
-
-function sourceTypeFor(r: SearchResult): string | null {
-  if (r.type === "Exposure finding") return "finding";
-  if (r.type === "Intel finding") return "osint_finding";
-  if (r.type === "Threat actor") return "threat_actor";
-  if (r.type === "Domain candidate") return "domain_candidate";
-  if (r.type === "Detection rule") return "detection_rule";
-  if (r.type === "Tabletop exercise") return "exercise";
-  return null;
-}
 
 export function GlobalCommandPalette() {
   const [open, setOpen] = useState(false);
@@ -62,29 +52,6 @@ export function GlobalCommandPalette() {
 
   const results = query.data?.results ?? [];
   const actionTarget = useMemo(() => results[0], [results]);
-  const actionTargetType = actionTarget ? sourceTypeFor(actionTarget) : null;
-
-  const startInvestigation = useMutation({
-    mutationFn: async (r: SearchResult) => {
-      const sourceType = sourceTypeFor(r);
-      if (!sourceType) return null;
-      const res = await apiRequest("POST", "/api/v1/investigations", {
-        title: `Investigate ${r.title}`.slice(0, 170),
-        severity: (r.severity || "medium").toLowerCase(),
-        summary: `${r.type}: ${r.subtitle}`,
-        sourceType,
-        sourceId: r.id,
-      });
-      return res.json();
-    },
-    onSuccess: (inv: any) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/v1/investigations"] });
-      if (inv?.id) window.location.hash = `#/investigations/${encodeURIComponent(inv.id)}`;
-      setOpen(false);
-      toast({ title: "Investigation started", description: inv?.title ?? "Case workspace opened." });
-    },
-    onError: (e: any) => toast({ variant: "destructive", title: "Could not start investigation", description: e.message }),
-  });
 
   const openResult = (r: SearchResult) => {
     window.location.hash = r.href.startsWith("#") ? r.href : `#${r.href}`;
@@ -125,26 +92,11 @@ export function GlobalCommandPalette() {
               ))}
             </CommandGroup>
           )}
-          {actionTarget && (actionTargetType || actionTarget.type === "Intel finding" || actionTarget.copyValue) && (
+          {actionTarget?.copyValue && (
             <CommandGroup heading="Quick actions for top result">
               <div className="px-2 pb-1 text-[11px] text-muted-foreground">
                 Actions apply to <span className="font-medium text-foreground">{actionTarget.title}</span>.
               </div>
-              {actionTargetType && (
-                <CommandItem value={`start investigation ${actionTarget.title}`} onSelect={() => startInvestigation.mutate(actionTarget)}>
-                  <BriefcaseBusiness size={15} className="text-[hsl(var(--brand))]" />
-                  <span className="truncate">Start investigation</span>
-                </CommandItem>
-              )}
-              {actionTarget.type === "Intel finding" && (
-                <CommandItem value={`generate detection ${actionTarget.title}`} onSelect={() => {
-                  window.location.hash = `#/detection-rules?findingIds=${encodeURIComponent(actionTarget.id)}`;
-                  setOpen(false);
-                }}>
-                  <ShieldCheck size={15} className="text-[hsl(var(--brand))]" />
-                  <span className="truncate">Generate detection from this intel</span>
-                </CommandItem>
-              )}
               {actionTarget.copyValue && (
                 <CommandItem value={`copy ${actionTarget.copyValue}`} onSelect={() => {
                   navigator.clipboard?.writeText(actionTarget.copyValue || "");

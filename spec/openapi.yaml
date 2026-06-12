@@ -1,14 +1,13 @@
 openapi: 3.1.0
 info:
-  title: OptraSight Express API
+  title: OptraSight BatchOne API
   version: 2.2.0
-  summary: Minimal accurate contract for the active Express 5 + SQLite API.
+  summary: Contract snapshot for the BatchOne Express 5 + SQLite API.
   description: |
-    OptraSight is served by one Express process on `/api/v1`. Authenticated
-    routes use an opaque bearer session from `/auth/login`; MSSP admins may
-    pivot tenant context with `X-Tenant-Id`. This file intentionally documents
-    the currently supported public interface rather than old FastAPI/Celery
-    claims.
+    OptraSight BatchOne is served by one Express process on `/api/v1`.
+    Authenticated routes use opaque bearer sessions from `/auth/login`.
+    This snapshot documents the BatchOne release surface: Intel Inbox,
+    Actor Observatory/TAP, AI Setup, Job Control, and Platform Users.
 servers:
   - url: http://localhost:5000/api/v1
     description: Local Express server
@@ -18,12 +17,10 @@ tags:
   - name: health
   - name: auth
   - name: ai
-  - name: integrations
-  - name: evidence
+  - name: jobs
   - name: osint
   - name: threat-actors
-  - name: detection-rules
-  - name: exercises
+  - name: users
 paths:
   /health:
     get:
@@ -48,9 +45,10 @@ paths:
               properties:
                 email: { type: string, format: email }
                 password: { type: string }
+                mfaCode: { type: string }
       responses:
         "200":
-          description: Session issued
+          description: Session issued or MFA/password setup required
           content:
             application/json:
               schema:
@@ -62,86 +60,148 @@ paths:
       summary: Revoke the current bearer session
       responses:
         "200": { description: Revoked }
+  /auth/change-password:
+    post:
+      tags: [auth]
+      summary: Change a temporary or current password
+      responses:
+        "200": { description: Password changed }
+  /auth/mfa/setup:
+    get:
+      tags: [auth]
+      summary: Start MFA enrollment for the current user
+      responses:
+        "200": { description: TOTP setup payload }
+  /auth/mfa/verify:
+    post:
+      tags: [auth]
+      summary: Verify MFA enrollment or sign-in code
+      responses:
+        "200": { description: MFA verified }
   /me:
     get:
       tags: [auth]
-      summary: Current user and tenant
+      summary: Current user and capabilities
       responses:
         "200": { description: OK }
   /ai/providers:
     get:
       tags: [ai]
-      summary: List tenant AI providers and global availability
+      summary: List BatchOne AI providers and task assignments
       responses:
         "200":
-          description: Includes `hasUsableProvider`; AI actions should be disabled when false.
+          description: Includes provider usability, masked key state, and assignment metadata.
     post:
       tags: [ai]
-      summary: Create or update an encrypted tenant AI provider key
+      summary: Create or update an encrypted AI provider key
       responses:
         "200": { description: Saved }
-  /integrations:
-    get:
-      tags: [integrations]
-      summary: List integration catalogue entries for the tenant
-      responses:
-        "200":
-          description: Includes implemented/configured/liveTested truth gates.
-  /integrations/{tool}:
-    get:
-      tags: [integrations]
-      summary: Read one integration
+  /ai/providers/{id}/test:
+    post:
+      tags: [ai]
+      summary: Test a configured provider without exposing the key
       parameters:
-        - $ref: "#/components/parameters/Tool"
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200": { description: Test result }
+  /ai/assignments:
+    put:
+      tags: [ai]
+      summary: Save BatchOne AI task routing
+      responses:
+        "200": { description: Saved }
+  /ai-jobs/active:
+    get:
+      tags: [jobs]
+      summary: List active AI and OSINT jobs for the current session
       responses:
         "200": { description: OK }
-    put:
-      tags: [integrations]
-      summary: Enable/disable a connector or update encrypted credentials
-      parameters:
-        - $ref: "#/components/parameters/Tool"
+  /osint/ai-jobs/history:
+    get:
+      tags: [jobs]
+      summary: List recent AI/OSINT job history
       responses:
-        "200": { description: Saved }
-  /integrations/{tool}/test:
-    post:
-      tags: [integrations]
-      summary: Deterministic connector test
-      description: Unsupported connectors must not return green simulated success.
-      parameters:
-        - $ref: "#/components/parameters/Tool"
-      responses:
-        "200":
-          description: Test result with implemented/configured/liveTested details.
-  /evidence/urlscan:
-    post:
-      tags: [evidence]
-      summary: Submit a URL to URLScan.io for real evidence capture
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [url]
-              properties:
-                url: { type: string, format: uri }
-                findingId: { type: string }
-      responses:
-        "202": { description: Queued or failed real URLScan evidence row }
-        "409": { description: URLScan.io key is not configured }
-        "502": { description: URLScan.io request failed }
+        "200": { description: OK }
   /osint/findings:
     get:
       tags: [osint]
-      summary: List OSINT findings for the current tenant
+      summary: List OSINT findings
+      responses:
+        "200": { description: OK }
+  /osint/findings/{id}:
+    get:
+      tags: [osint]
+      summary: Read one OSINT finding
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200": { description: OK }
+    patch:
+      tags: [osint]
+      summary: Update analyst-editable finding fields
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200": { description: Updated }
+  /osint/findings/ai-analyze:
+    post:
+      tags: [osint]
+      summary: Queue or refresh AI analysis for selected findings
+      responses:
+        "202": { description: Job queued }
+  /osint/hunt-queries:
+    get:
+      tags: [osint]
+      summary: List generated threat-hunting queries
+      responses:
+        "200": { description: OK }
+    post:
+      tags: [osint]
+      summary: Generate threat-hunting queries from selected findings
+      responses:
+        "202": { description: Job queued }
+  /osint/sources:
+    get:
+      tags: [osint]
+      summary: List monitored OSINT sources
+      responses:
+        "200": { description: OK }
+  /osint/sources/bulk:
+    post:
+      tags: [osint]
+      summary: Enable or disable selected OSINT sources
+      responses:
+        "200": { description: Updated }
+  /osint/sources/kpis:
+    get:
+      tags: [osint]
+      summary: Source-health counters for Intel Inbox
       responses:
         "200": { description: OK }
   /osint/scan:
     post:
       tags: [osint]
-      summary: Start OSINT fetch/scan workflow
+      summary: Start OSINT ingestion
       responses:
         "202": { description: Started or truthfully blocked }
+  /osint/chat/triage:
+    post:
+      tags: [osint]
+      summary: Queue CIRT triage over current findings
+      responses:
+        "202": { description: Job queued }
+  /osint/chat/deep-dive:
+    post:
+      tags: [osint]
+      summary: Queue CIRT deep-dive over selected findings
+      responses:
+        "202": { description: Job queued }
+  /osint/chat/converse:
+    post:
+      tags: [osint]
+      summary: Synchronous OSINT chat over selected context
+      responses:
+        "200": { description: Chat response }
   /threat-actors:
     get:
       tags: [threat-actors]
@@ -153,14 +213,53 @@ paths:
       summary: Create a TAP dossier
       responses:
         "201": { description: Created }
-  /threat-actors/{id}/portrait:
-    post:
+  /threat-actors/{id}/full:
+    get:
       tags: [threat-actors]
-      summary: Trigger AI portrait generation
+      summary: Read a full TAP dossier
       parameters:
         - $ref: "#/components/parameters/Id"
       responses:
-        "202": { description: AI job started }
+        "200": { description: OK }
+  /threat-actors/{id}:
+    patch:
+      tags: [threat-actors]
+      summary: Update a TAP dossier
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200": { description: Updated }
+  /threat-actors/{id}/enrich:
+    post:
+      tags: [threat-actors]
+      summary: Queue provider enrichment for a TAP dossier
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "202": { description: Job queued }
+  /threat-actors/{id}/export.docx:
+    get:
+      tags: [threat-actors]
+      summary: Export one TAP dossier as DOCX
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200": { description: DOCX export }
+  /threat-actors/{id}/portrait:
+    post:
+      tags: [threat-actors]
+      summary: Queue AI portrait generation
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "202": { description: Job queued }
+    delete:
+      tags: [threat-actors]
+      summary: Remove the current TAP portrait
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200": { description: Removed }
   /threat-actors/{id}/portrait/upload:
     post:
       tags: [threat-actors]
@@ -169,64 +268,25 @@ paths:
         - $ref: "#/components/parameters/Id"
       responses:
         "200": { description: Uploaded }
-  /detection-rules:
+  /admin/platform-users:
     get:
-      tags: [detection-rules]
-      summary: List detection rules
+      tags: [users]
+      summary: List platform users
       responses:
         "200": { description: OK }
     post:
-      tags: [detection-rules]
-      summary: Create a detection rule
+      tags: [users]
+      summary: Create a platform user
       responses:
         "201": { description: Created }
-  /detection-rules/{id}/deploy:
-    post:
-      tags: [detection-rules]
-      summary: Record manual deployment or truthfully reject push mode
-      description: Push mode does not simulate SIEM success.
+  /admin/platform-users/{id}:
+    patch:
+      tags: [users]
+      summary: Update a platform user
       parameters:
         - $ref: "#/components/parameters/Id"
       responses:
-        "200": { description: Deployment row updated }
-  /exercises:
-    get:
-      tags: [exercises]
-      summary: List tabletop exercises
-      responses:
-        "200": { description: OK }
-    post:
-      tags: [exercises]
-      summary: Create a tabletop exercise shell
-      responses:
-        "201": { description: Created }
-  /exercises/{id}/generate:
-    post:
-      tags: [exercises]
-      summary: Start async exercise generation
-      parameters:
-        - $ref: "#/components/parameters/Id"
-      responses:
-        "202": { description: AI job started }
-  /exercise-portal/{token}:
-    get:
-      tags: [exercises]
-      security: []
-      summary: Public participant portal bootstrap
-      parameters:
-        - $ref: "#/components/parameters/PortalToken"
-      responses:
-        "200": { description: Portal state }
-        "404": { description: Invalid token }
-  /exercise-portal/{token}/respond:
-    post:
-      tags: [exercises]
-      security: []
-      summary: Submit a participant response
-      parameters:
-        - $ref: "#/components/parameters/PortalToken"
-      responses:
-        "200": { description: Response recorded }
+        "200": { description: Updated }
 components:
   securitySchemes:
     bearerAuth:
@@ -239,26 +299,17 @@ components:
       name: id
       required: true
       schema: { type: string }
-    Tool:
-      in: path
-      name: tool
-      required: true
-      schema: { type: string }
-    PortalToken:
-      in: path
-      name: token
-      required: true
-      schema: { type: string, minLength: 32 }
   responses:
     Unauthorized:
       description: Missing or invalid bearer token
   schemas:
     AuthResponse:
       type: object
-      required: [access_token, token_type, tenant_id, role, email]
+      required: [access_token, token_type, role, email]
       properties:
         access_token: { type: string }
         token_type: { type: string, const: bearer }
-        tenant_id: { type: string }
         role: { type: string }
         email: { type: string, format: email }
+        passwordMustChange: { type: boolean }
+        mfaRequired: { type: boolean }

@@ -1,6 +1,6 @@
 /**
- * OSINT AI Chatbot — server-side glue for the floating chatbot on the OSINT
- * Monitoring page. Two endpoints:
+ * Analyst chat — server-side glue for the global floating chatbot plus the
+ * Intel Inbox CIRT workflows. Primary endpoints:
  *
  *   runChatTriage()   — bucketed CIRT tier triage report (Tier 1 -> Tier 4 +
  *                       Analyst Action Plan Summary) rendered as Markdown.
@@ -17,7 +17,7 @@ import type { OsintFindingDTO } from "@shared/schema";
 
 import { fetchSourcesBatch } from "./sourceFetch";
 import {
-  chatTriageLiveDiagnostic, chatTriageMock,
+  chatTriageLiveDiagnostic,
   chatDeepDiveLiveDiagnostic,
   type ChatTriageInput, type ChatTriageInputFinding,
   type ChatDeepDiveInputFinding, type ChatDeepDiveOutput,
@@ -26,8 +26,8 @@ import {
 import type { LiveChatDiagnostic } from "./aiLive";
 
 // v2.15 — surfaced to callers/UI so a failed live-AI call can show the actual
-// reason (HTTP code, timeout, parse error) instead of silently falling back to
-// a deterministic mock.
+// reason (HTTP code, timeout, parse error) without leaking upstream response
+// bodies to the browser or persisted AI job result.
 export interface AiDiagnosticInfo {
   ok: boolean;
   reason: string;
@@ -42,7 +42,7 @@ function diagToInfo(d: LiveChatDiagnostic | null | undefined): AiDiagnosticInfo 
     reason: d.reason,
     httpStatus: d.httpStatus,
     latencyMs: d.latencyMs,
-    rawBodyPreview: d.rawBodyPreview,
+    rawBodyPreview: "",
   };
 }
 
@@ -58,6 +58,20 @@ export class ChatLiveAiError extends Error {
     this.name = "ChatLiveAiError";
     this.providerLabel = providerLabel;
     this.diagnostic = diagToInfo(diag)!;
+  }
+}
+
+export class ChatProviderUnavailableError extends ChatLiveAiError {
+  constructor(taskLabel: string) {
+    super("AI provider", {
+      ok: false,
+      result: null,
+      reason: `No AI provider is configured for ${taskLabel}.`,
+      httpStatus: 409,
+      latencyMs: 0,
+      rawBodyPreview: "",
+    });
+    this.name = "ChatProviderUnavailableError";
   }
 }
 
@@ -102,15 +116,7 @@ export interface RunChatTriageOpts {
   tenantId: string;
   range: ChatRangeKey;
   maxItems?: number;
-  // v2.18 — Global view support. When `findingIds` is non-empty the triage
-  // routine runs cross-tenant: each ID is looked up via
-  // storage.getOsintFindingAnyTenant() and the client profile is unioned
-  // across every distinct tenant the IDs touch. `tenantId` is used only as
-  // the AI-provider resolution anchor (falls back to whichever tenant has
-  // a configured provider). When `findingIds` is empty/undefined the path
-  // is unchanged: tenant-scoped triage over `range`.
   findingIds?: string[];
-  crossTenant?: boolean;
 }
 export interface RunChatTriageResult {
   reportMd: string;
@@ -121,77 +127,28 @@ export interface RunChatTriageResult {
   generatedAt: string;
 }
 
-// v2.18 — union the client-profile signals (industries / geos / monitored
-// technologies) across every tenant involved in a Global-view triage or
-// deep-dive request. Returns the canonical { industries, geos, technologies }
-// shape used by both osint_overview and osint_analysis prompts.
-function unionClientProfiles(storage: any, tenantIds: string[]): {
+function workspaceClientProfile(): {
   industries: string[]; geos: string[]; technologies: string[];
 } {
-  const indSet = new Set<string>();
-  const geoSet = new Set<string>();
-  const techSet = new Set<string>();
-  for (const tid of tenantIds) {
-    if (!tid) continue;
-    const p = storage.getClientProfile ? storage.getClientProfile(tid) : null;
-    if (!p) continue;
-    for (const x of (p.industries || [])) indSet.add(String(x));
-    for (const x of (p.geos || [])) geoSet.add(String(x));
-    for (const x of (p.monitoredTechnologies || p.technologies || [])) techSet.add(String(x));
-  }
   return {
-    industries: Array.from(indSet),
-    geos: Array.from(geoSet),
-    technologies: Array.from(techSet),
+    industries: ["security-operations"],
+    geos: ["Global"],
+    technologies: ["osint", "threat-intelligence", "detection-engineering"],
   };
-}
-
-// v2.18 — walk the candidate tenants in order and return the first one that
-// has a resolved AI provider for the requested capability. Used so Global-view
-// triage/deep-dive can find a working provider even when the admin's own
-// tenant has none configured.
-function resolveProviderAcrossTenants(storage: any, candidates: string[], capability: string): any {
-  const seen = new Set<string>();
-  for (const tid of candidates) {
-    if (!tid || seen.has(tid)) continue;
-    seen.add(tid);
-    if (!storage.resolveAiProvider) return null;
-    const p = storage.resolveAiProvider(tid, capability);
-    if (p) return p;
-  }
-  return null;
 }
 
 export async function runChatTriage(storage: any, opts: RunChatTriageOpts): Promise<RunChatTriageResult> {
   const max = opts.maxItems ?? 60;
 
-  // v2.18 — Global path: caller passed explicit findingIds spanning N tenants.
-  let inRange: OsintFindingDTO[];
-  const involvedTenantIds = new Set<string>();
-  if (opts.crossTenant && opts.findingIds && opts.findingIds.length > 0) {
-    const collected: OsintFindingDTO[] = [];
-    for (const fid of opts.findingIds) {
-      const f = storage.getOsintFindingAnyTenant
-        ? storage.getOsintFindingAnyTenant(fid)
-        : storage.getOsintFinding(opts.tenantId, fid);
-      if (f) {
-        collected.push(f);
-        if (f.tenantId) involvedTenantIds.add(f.tenantId);
-      }
-    }
-    inRange = filterByRange(collected, opts.range)
-      .sort((a, b) => (Date.parse(b.publishedAt || b.createdAt || "") - Date.parse(a.publishedAt || a.createdAt || "")))
-      .slice(0, max);
-  } else {
-    const all = storage.listOsintFindings(opts.tenantId);
-    inRange = filterByRange(all, opts.range)
-      .sort((a, b) => (Date.parse(b.publishedAt || b.createdAt || "") - Date.parse(a.publishedAt || a.createdAt || "")))
-      .slice(0, max);
-    involvedTenantIds.add(opts.tenantId);
-  }
+  const sourceFindings = opts.findingIds?.length
+    ? opts.findingIds.map((fid) => storage.getOsintFinding(opts.tenantId, fid)).filter(Boolean)
+    : storage.listOsintFindings(opts.tenantId);
+  const inRange = filterByRange(sourceFindings, opts.range)
+    .sort((a, b) => (Date.parse(b.publishedAt || b.createdAt || "") - Date.parse(a.publishedAt || a.createdAt || "")))
+    .slice(0, max);
 
   // Pre-fetch with a small per-item budget so triage prompt stays compact.
-  const fetched = await fetchSourcesBatch(inRange.map((f) => f.url));
+  const fetched = await fetchSourcesBatch(inRange.map((f) => f.url), { includeReferences: true, maxReferenceLinks: 2 });
   const contentByUrl = new Map<string, string | null>();
   for (const r of fetched) contentByUrl.set(r.url || "", r.content);
 
@@ -214,15 +171,10 @@ export async function runChatTriage(storage: any, opts: RunChatTriageOpts): Prom
     };
   });
 
-  // v2.18 — union client profile across every tenant involved (global mode).
-  const clientProfile = unionClientProfiles(storage, Array.from(involvedTenantIds));
-  // Prefer a resolved provider on opts.tenantId; if global view doesn't have
-  // one on the admin's own tenant, try the first involved tenant that does.
-  const tenantProvider = resolveProviderAcrossTenants(
-    storage,
-    [opts.tenantId, ...Array.from(involvedTenantIds)],
-    "osint_overview",
-  );
+  const clientProfile = workspaceClientProfile();
+  const tenantProvider = storage.resolveAiProvider
+    ? storage.resolveAiProvider(opts.tenantId, "osint_overview")
+    : null;
 
   const input: ChatTriageInput = {
     rangeLabel: RANGE_LABEL[opts.range],
@@ -241,15 +193,12 @@ export async function runChatTriage(storage: any, opts: RunChatTriageOpts): Prom
       providerLabel = tenantProvider.label || tenantProvider.provider;
     } else if (diag && !diag.ok) {
       // Provider was configured but the live call failed — surface the
-      // actual reason instead of silently returning a deterministic mock.
+      // actual reason instead of returning synthetic analysis.
       throw new ChatLiveAiError(tenantProvider.label || tenantProvider.provider, diag);
     }
   }
   if (!reportMd) {
-    // No provider configured — deterministic mock so the UI still works.
-    const mock = chatTriageMock(input);
-    reportMd = mock.reportMd;
-    providerLabel = null;
+    throw new ChatProviderUnavailableError("CIRT triage");
   }
 
   return {
@@ -269,9 +218,6 @@ export async function runChatTriage(storage: any, opts: RunChatTriageOpts): Prom
 export interface RunChatDeepDiveOpts {
   tenantId: string;
   findingIds: string[];
-  // v2.18 — when true, look findings up cross-tenant and union client profiles
-  // across every involved tenant. Used by Global-view deep dive.
-  crossTenant?: boolean;
 }
 export interface RunChatDeepDiveResult {
   perFinding: ChatDeepDivePerFinding[];
@@ -288,26 +234,16 @@ export interface RunChatDeepDiveResult {
 export async function runChatDeepDive(storage: any, opts: RunChatDeepDiveOpts): Promise<RunChatDeepDiveResult> {
   if (!opts.findingIds.length) throw new Error("findingIds required");
 
-  // v2.18 — cross-tenant lookup when Global view is the caller.
   const findings = opts.findingIds
-    .map((id) => opts.crossTenant && storage.getOsintFindingAnyTenant
-      ? storage.getOsintFindingAnyTenant(id)
-      : storage.getOsintFinding(opts.tenantId, id))
+    .map((id) => storage.getOsintFinding(opts.tenantId, id))
     .filter((f: any): f is OsintFindingDTO => !!f);
 
   if (findings.length === 0) throw new Error("no matching findings");
 
-  // Tenants touched by this batch — used for profile union + provider fallback.
-  const involvedTenantIds = Array.from(new Set(findings.map((f) => f.tenantId).filter(Boolean)));
-  const clientProfile = unionClientProfiles(
-    storage,
-    opts.crossTenant ? involvedTenantIds : [opts.tenantId],
-  );
-  const tenantProvider = resolveProviderAcrossTenants(
-    storage,
-    [opts.tenantId, ...involvedTenantIds],
-    "osint_analysis",
-  );
+  const clientProfile = workspaceClientProfile();
+  const tenantProvider = storage.resolveAiProvider
+    ? storage.resolveAiProvider(opts.tenantId, "osint_analysis")
+    : null;
 
   // v2.16 — prefer the per-finding CIRT cache populated by the background
   // analyzer. We split the requested findings into:
@@ -316,15 +252,12 @@ export async function runChatDeepDive(storage: any, opts: RunChatDeepDiveOpts): 
   //              payloads almost never exceed the 90s/6000-token budget,
   //              unlike the old batched 20-finding call which routinely timed
   //              out at 120s)
-  // v2.18 — cache lookups must use each finding's own tenantId in Global mode
-  // so we don't miss the cache for findings outside opts.tenantId.
-  const tidFor = (f: OsintFindingDTO) => (opts.crossTenant && f.tenantId) ? f.tenantId : opts.tenantId;
   const perFinding: ChatDeepDivePerFinding[] = [];
   const missing: OsintFindingDTO[] = [];
   let cacheHits = 0;
   for (const f of findings) {
     const cached = (storage as any).getOsintFindingCache
-      ? (storage as any).getOsintFindingCache(tidFor(f), f.id)
+      ? (storage as any).getOsintFindingCache(opts.tenantId, f.id)
       : null;
     if (cached && cached.cirtStatus === "done" && cached.cirtAnalysis) {
       perFinding.push(cached.cirtAnalysis as ChatDeepDivePerFinding);
@@ -340,18 +273,18 @@ export async function runChatDeepDive(storage: any, opts: RunChatDeepDiveOpts): 
   // Resolve a single providerLabel — prefer the cache's record, then live.
   if (cacheHits > 0) {
     const first = findings.find((f) => {
-      const c = (storage as any).getOsintFindingCache?.(tidFor(f), f.id);
+      const c = (storage as any).getOsintFindingCache?.(opts.tenantId, f.id);
       return c?.cirtStatus === "done";
     });
     if (first) {
-      const c = (storage as any).getOsintFindingCache(tidFor(first), first.id);
+      const c = (storage as any).getOsintFindingCache(opts.tenantId, first.id);
       providerLabel = c?.cirtProviderLabel ?? null;
     }
   }
 
   if (missing.length > 0 && tenantProvider) {
     // Pre-fetch source bodies for the missing batch.
-    const fetched = await fetchSourcesBatch(missing.map((f) => f.url));
+    const fetched = await fetchSourcesBatch(missing.map((f) => f.url), { includeReferences: true, maxReferenceLinks: 3 });
     const sourceByIdx = new Map<number, string | null>();
     fetched.forEach((r, i) => sourceByIdx.set(i, r.content));
 
@@ -384,10 +317,9 @@ export async function runChatDeepDive(storage: any, opts: RunChatDeepDiveOpts): 
         const match = live.perFinding.find((p) => p.findingId === f.id) || live.perFinding[0];
         perFinding.push(match);
         providerLabel = providerLabel ?? (tenantProvider.label || tenantProvider.provider);
-        // Persist into the cache so the next call is instant. In Global mode
-        // write back to the finding's owning tenant.
+        // Persist into the cache so the next call is instant.
         if ((storage as any).saveOsintFindingCirt) {
-          (storage as any).saveOsintFindingCirt(tidFor(f), f.id, {
+          (storage as any).saveOsintFindingCirt(opts.tenantId, f.id, {
             sourceContent,
             cirtAnalysis: match,
             providerLabel: tenantProvider.label || tenantProvider.provider,
@@ -404,28 +336,8 @@ export async function runChatDeepDive(storage: any, opts: RunChatDeepDiveOpts): 
   let result: ChatDeepDiveOutput | null = perFinding.length > 0
     ? { perFinding, overallAssessment: buildOverallAssessment(perFinding) }
     : null;
-  // Mock fallback — only reached when NO AI provider is configured AND no cache.
   if (!result) {
-    result = {
-      perFinding: findings.map((f) => ({
-        findingId: f.id,
-        title: f.title,
-        url: f.url,
-        source: f.sourceName,
-        severityLabel: (f.severity || "INFO").toUpperCase(),
-        relevanceScore: typeof f.aiRelevanceScore === "number" ? f.aiRelevanceScore : 0.5,
-        executiveSummary: f.aiSummary || f.summary || "(no AI provider configured — deterministic mock)",
-        detailedAnalysis: f.aiSummary || f.summary || "Configure DeepSeek / OpenAI / Anthropic / Gemini under AI Setup for full CIRT-grade deep dive analysis.",
-        mitreTtps: [],
-        iocs: [],
-        detectionActions: [
-          "Review the source advisory and validate exposure against monitored assets.",
-          "Generate hunt queries via the OSINT hunt-query workflow if exposure is confirmed.",
-        ],
-        cveIds: f.cveIds || [],
-      })),
-      overallAssessment: "Deterministic mock — configure a live AI provider for cross-finding pattern synthesis.",
-    };
+    throw new ChatProviderUnavailableError("CIRT deep dive");
   }
 
   const htmlReport = buildDeepDiveHtml(result, {
@@ -606,7 +518,7 @@ function buildDeepDiveHtml(
   <div class="wrap">
     <section class="hero">
       <h1>🛡️ OptraSight CIRT Deep Dive Report</h1>
-      <div class="sub">Generated ${esc(new Date(meta.generatedAt).toUTCString())} · ${result.perFinding.length} finding${result.perFinding.length === 1 ? "" : "s"} analysed${meta.providerLabel ? ` · ${esc(meta.providerLabel)}` : " · deterministic mock"}</div>
+      <div class="sub">Generated ${esc(new Date(meta.generatedAt).toUTCString())} · ${result.perFinding.length} finding${result.perFinding.length === 1 ? "" : "s"} analysed${meta.providerLabel ? ` · ${esc(meta.providerLabel)}` : " · cached analysis"}</div>
       <div class="badges">
         <span class="badge">CIRT-grade structured analysis</span>
         <span class="badge">MITRE ATT&CK-anchored</span>
@@ -631,10 +543,10 @@ function buildDeepDiveHtml(
 
 
 // ---------------------------------------------------------------------------
-// v2.17 — Free-form chat converse. The floating AI assistant on the OSINT
-// page can hold an open conversation with the analyst about the currently
-// visible findings. Uses the same provider routing as triage/deep-dive
-// (osint_overview lane) so a tenant only needs one provider configured.
+// Free-form chat converse. The global floating AI assistant can answer general
+// analyst questions, optionally grounded in visible Intel Inbox findings and
+// server-fetched source URLs. It uses the dedicated osint_chat routing lane so
+// the chatroom can use a different provider from CIRT overview.
 // ---------------------------------------------------------------------------
 
 import { liveChatJsonDiagnostic } from "./aiLive";
@@ -655,18 +567,61 @@ export interface RunChatConverseResult {
   contextSize: number;
 }
 
-const CONVERSE_SYSTEM = `You are OptraSight's OSINT analyst assistant. You help cyber-security analysts triage open-source threat intelligence findings.
+function extractHttpUrls(text: string): string[] {
+  const matches = text.match(/\bhttps?:\/\/[^\s<>"'`)\]]+/gi) ?? [];
+  return Array.from(new Set(matches.map((url) => url.replace(/[),.;:!?]+$/g, "")))).slice(0, 6);
+}
+
+const CONVERSE_SYSTEM = `You are OptraSight's analyst assistant for threat intelligence, source review, TAP dossiers, hunt-query reasoning, and security-operations triage.
 
 Tone: concise, technical, neutral. No marketing fluff.
 Always answer in English.
 Always return JSON with a single key "reply" whose value is the markdown answer.
 Where useful, structure replies with short bullets, sub-headers, and inline code for technical artifacts (CVEs, IPs, file hashes, ATT&CK IDs).
-If the analyst asks for something you do not have evidence for in the supplied findings, say so explicitly instead of guessing.`;
+When sourceContext is provided, treat it as server-fetched article/reference text for the supplied URLs. Analyze that fetched text instead of assuming the AI provider can browse URLs.
+You may answer general security-operations questions, but distinguish source-backed statements from general guidance.
+If the analyst asks for something you do not have evidence for in the supplied findings or source context, say so explicitly instead of guessing.
+You must not help change, patch, debug, extend, or operate OptraSight's application code, repository, build scripts, routes, schemas, deployment, or dependencies. If asked for software-development assistance, refuse briefly and redirect to threat-intelligence or defensive-operations analysis.`;
+
+const CODE_DEVELOPMENT_POLICY_REPLY = [
+  "I cannot help change, patch, debug, or develop OptraSight platform code from the analyst chat.",
+  "",
+  "I can still help with threat-intelligence review, source analysis, TAP reasoning, CIRT triage, and defensive hunt-query logic.",
+].join("\n");
+
+const SECURITY_ARTIFACT_TERMS = /\b(hunt\s+quer(?:y|ies)|sigma|spl|kql|yara(?:-l)?|snort|suricata|cortex\s+xql|esql|detection\s+rule|ioc|indicator|ttp|attack\s+technique|mitre|siem)\b/i;
+const SOFTWARE_DEVELOPMENT_TERMS = /\b(code|coding|software|develop(?:ment)?|program(?:ming)?|script|typescript|javascript|python|react|tsx|jsx|express|vite|tailwind|drizzle|sqlite|schema|migration|component|route|endpoint|middleware|package\.json|dependency|npm|git|commit|pull\s+request|pr|build|compile|deploy|repository|repo|codebase|source\s+file|server\/|client\/|shared\/|dist\/)\b/i;
+const PLATFORM_CHANGE_ACTIONS = /\b(change|modify|edit|update|patch|fix|debug|implement|add|remove|delete|refactor|rewrite|create|write|generate|run|execute|install|upgrade|downgrade|commit|push|merge|open)\b/i;
+const PLATFORM_TARGET_TERMS = /\b(optrasight|platform|application|app|ui|frontend|backend|server|client|database|api|route|endpoint|auth|login|session|chatbot|chat\s*bot|ai\s+setup|tap|actor\s+observatory|intel\s+inbox)\b/i;
+
+export function isChatbotCodeDevelopmentRequest(text: string): boolean {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) return false;
+
+  // Detection/hunt artifacts are analyst deliverables in BatchOne. Keep those
+  // available even though they can look code-like.
+  if (SECURITY_ARTIFACT_TERMS.test(normalized)) return false;
+
+  const asksForPlatformChange = PLATFORM_CHANGE_ACTIONS.test(normalized) && PLATFORM_TARGET_TERMS.test(normalized);
+  const asksForSoftwareWork = PLATFORM_CHANGE_ACTIONS.test(normalized) && SOFTWARE_DEVELOPMENT_TERMS.test(normalized);
+  const asksForRepoOps = /\b(npm\s+run|git\s+(?:add|commit|push|pull|checkout|merge|reset|status)|apply[_ -]?patch|diff|tsc|eslint|prettier|vite)\b/i.test(normalized);
+
+  return asksForPlatformChange || asksForSoftwareWork || asksForRepoOps;
+}
 
 export async function runChatConverse(storage: any, opts: RunChatConverseOpts): Promise<RunChatConverseResult> {
   const messages = Array.isArray(opts.messages) ? opts.messages.slice(-12) : []; // bound the history sent to the LLM
   if (messages.length === 0 || messages[messages.length - 1].role !== "user") {
     throw new Error("the conversation must end with a user message");
+  }
+
+  const lastUserMessage = messages[messages.length - 1].content;
+  if (isChatbotCodeDevelopmentRequest(lastUserMessage)) {
+    return {
+      reply: CODE_DEVELOPMENT_POLICY_REPLY,
+      providerLabel: "OptraSight policy",
+      contextSize: 0,
+    };
   }
 
   // Compose the user-side payload: history + (optional) finding context.
@@ -691,20 +646,34 @@ export async function runChatConverse(storage: any, opts: RunChatConverseOpts): 
     }
   }
 
+  const explicitUrls = extractHttpUrls(lastUserMessage);
+  const findingUrls = findingCtx.map((f) => f.url).filter((url): url is string => typeof url === "string" && url.length > 0);
+  const urlContextUrls = Array.from(new Set([...explicitUrls, ...findingUrls])).slice(0, 8);
+  const fetchedSources = urlContextUrls.length
+    ? await fetchSourcesBatch(urlContextUrls, { includeReferences: true, maxReferenceLinks: 2 })
+    : [];
+  const sourceContext = fetchedSources
+    .filter((entry) => entry.content && entry.content.trim().length > 0)
+    .map((entry) => ({
+      url: entry.url,
+      text: entry.content!.slice(0, 8_000),
+    }));
+
   const userPayload = {
     findings: findingCtx,
+    sourceContext,
     conversation: messages,
   };
 
   const provider = storage.resolveAiProvider
-    ? storage.resolveAiProvider(opts.tenantId, "osint_overview")
+    ? (storage.resolveAiProvider(opts.tenantId, "osint_chat") ?? storage.resolveAiProvider(opts.tenantId, "osint_overview"))
     : null;
 
   if (!provider || provider.provider === "mock") {
     // Deterministic mock so the UI still works during setup.
     const last = messages[messages.length - 1].content;
-    const reply = `**(no live AI provider configured)**\n\nI heard: _${last.slice(0, 200)}_\n\nConfigure DeepSeek, OpenAI, Anthropic, or Gemini under **AI Setup** for live answers.`;
-    return { reply, providerLabel: "mock", contextSize: findingCtx.length };
+    const reply = `**(no live AI provider configured)**\n\nI heard: _${last.slice(0, 200)}_\n\nConfigure the **Analyst chat** task under **AI Setup** for live answers.`;
+    return { reply, providerLabel: "mock", contextSize: findingCtx.length + sourceContext.length };
   }
 
   const diag = liveChatJsonDiagnostic(provider, {
@@ -720,5 +689,5 @@ export async function runChatConverse(storage: any, opts: RunChatConverseOpts): 
   const reply = typeof (diag.result as any).reply === "string"
     ? (diag.result as any).reply
     : JSON.stringify(diag.result);
-  return { reply, providerLabel: provider.label || provider.provider, contextSize: findingCtx.length };
+  return { reply, providerLabel: provider.label || provider.provider, contextSize: findingCtx.length + sourceContext.length };
 }

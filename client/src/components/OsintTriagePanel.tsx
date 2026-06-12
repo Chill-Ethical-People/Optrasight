@@ -70,7 +70,7 @@ interface CirtJobSummary {
   id: string;
   kind: "chat_triage" | "chat_deep_dive";
   status: "completed" | "failed";
-  payload: { range?: RangeKey; findingIds?: string[]; crossTenant?: boolean };
+  payload: { range?: RangeKey; findingIds?: string[] };
   providerLabel: string | null;
   createdAt: string;
   completedAt: string | null;
@@ -89,43 +89,23 @@ interface PreviewResult {
   completedAt?: string | null;
 }
 
+export function parseCirtDeepLink(hash: string): { mode: "triage" | "deepdive"; jobId: string | null } | null {
+  const qix = hash.indexOf("?");
+  if (qix < 0) return null;
+  const qs = new URLSearchParams(hash.slice(qix + 1));
+  const ai = qs.get("ai");
+  if (ai !== "triage" && ai !== "deep-dive" && ai !== "deepdive") return null;
+  return {
+    mode: ai === "triage" ? "triage" : "deepdive",
+    jobId: qs.get("job"),
+  };
+}
+
 async function startAiJob(path: string, body: any): Promise<string> {
   const r = await apiRequest("POST", path, body);
   const json = await r.json();
   if (!json?.jobId) throw new Error("server did not return a job id");
   return String(json.jobId);
-}
-
-async function pollAiJob<T>(
-  jobId: string,
-  opts: { onTick?: (snap: AiJobSnapshot<T>) => void; signal?: AbortSignal; pollMs?: number; maxMs?: number } = {},
-): Promise<AiJobSnapshot<T>> {
-  const pollMs = opts.pollMs ?? 3000;
-  const maxMs = opts.maxMs ?? 15 * 60 * 1000; // 15 min hard cap on the client side
-  const started = Date.now();
-  while (true) {
-    if (opts.signal?.aborted) throw new Error("Polling cancelled.");
-    const r = await apiRequest("GET", `/api/v1/osint/ai-jobs/${jobId}`);
-    const snap = (await r.json()) as AiJobSnapshot<T>;
-    opts.onTick?.(snap);
-    if (snap.status === "completed" || snap.status === "failed") return snap;
-    if (Date.now() - started > maxMs) throw new Error("AI job exceeded the 15-minute client poll budget. The job may still be running server-side — reload to check.");
-    await new Promise((resolve) => setTimeout(resolve, pollMs));
-  }
-}
-
-function friendlyJobError(snap: AiJobSnapshot<unknown>): { isAiFailure: boolean; message: string } {
-  const err = snap.error;
-  if (!err) return { isAiFailure: false, message: "Job failed without details." };
-  if (err.aiDiagnostic) {
-    const diag: any = err.aiDiagnostic;
-    const provider = err.providerLabel ? `"${err.providerLabel}" ` : "";
-    return {
-      isAiFailure: true,
-      message: `${provider}returned ${diag.httpStatus ? `HTTP ${diag.httpStatus}` : "no response"} after ${diag.latencyMs}ms — ${diag.reason}.`,
-    };
-  }
-  return { isAiFailure: false, message: err.message || "AI job failed." };
 }
 
 function parseApiError(e: any): { isAiFailure: boolean; message: string } {
@@ -173,10 +153,10 @@ function cirtJobLabel(job: Pick<CirtJobSummary, "kind" | "payload" | "targetLabe
   if (job.targetLabel) return job.targetLabel;
   if (job.kind === "chat_triage") {
     const range = job.payload?.range ? RANGE_LABEL[job.payload.range] ?? job.payload.range : "selected range";
-    return `CIRT triage — ${range}${job.payload?.crossTenant ? " (all tenants)" : ""}`;
+    return `CIRT triage — ${range}`;
   }
   const count = job.payload?.findingIds?.length ?? 0;
-  return `CIRT deep-dive — ${count} finding${count === 1 ? "" : "s"}${job.payload?.crossTenant ? " (all tenants)" : ""}`;
+  return `CIRT deep-dive — ${count} finding${count === 1 ? "" : "s"}`;
 }
 
 function previewFromJob(job: AiJobSnapshot<any> | undefined): PreviewResult | null {
@@ -195,11 +175,10 @@ function previewFromJob(job: AiJobSnapshot<any> | undefined): PreviewResult | nu
 interface Props {
   range: RangeKey;
   findings: OsintFindingDTO[];
-  isGlobal?: boolean;
 }
 
 /** Inline triage + deep-dive panel — replaces the old AI Overview card. */
-export default function OsintTriagePanel({ range, findings, isGlobal }: Props) {
+export default function OsintTriagePanel({ range, findings }: Props) {
   const { toast } = useToast();
   const aiAvailability = useAiAvailability();
   const aiDisabled = !aiAvailability.hasUsableProvider;
@@ -208,7 +187,7 @@ export default function OsintTriagePanel({ range, findings, isGlobal }: Props) {
   const [inlinePreview, setInlinePreview] = useState<PreviewResult | null>(null);
 
   const { data: historyData, refetch: refetchCirtHistory } = useQuery<{ jobs: CirtJobSummary[] }>({
-    queryKey: ["/api/v1/osint/ai-jobs/history", isGlobal ? "global" : "tenant"],
+    queryKey: ["/api/v1/osint/ai-jobs/history"],
     queryFn: async () => {
       const r = await apiRequest("GET", "/api/v1/osint/ai-jobs/history?max=20");
       return r.json();
@@ -228,15 +207,10 @@ export default function OsintTriagePanel({ range, findings, isGlobal }: Props) {
   const activePreview = inlinePreview ?? previewFromJob(previewJob);
 
   useEffect(() => {
-    const raw = window.location.hash || "";
-    const qix = raw.indexOf("?");
-    if (qix < 0) return;
-    const qs = new URLSearchParams(raw.slice(qix + 1));
-    const ai = qs.get("ai");
-    const job = qs.get("job");
-    if (ai === "triage") setMode("triage");
-    if (ai === "deep-dive" || ai === "deepdive") setMode("deepdive");
-    if (job) setPreviewJobId(job);
+    const link = parseCirtDeepLink(window.location.hash || "");
+    if (!link) return;
+    setMode(link.mode);
+    if (link.jobId) setPreviewJobId(link.jobId);
   }, []);
 
   // Triage state
@@ -293,23 +267,14 @@ export default function OsintTriagePanel({ range, findings, isGlobal }: Props) {
     setTriageStatus("Submitting job…");
     setTriageStartedAt(Date.now());
     try {
-      // v2.18 — in Global view, the server's __global__ fallback resolves
-      // the admin's own tenant. Pass explicit findingIds + crossTenant so
-      // the AI gets the actual cross-tenant slice the user sees.
-      const body: any = { range };
-      if (isGlobal) {
-        body.crossTenant = true;
-        body.findingIds = filteredFindings.slice(0, 60).map((f) => f.id);
-      }
       // v2.27 — async job + poll. POST returns instantly; the long-running
       // model call happens server-side, immune to edge-proxy timeouts.
-      const jobId = await startAiJob("/api/v1/osint/chat/triage", body);
+      await startAiJob("/api/v1/osint/chat/triage", { range });
       refetchCirtHistory();
       toast({
         title: "CIRT triage queued",
         description: "It will keep running server-side. Open it from the background jobs tray or Recent CIRT Results.",
       });
-      setPreviewJobId(jobId);
     } catch (e: any) {
       const parsed = parseApiError(e);
       toast({ variant: "destructive", title: parsed.isAiFailure ? "AI provider failed" : "Triage failed", description: parsed.message });
@@ -329,17 +294,12 @@ export default function OsintTriagePanel({ range, findings, isGlobal }: Props) {
     setLastDeep(null);
     setDeepStatus("Submitting job…");
     try {
-      // v2.18 — explicit crossTenant flag so Global view can run deep dive
-      // on findings spanning multiple tenants.
-      const body: any = { findingIds: selectedIds };
-      if (isGlobal) body.crossTenant = true;
-      const jobId = await startAiJob("/api/v1/osint/chat/deep-dive", body);
+      await startAiJob("/api/v1/osint/chat/deep-dive", { findingIds: selectedIds });
       refetchCirtHistory();
       toast({
         title: "Deep dive queued",
         description: "It will keep running server-side. Open it from the background jobs tray or Recent CIRT Results.",
       });
-      setPreviewJobId(jobId);
     } catch (e: any) {
       const parsed = parseApiError(e);
       toast({ variant: "destructive", title: parsed.isAiFailure ? "AI provider failed" : "Deep dive failed", description: parsed.message });
@@ -374,10 +334,9 @@ export default function OsintTriagePanel({ range, findings, isGlobal }: Props) {
       <div className="flex items-center gap-2 mb-2">
         <Brain size={14} className="text-primary" />
         <div className="text-sm font-medium">CIRT Triage &amp; Deep Dive</div>
-        {isGlobal && <Badge variant="outline" className="text-[10px]">cross-tenant · global view</Badge>}
       </div>
       <div className="text-xs text-muted-foreground mb-3">
-        Same CIRT-style workflow as the local <span className="font-mono">triage_analyze_v2.py</span> — now inline on the OSINT page. Initial Triage runs a Tier 1-4 bucketed report over the current day range. Deep Dive runs per-finding analysis on a selected subset.{isGlobal && <> <strong>Global view:</strong> triage &amp; deep dive operate across every tenant&apos;s findings using each finding&apos;s own client profile and provider.</>}
+        CIRT triage groups current findings into priority buckets and preserves source context for review. Deep Dive runs per-finding analysis on a selected subset.
       </div>
 
       <Tabs value={mode} onValueChange={(v) => setMode(v as any)} className="space-y-3">
@@ -392,7 +351,7 @@ export default function OsintTriagePanel({ range, findings, isGlobal }: Props) {
 
         <TabsContent value="triage" className="space-y-3 mt-2">
           <div className="text-xs text-muted-foreground">
-            Generates a CIRT Tier 1-4 bucketed report scoped to <strong>{RANGE_LABEL[range]}</strong>. Source URLs are pre-fetched so the AI can read the full article before triaging.
+            Generates a CIRT Tier 1-4 bucketed report scoped to <strong>{RANGE_LABEL[range]}</strong>. OptraSight fetches source context before triage so the report stays tied to the original evidence.
           </div>
           <Button
             onClick={runTriage}
@@ -420,7 +379,7 @@ export default function OsintTriagePanel({ range, findings, isGlobal }: Props) {
               <div className="flex items-center justify-between flex-wrap gap-2 pb-2 border-b">
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <Badge variant="secondary" className="text-[10px]">{triageReport.itemsAnalysed} items · {triageReport.rangeLabel}</Badge>
-                  <span>via {triageReport.providerLabel ?? "mock"}</span>
+                  <span>via {triageReport.providerLabel ?? "configured provider"}</span>
                 </div>
                 <Button
                   size="sm" variant="outline"
@@ -530,7 +489,7 @@ export default function OsintTriagePanel({ range, findings, isGlobal }: Props) {
                 <Check size={14} /> Report ready
               </div>
               <div className="text-xs text-muted-foreground mb-2">
-                <strong>{lastDeep.htmlFileName}</strong> · {lastDeep.perFinding.length} findings · via {lastDeep.providerLabel ?? "mock"}
+                <strong>{lastDeep.htmlFileName}</strong> · {lastDeep.perFinding.length} findings · via {lastDeep.providerLabel ?? "configured provider"}
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button
@@ -597,10 +556,11 @@ export default function OsintTriagePanel({ range, findings, isGlobal }: Props) {
                     size="sm"
                     variant="outline"
                     className="h-7 px-2 text-[11px]"
+                    disabled={!ok}
                     onClick={() => { setInlinePreview(null); setPreviewJobId(job.id); }}
                     data-testid={`button-preview-cirt-${job.id}`}
                   >
-                    <Eye size={11} className="mr-1" />Preview
+                    <Eye size={11} className="mr-1" />{ok ? "Preview" : "Pending"}
                   </Button>
                 </div>
               );

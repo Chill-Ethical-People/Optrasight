@@ -18,15 +18,16 @@ const KIND_LABEL: Record<string, string> = {
   chat_deep_dive: "CIRT deep-dive",
   finding_ai_triage: "Finding AI triage",
   osint_analysis: "OSINT AI analysis",
-  young_domain_analysis: "Malicious-site AI analysis",
   hunt_query_generation: "Hunt query generation",
-  email_draft_generation: "Email draft generation",
   detection_rule_generation: "Detection rule generation",
-  exercise_generation: "Exercise generation",
   osint_triage: "CIRT triage",
   osint_deep_dive: "CIRT deep-dive",
   osint_run: "OSINT collection run",
 };
+
+export function aiJobKindLabel(kind: string): string {
+  return KIND_LABEL[kind] ?? kind.replaceAll("_", " ");
+}
 
 function elapsed(job: AiJobSummary): string {
   const start = job.startedAt ?? job.createdAt;
@@ -39,6 +40,21 @@ function elapsed(job: AiJobSummary): string {
   const m = Math.floor(s / 60);
   const rem = s % 60;
   return rem === 0 ? `${m}m` : `${m}m ${rem}s`;
+}
+
+export function aiJobRowState(job: AiJobSummary, variant: "running" | "finished") {
+  const kindLabel = aiJobKindLabel(job.kind);
+  const target = job.targetLabel ?? "";
+  const ok = job.status === "succeeded" || job.status === "completed";
+  const fail = job.status === "failed" || job.status === "completed_with_errors";
+  return {
+    kindLabel,
+    target,
+    ok,
+    fail,
+    openUrl: job.targetUrl ?? null,
+    isRunning: variant === "running",
+  };
 }
 
 export function AiJobsTray() {
@@ -102,10 +118,7 @@ export function AiJobsTray() {
 }
 
 function JobRow({ job, variant }: { job: AiJobSummary; variant: "running" | "finished" }) {
-  const kindLabel = KIND_LABEL[job.kind] ?? job.kind.replaceAll("_", " ");
-  const target = job.targetLabel ?? "";
-  const ok = job.status === "succeeded" || job.status === "completed";
-  const fail = job.status === "failed" || job.status === "completed_with_errors";
+  const { kindLabel, target, ok, fail } = aiJobRowState(job, variant);
 
   return (
     <div className="px-3 py-2.5 flex items-start gap-2.5" data-testid={`aijob-row-${job.id}`}>

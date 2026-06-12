@@ -25,10 +25,6 @@ const uid = () => randomUUID();
 const now = () => new Date().toISOString();
 const j = (v) => JSON.stringify(v);
 
-function parseJson(value, fallback) {
-  try { const p = JSON.parse(value || ""); return p == null ? fallback : p; } catch { return fallback; }
-}
-
 // ─── C1. Remove synthetic placeholder IOCs ───────────────────────────────────
 // These "frede"/"aborede" pattern domains were auto-generated placeholders,
 // NOT real threat actor infrastructure.

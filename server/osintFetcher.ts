@@ -33,6 +33,7 @@ import { MONITORED_TECHNOLOGIES, type FindingIoCs } from "../shared/schema";
 import { OSINT_SOURCES, type OsintSourceSeed } from "./osintSeed";
 import { createHash } from "crypto";
 import { isSecurityPublisherHost } from "./iocPublisherBlocklist";
+import { isSafeSourceFetchUrl } from "./sourceFetch";
 
 export interface ParsedItem {
   sourceId?: string;          // canonical osrc-XXXX id from the catalog (when known)
@@ -60,6 +61,7 @@ const FETCH_TIMEOUT_MS = 9000;
 const FEED_CONCURRENCY = 8;
 
 async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
+  if (!(await isSafeSourceFetchUrl(url))) throw new Error("unsafe source URL");
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), FETCH_TIMEOUT_MS);
   try {
@@ -463,7 +465,7 @@ export function extractIoCs(text: string, sourceUrl?: string | null): FindingIoC
   if (ipv6.length) out.ipv6 = dedupeCap(ipv6);
 
   // URLs (normalised) — strip the article's own URL.
-  const urlsRaw = (s.match(URL_RE) || []).map((u) => normaliseUrl(u.replace(/[\)\].,;:!\?]+$/, "")));
+  const urlsRaw = (s.match(URL_RE) || []).map((u) => normaliseUrl(u.replace(/[)\].,;:!?]+$/, "")));
   const urls: string[] = [];
   for (const u of urlsRaw) {
     if (sourceUrls.has(u)) continue;
@@ -1098,11 +1100,13 @@ function buildDeepParsers(): DeepParser[] {
   });
 
   // ---- 13-16. KrebsOnSecurity / DarkReading / SecurityWeek / Schneier ----
-  const RICH_RSS: Array<[string, string, string, string]> = [
+  const RICH_RSS: Array<[string, string, string | string[], string]> = [
     ["KrebsOnSecurity", "SECURITY_NEWS", "https://krebsonsecurity.com/feed/", "https://krebsonsecurity.com/"],
     ["Dark Reading", "SECURITY_NEWS", "https://www.darkreading.com/rss.xml", "https://www.darkreading.com/"],
     ["SecurityWeek", "SECURITY_NEWS", "https://feeds.feedburner.com/Securityweek", "https://www.securityweek.com/"],
     ["Schneier on Security", "SECURITY_NEWS", "https://www.schneier.com/feed/atom/", "https://www.schneier.com/"],
+    ["Graham Cluley", "SECURITY_NEWS", "https://grahamcluley.com/feed/", "https://grahamcluley.com/"],
+    ["Troy Hunt", "SECURITY_NEWS", "https://www.troyhunt.com/rss/", "https://www.troyhunt.com/"],
     ["The Register Security", "SECURITY_NEWS", "https://www.theregister.com/security/headlines.atom", "https://www.theregister.com/security/"],
     ["SANS ISC Diary", "SECURITY_NEWS", "https://isc.sans.edu/rssfeed_full.xml", "https://isc.sans.edu/"],
     ["The DFIR Report", "SECURITY_NEWS", "https://thedfirreport.com/feed/", "https://thedfirreport.com/"],
@@ -1112,27 +1116,41 @@ function buildDeepParsers(): DeepParser[] {
     ["Help Net Security", "SECURITY_NEWS", "https://www.helpnetsecurity.com/feed/", "https://www.helpnetsecurity.com/"],
     ["Cisco Talos", "SECURITY_NEWS", "https://blog.talosintelligence.com/feeds/posts/default", "https://blog.talosintelligence.com/"],
     ["Microsoft Threat Intelligence", "SECURITY_NEWS", "https://www.microsoft.com/en-us/security/blog/feed/", "https://www.microsoft.com/security/blog/"],
-    ["Mandiant Threat Research", "SECURITY_NEWS", "https://cloud.google.com/blog/topics/threat-intelligence/rss/", "https://cloud.google.com/blog/topics/threat-intelligence"],
+    [
+      "Mandiant — Threat Intelligence",
+      "VENDOR_RESEARCH",
+      [
+        "https://feeds.feedburner.com/threatintelligence/pvexyqv7v0v",
+        "https://cloudblog.withgoogle.com/blog/topics/threat-intelligence/rss/",
+        "https://cloud.google.com/blog/topics/threat-intelligence/rss/",
+      ],
+      "https://cloud.google.com/blog/topics/threat-intelligence",
+    ],
     ["CrowdStrike Adversary blog", "SECURITY_NEWS", "https://www.crowdstrike.com/blog/feed/", "https://www.crowdstrike.com/blog/"],
     ["Unit 42 (Palo Alto)", "SECURITY_NEWS", "https://unit42.paloaltonetworks.com/feed/", "https://unit42.paloaltonetworks.com/"],
     ["Trend Micro Research", "SECURITY_NEWS", "https://feeds.trendmicro.com/TrendMicroResearch", "https://www.trendmicro.com/"],
     ["SentinelLabs", "SECURITY_NEWS", "https://www.sentinelone.com/labs/feed/", "https://www.sentinelone.com/labs/"],
-    ["ESET WeLiveSecurity", "SECURITY_NEWS", "https://www.welivesecurity.com/en/rss/feed/", "https://www.welivesecurity.com/"],
+    ["ESET WeLiveSecurity", "VENDOR_RESEARCH", ["https://feeds.feedburner.com/eset/blog", "https://www.welivesecurity.com/en/rss/feed/"], "https://www.welivesecurity.com/"],
+    ["Fortinet — FortiGuard Labs Threat Research", "VENDOR_RESEARCH", "https://feeds.fortinet.com/fortinet/blog/threat-research", "https://www.fortinet.com/blog/threat-research"],
     ["Securelist (Kaspersky)", "SECURITY_NEWS", "https://securelist.com/feed/", "https://securelist.com/"],
     ["Volexity", "SECURITY_NEWS", "https://www.volexity.com/blog/feed/", "https://www.volexity.com/"],
     ["Proofpoint Threat Insight", "SECURITY_NEWS", "https://www.proofpoint.com/us/threat-insight/feed", "https://www.proofpoint.com/"],
     ["Group-IB blog", "SECURITY_NEWS", "https://www.group-ib.com/blog/feed/", "https://www.group-ib.com/"],
     ["Tenable Blog Vulnerabilities", "SECURITY_NEWS", "https://www.tenable.com/blog/feed/category/vulnerabilities", "https://www.tenable.com/blog/"],
     ["Rapid7", "SECURITY_NEWS", "https://blog.rapid7.com/rss/", "https://blog.rapid7.com/"],
-    ["Sophos News Security Operations", "SECURITY_NEWS", "https://news.sophos.com/en-us/category/security-operations/feed/", "https://news.sophos.com/"],
+    ["Sophos — Security Operations", "VENDOR_RESEARCH", ["https://www.sophos.com/en-us/category/security-operations/feed", "https://news.sophos.com/en-us/category/security-operations/feed/"], "https://www.sophos.com/en-us/category/security-operations"],
     ["Malwarebytes Labs", "SECURITY_NEWS", "https://www.malwarebytes.com/blog/feed", "https://www.malwarebytes.com/blog"],
     ["Snyk Vulnerabilities", "SECURITY_NEWS", "https://snyk.io/blog/category/vulnerabilities/feed/", "https://snyk.io/blog/"],
     ["AttackerKB", "SECURITY_NEWS", "https://attackerkb.com/api/feed", "https://attackerkb.com/"],
     ["GreyNoise blog", "SECURITY_NEWS", "https://www.greynoise.io/blog/rss.xml", "https://www.greynoise.io/"],
+    // v2.11 threat intel RSS
+    ["MITRE ATT&CK — Updates Blog", "THREAT_INTEL", "https://medium.com/feed/mitre-attack", "https://medium.com/mitre-attack"],
+    ["DataBreaches.net", "RANSOMWARE_LEAK", "http://feeds.feedburner.com/OfficeOfInadequateSecurity", "https://www.databreaches.net/"],
   ];
-  for (const [name, cat, url, landing] of RICH_RSS) {
+  for (const [name, cat, urlOrUrls, landing] of RICH_RSS) {
+    const urls = Array.isArray(urlOrUrls) ? urlOrUrls : [urlOrUrls];
     let host = "";
-    try { host = new URL(url).hostname.toLowerCase(); } catch { /* ignore */ }
+    try { host = new URL(urls[0]).hostname.toLowerCase(); } catch { /* ignore */ }
     parsers.push({
       id: `deep-rich-${name.toLowerCase().replace(/\W+/g, "-")}`,
       // v2.9 fix: match catalog source by exact name (with host fallback) so
@@ -1142,34 +1160,362 @@ function buildDeepParsers(): DeepParser[] {
       sourceCategory: cat,
       sourceUrl: landing,
       run: async ({ sinceIso, maxItems }) => {
-        let r: Response;
-        try { r = await fetchWithTimeout(url); } catch { return []; }
-        if (!r.ok) return [];
-        const entries = parseFeed(await r.text());
         const out: ParsedItem[] = [];
-        for (const e of entries.slice(0, maxItems)) {
-          const pub = safeDateIso(e.pubDate);
-          if (pub < sinceIso) continue;
-          const text = `${e.title} ${e.description}`;
-          out.push({
-            sourceName: name,
-            sourceCategory: cat,
-            sourceUrl: landing,
-            title: e.title,
-            url: e.link,
-            publishedAt: pub,
-            severity: severityFromText(text),
-            cveIds: extractCves(text),
-            affectedTech: detectTech(text),
-            threatActors: detectActors(text),
-            summary: e.description.slice(0, 320),
-            rawSnippet: `[${name}]\n${e.title}\n${e.link}\n\n${e.description}`,
-          });
+        for (const url of urls) {
+          let r: Response;
+          try { r = await fetchWithTimeout(url); } catch { continue; }
+          if (!r.ok) continue;
+          const entries = parseFeed(await r.text());
+          for (const e of entries.slice(0, maxItems)) {
+            const pub = safeDateIso(e.pubDate);
+            if (pub < sinceIso) continue;
+            const text = `${e.title} ${e.description}`;
+            out.push({
+              sourceName: name,
+              sourceCategory: cat,
+              sourceUrl: landing,
+              title: e.title,
+              url: e.link,
+              publishedAt: pub,
+              severity: severityFromText(text),
+              cveIds: extractCves(text),
+              affectedTech: detectTech(text),
+              threatActors: detectActors(text),
+              summary: e.description.slice(0, 320),
+              rawSnippet: `[${name}]\n${e.title}\n${e.link}\n\n${e.description}`,
+            });
+            if (out.length >= maxItems) return out;
+          }
         }
         return out;
       },
     });
   }
+
+  // ========================================================================
+  // v2.11 — STRUCTURED THREAT INTEL FEED PARSERS
+  // ========================================================================
+
+  // ---- abuse.ch — Feodo Tracker C2 botnet IPs (public, no auth) ----
+  parsers.push({
+    id: "deep-abusech-feodo",
+    sourceId: "osrc-1043",
+    sourceName: "abuse.ch — Feodo Tracker C2 IPs",
+    sourceCategory: "THREAT_INTEL",
+    sourceUrl: "https://feodotracker.abuse.ch/",
+    run: async ({ maxItems }) => {
+      const r = await fetchWithTimeout("https://feodotracker.abuse.ch/downloads/ipblocklist_recommended.txt");
+      if (!r.ok) return [];
+      const text = await r.text();
+      const lines = text.split("\n").filter(l => l.trim() && !l.startsWith("#"));
+      const ips = lines.slice(0, maxItems);
+      if (ips.length === 0) return [];
+      return [{
+        sourceId: "osrc-1043",
+        sourceName: "abuse.ch — Feodo Tracker C2 IPs",
+        sourceCategory: "THREAT_INTEL",
+        sourceUrl: "https://feodotracker.abuse.ch/",
+        title: `Feodo Tracker: ${ips.length} active botnet C2 IPs`,
+        url: "https://feodotracker.abuse.ch/blocklist/",
+        publishedAt: new Date().toISOString(),
+        severity: "critical",
+        cveIds: [],
+        affectedTech: [],
+        threatActors: ["Emotet", "Dridex", "TrickBot", "QakBot"],
+        iocs: { ipv4: ips.slice(0, 20) },
+        summary: `${ips.length} botnet C2 server IPs recommended for blocking. Associated with Emotet, Dridex, TrickBot, and QakBot banking trojans.`,
+        rawSnippet: `[Feodo Tracker]\nActive C2 IPs (${ips.length} total):\n${ips.slice(0, 20).join("\n")}`,
+      }];
+    },
+  });
+
+  // ---- DShield / SANS — Top Attacker IPs ----
+  parsers.push({
+    id: "deep-dshield-top",
+    sourceId: "osrc-1048",
+    sourceName: "DShield — SANS Top Attackers",
+    sourceCategory: "THREAT_INTEL",
+    sourceUrl: "https://isc.sans.edu/",
+    run: async ({ maxItems }) => {
+      const r = await fetchWithTimeout("https://isc.sans.edu/api/topips/records/100?json");
+      if (!r.ok) return [];
+      const j = await r.json() as any;
+      const records = Array.isArray(j) ? j : [];
+      const ips = records.map((rec: any) => rec.source).filter(Boolean).slice(0, maxItems);
+      if (ips.length === 0) return [];
+      return [{
+        sourceId: "osrc-1048",
+        sourceName: "DShield — SANS Top Attackers",
+        sourceCategory: "THREAT_INTEL",
+        sourceUrl: "https://isc.sans.edu/",
+        title: `DShield: Top ${ips.length} attacking IPs (last 24h)`,
+        url: "https://isc.sans.edu/topips.html",
+        publishedAt: new Date().toISOString(),
+        severity: "medium",
+        cveIds: [],
+        affectedTech: [],
+        threatActors: [],
+        iocs: { ipv4: ips.slice(0, 20) },
+        summary: `Top ${ips.length} source IPs reported to the SANS DShield distributed sensor network in the last 24 hours.`,
+        rawSnippet: `[DShield]\nTop attacking IPs:\n${ips.slice(0, 20).join("\n")}`,
+      }];
+    },
+  });
+
+  // ---- Spamhaus DROP — Don't Route Or Peer ----
+  parsers.push({
+    id: "deep-spamhaus-drop",
+    sourceId: "osrc-1049",
+    sourceName: "Spamhaus DROP — Do Not Route",
+    sourceCategory: "THREAT_INTEL",
+    sourceUrl: "https://www.spamhaus.org/drop/",
+    run: async () => {
+      const r = await fetchWithTimeout("https://www.spamhaus.org/drop/drop.txt");
+      if (!r.ok) return [];
+      const text = await r.text();
+      const cidrs = text.split("\n")
+        .map(l => l.split(";")[0].trim())
+        .filter(l => l && !l.startsWith(";"));
+      if (cidrs.length === 0) return [];
+      return [{
+        sourceId: "osrc-1049",
+        sourceName: "Spamhaus DROP — Do Not Route",
+        sourceCategory: "THREAT_INTEL",
+        sourceUrl: "https://www.spamhaus.org/drop/",
+        title: `Spamhaus DROP: ${cidrs.length} CIDR blocks — Do Not Route Or Peer`,
+        url: "https://www.spamhaus.org/drop/drop.txt",
+        publishedAt: new Date().toISOString(),
+        severity: "high",
+        cveIds: [],
+        affectedTech: [],
+        threatActors: [],
+        iocs: { ipv4: cidrs.slice(0, 20) },
+        summary: `Spamhaus DROP list contains ${cidrs.length} netblocks hijacked by cyber criminals and used for spam, malware, and C2 operations.`,
+        rawSnippet: `[Spamhaus DROP]\nBlocked CIDRs (${cidrs.length} total):\n${cidrs.slice(0, 20).join("\n")}`,
+      }];
+    },
+  });
+
+  // ---- Blocklist.de — All Attack IPs ----
+  parsers.push({
+    id: "deep-blocklist-de",
+    sourceId: "osrc-1051",
+    sourceName: "Blocklist.de — All Attack IPs",
+    sourceCategory: "THREAT_INTEL",
+    sourceUrl: "https://www.blocklist.de/",
+    run: async ({ maxItems }) => {
+      const r = await fetchWithTimeout("https://lists.blocklist.de/lists/all.txt");
+      if (!r.ok) return [];
+      const text = await r.text();
+      const ips = text.split("\n").filter(l => l.trim() && /^\d+\.\d+\.\d+\.\d+$/.test(l.trim())).slice(0, maxItems);
+      if (ips.length === 0) return [];
+      return [{
+        sourceId: "osrc-1051",
+        sourceName: "Blocklist.de — All Attack IPs",
+        sourceCategory: "THREAT_INTEL",
+        sourceUrl: "https://www.blocklist.de/",
+        title: `Blocklist.de: ${ips.length} attack source IPs (last 48h)`,
+        url: "https://www.blocklist.de/en/export.html",
+        publishedAt: new Date().toISOString(),
+        severity: "medium",
+        cveIds: [],
+        affectedTech: [],
+        threatActors: [],
+        iocs: { ipv4: ips.slice(0, 20) },
+        summary: `${ips.length} IPs reported attacking services (SSH, mail, web, FTP, SIP) in the last 48 hours via the blocklist.de fail2ban network.`,
+        rawSnippet: `[Blocklist.de]\nAttack IPs (${ips.length} total):\n${ips.slice(0, 20).join("\n")}`,
+      }];
+    },
+  });
+
+  // ---- Tor Exit Nodes ----
+  parsers.push({
+    id: "deep-tor-exits",
+    sourceId: "osrc-1052",
+    sourceName: "Tor Exit Nodes — Bulk Exit List",
+    sourceCategory: "THREAT_INTEL",
+    sourceUrl: "https://check.torproject.org/",
+    run: async ({ maxItems }) => {
+      const r = await fetchWithTimeout("https://check.torproject.org/torbulkexitlist");
+      if (!r.ok) return [];
+      const text = await r.text();
+      const ips = text.split("\n").filter(l => l.trim() && /^\d+\.\d+\.\d+\.\d+$/.test(l.trim())).slice(0, maxItems);
+      if (ips.length === 0) return [];
+      return [{
+        sourceId: "osrc-1052",
+        sourceName: "Tor Exit Nodes — Bulk Exit List",
+        sourceCategory: "THREAT_INTEL",
+        sourceUrl: "https://check.torproject.org/",
+        title: `Tor Exit Nodes: ${ips.length} active exit relays`,
+        url: "https://check.torproject.org/torbulkexitlist",
+        publishedAt: new Date().toISOString(),
+        severity: "info",
+        cveIds: [],
+        affectedTech: [],
+        threatActors: [],
+        iocs: { ipv4: ips.slice(0, 20) },
+        summary: `${ips.length} active Tor exit relay IPs. Traffic from these IPs may be anonymized and warrants additional scrutiny.`,
+        rawSnippet: `[Tor Exit Nodes]\nActive exit relays (${ips.length} total):\n${ips.slice(0, 20).join("\n")}`,
+      }];
+    },
+  });
+
+  // ---- TweetFeed — Security Researcher IOCs from Twitter/X ----
+  parsers.push({
+    id: "deep-tweetfeed",
+    sourceId: "osrc-1053",
+    sourceName: "TweetFeed — Security Researcher IOCs",
+    sourceCategory: "THREAT_INTEL",
+    sourceUrl: "https://tweetfeed.live/",
+    run: async ({ maxItems }) => {
+      const r = await fetchWithTimeout("https://api.tweetfeed.live/v1/month/");
+      if (!r.ok) return [];
+      const j = await r.json() as any;
+      const items = Array.isArray(j) ? j : [];
+      if (items.length === 0) return [];
+      const out: ParsedItem[] = [];
+      const grouped = new Map<string, any[]>();
+      for (const item of items) {
+        const tag = item.tags?.[0] || item.type || "unknown";
+        if (!grouped.has(tag)) grouped.set(tag, []);
+        grouped.get(tag)!.push(item);
+      }
+      for (const [tag, entries] of grouped) {
+        if (out.length >= maxItems) break;
+        const iocs: any = {};
+        for (const e of entries.slice(0, 20)) {
+          const v = e.value || "";
+          const t = (e.type || "").toLowerCase();
+          if (t === "ip") (iocs.ipv4 ||= []).push(v);
+          else if (t === "domain") (iocs.domain ||= []).push(v);
+          else if (t === "url") (iocs.url ||= []).push(v);
+          else if (t === "sha256") (iocs.sha256 ||= []).push(v);
+          else if (t === "md5") (iocs.md5 ||= []).push(v);
+        }
+        out.push({
+          sourceId: "osrc-1053",
+          sourceName: "TweetFeed — Security Researcher IOCs",
+          sourceCategory: "THREAT_INTEL",
+          sourceUrl: "https://tweetfeed.live/",
+          title: `TweetFeed: ${entries.length} IOCs tagged "${tag}" (last 30 days)`,
+          url: `https://tweetfeed.live/?tag=${encodeURIComponent(tag)}`,
+          publishedAt: entries[0]?.date ? new Date(entries[0].date).toISOString() : new Date().toISOString(),
+          severity: "medium",
+          cveIds: [],
+          affectedTech: [],
+          threatActors: detectActors(tag),
+          iocs,
+          summary: `${entries.length} IOCs shared by security researchers on Twitter/X, tagged as "${tag}".`,
+          rawSnippet: `[TweetFeed]\nTag: ${tag}\nCount: ${entries.length}\nSample IOCs:\n${entries.slice(0, 10).map((e: any) => `${e.type}: ${e.value}`).join("\n")}`,
+        });
+      }
+      return out;
+    },
+  });
+
+  // ---- Botvrij.eu — CSIRT MISP event IOCs ----
+  parsers.push({
+    id: "deep-botvrij",
+    sourceId: "osrc-1054",
+    sourceName: "Botvrij.eu — CSIRT MISP Events",
+    sourceCategory: "THREAT_INTEL",
+    sourceUrl: "https://www.botvrij.eu/",
+    run: async ({ maxItems }) => {
+      const idx = await fetchWithTimeout("http://www.botvrij.eu/data/feed-osint/");
+      if (!idx.ok) return [];
+      const html = await idx.text();
+      const fileRe = /href="([0-9a-f-]{36}\.json)"/g;
+      const files: string[] = [];
+      let m: RegExpExecArray | null;
+      while ((m = fileRe.exec(html)) !== null) files.push(m[1]);
+      if (files.length === 0) return [];
+      const out: ParsedItem[] = [];
+      const batch = files.slice(-Math.min(files.length, maxItems * 2));
+      for (const fname of batch) {
+        if (out.length >= maxItems) break;
+        let ev: any;
+        try {
+          const r = await fetchWithTimeout(`http://www.botvrij.eu/data/feed-osint/${fname}`);
+          if (!r.ok) continue;
+          ev = await r.json();
+        } catch { continue; }
+        const event = ev?.Event;
+        if (!event) continue;
+        const attrs = event.Attribute || [];
+        const iocs: any = {};
+        for (const a of attrs) {
+          const t = (a.type || "").toLowerCase();
+          const v = a.value || "";
+          if (!v) continue;
+          if (t === "ip-src" || t === "ip-dst") (iocs.ipv4 ||= []).push(v.split("|")[0]);
+          else if (t === "domain" || t === "hostname") (iocs.domain ||= []).push(v);
+          else if (t === "url" || t === "uri") (iocs.url ||= []).push(v);
+          else if (t === "sha256") (iocs.sha256 ||= []).push(v);
+          else if (t === "sha1") (iocs.sha1 ||= []).push(v);
+          else if (t === "md5") (iocs.md5 ||= []).push(v);
+        }
+        const tags = (event.Tag || []).map((t: any) => t.name || "").filter(Boolean);
+        const actors = detectActors(tags.join(" ") + " " + (event.info || ""));
+        const threatLevel: Record<string, ParsedItem["severity"]> = { "1": "high", "2": "medium", "3": "low", "4": "info" };
+        out.push({
+          sourceId: "osrc-1054",
+          sourceName: "Botvrij.eu — CSIRT MISP Events",
+          sourceCategory: "THREAT_INTEL",
+          sourceUrl: "https://www.botvrij.eu/",
+          title: `Botvrij: ${event.info || fname}`,
+          url: `http://www.botvrij.eu/data/feed-osint/${fname}`,
+          publishedAt: event.publish_timestamp
+            ? new Date(Number(event.publish_timestamp) * 1000).toISOString()
+            : new Date(event.date || Date.now()).toISOString(),
+          severity: threatLevel[event.threat_level_id] || "medium",
+          cveIds: extractCves((event.info || "") + " " + attrs.map((a: any) => a.value).join(" ")),
+          affectedTech: detectTech((event.info || "") + " " + attrs.map((a: any) => a.value).join(" ")),
+          threatActors: actors,
+          iocs,
+          summary: `MISP event from ${event.Orgc?.name || "Botvrij CSIRT"}: ${(event.info || "").slice(0, 260)}. ${attrs.length} attributes.`,
+          rawSnippet: `[Botvrij.eu MISP]\nEvent: ${event.info}\nOrg: ${event.Orgc?.name}\nDate: ${event.date}\nThreat level: ${event.threat_level_id}\nTags: ${tags.slice(0, 10).join(", ")}\nAttributes: ${attrs.length}\nSample IOCs:\n${attrs.slice(0, 15).map((a: any) => `${a.type}: ${a.value}`).join("\n")}`,
+        });
+      }
+      return out;
+    },
+  });
+
+  // ---- C2IntelFeeds — Active C2 servers from GitHub repo ----
+  parsers.push({
+    id: "deep-c2intelfeeds",
+    sourceId: "osrc-1057",
+    sourceName: "C2IntelFeeds — Active C2 Servers",
+    sourceCategory: "THREAT_INTEL",
+    sourceUrl: "https://github.com/drb-ra/C2IntelFeeds",
+    run: async ({ maxItems }) => {
+      const r = await fetchWithTimeout("https://raw.githubusercontent.com/drb-ra/C2IntelFeeds/master/feeds/IPC2s-30day.csv");
+      if (!r.ok) return [];
+      const text = await r.text();
+      const lines = text.split("\n").filter(l => l.trim() && !l.startsWith("#") && !l.startsWith("ioc"));
+      const ips: string[] = [];
+      for (const line of lines.slice(0, maxItems)) {
+        const ip = line.split(",")[0]?.trim();
+        if (ip && /^\d+\.\d+\.\d+\.\d+/.test(ip)) ips.push(ip);
+      }
+      if (ips.length === 0) return [];
+      return [{
+        sourceId: "osrc-1057",
+        sourceName: "C2IntelFeeds — Active C2 Servers",
+        sourceCategory: "THREAT_INTEL",
+        sourceUrl: "https://github.com/drb-ra/C2IntelFeeds",
+        title: `C2IntelFeeds: ${ips.length} active C2 server IPs (last 30 days)`,
+        url: "https://github.com/drb-ra/C2IntelFeeds",
+        publishedAt: new Date().toISOString(),
+        severity: "high",
+        cveIds: [],
+        affectedTech: [],
+        threatActors: [],
+        iocs: { ipv4: ips.slice(0, 20) },
+        summary: `${ips.length} active Command & Control server IPs detected in the last 30 days. Includes Cobalt Strike, Metasploit, and other C2 framework beacons.`,
+        rawSnippet: `[C2IntelFeeds]\nActive C2 IPs (${ips.length} total):\n${ips.slice(0, 20).join("\n")}`,
+      }];
+    },
+  });
 
   return parsers;
 }
@@ -1236,7 +1582,7 @@ function looksLikeFeedUrl(url: string): boolean {
   // /feed|/rss|/atom in the path.
   if (/\.(rss|xml|atom|rdf)(\?|$)/.test(u)) return true;
   if (/\/feeds?\//.test(u)) return true;
-  if (/[?&\/](rss|atom|feed)([\/?&=]|$)/.test(u)) return true;
+  if (/[?&/](rss|atom|feed)([/?&=]|$)/.test(u)) return true;
   if (/(\/feed\/?$|\/rss\/?$|\/atom\/?$)/.test(u)) return true;
   return false;
 }
@@ -1281,6 +1627,7 @@ export async function runBroadIngest(opts: {
   maxTotal: number;            // hard cap on total returned items
   deepOnly?: boolean;          // skip the generic 514-source walk (used by legacy scan)
   categoryFilter?: string[];   // optional whitelist of seed categories
+  onProgress?: (progress: { attempted: number; total: number; parsed: number; feedsOk: number }) => void;
 }): Promise<{ items: ParsedItem[]; feedsTried: number; feedsOk: number; errors: string[] }> {
   const errors: string[] = [];
   const collected: ParsedItem[] = [];
@@ -1289,11 +1636,28 @@ export async function runBroadIngest(opts: {
 
   // ---- Phase A: deep parsers ----
   const deep = buildDeepParsers();
+  const candidates = opts.deepOnly ? [] : OSINT_SOURCES.filter((s) => {
+    if (opts.categoryFilter && !opts.categoryFilter.includes(s.category)) return false;
+    const FEED_CATS = new Set(["SECURITY_NEWS","CVE_VULN","CERT_GOV","VENDOR_RESEARCH","THREAT_INTEL","RANSOMWARE_LEAK"]);
+    if (!FEED_CATS.has(s.category)) return false;
+    return looksLikeFeedUrl(s.url);
+  });
+  const totalFeeds = deep.length + candidates.length;
+  const emitProgress = () => {
+    opts.onProgress?.({
+      attempted: feedsTried,
+      total: totalFeeds,
+      parsed: collected.length,
+      feedsOk,
+    });
+  };
+  emitProgress();
   let di = 0;
   async function deepWorker() {
     while (di < deep.length && collected.length < opts.maxTotal) {
       const p = deep[di++];
       feedsTried += 1;
+      emitProgress();
       try {
         const items = await p.run({ sinceIso: opts.sinceIso, maxItems: opts.maxPerSource * 3 });
         if (items.length > 0) feedsOk += 1;
@@ -1304,6 +1668,8 @@ export async function runBroadIngest(opts: {
         }
       } catch (e: any) {
         errors.push(`${p.id}: ${e?.message || e}`);
+      } finally {
+        emitProgress();
       }
     }
   }
@@ -1316,18 +1682,12 @@ export async function runBroadIngest(opts: {
   // ---- Phase B: generic catalog walk (v2.8 — RSS/Atom XML only) ----
   // Pre-filter sources: skip anything that isn't a feed-style URL. JSON sources
   // (NVD/GHSA/OSV/KEV/etc.) are handled by hand-written deep parsers above.
-  const candidates = OSINT_SOURCES.filter((s) => {
-    if (opts.categoryFilter && !opts.categoryFilter.includes(s.category)) return false;
-    const FEED_CATS = new Set(["SECURITY_NEWS","CVE_VULN","CERT_GOV","VENDOR_RESEARCH","RANSOMWARE_LEAK"]);
-    if (!FEED_CATS.has(s.category)) return false;
-    return looksLikeFeedUrl(s.url);
-  });
-
   let gi = 0;
   async function genericWorker() {
     while (gi < candidates.length && collected.length < opts.maxTotal) {
       const src = candidates[gi++];
       feedsTried += 1;
+      emitProgress();
       try {
         const items = await runOneGeneric(src, opts.sinceIso, opts.maxPerSource);
         if (items.length > 0) feedsOk += 1;
@@ -1337,6 +1697,8 @@ export async function runBroadIngest(opts: {
         }
       } catch (e: any) {
         errors.push(`${src.id}: ${e?.message || e}`);
+      } finally {
+        emitProgress();
       }
     }
   }

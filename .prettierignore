@@ -1,0 +1,16 @@
+dist
+node_modules
+coverage
+data
+data*.db*
+branding
+docs/mockups
+output
+tmp
+package-lock.json
+*.html
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.svg

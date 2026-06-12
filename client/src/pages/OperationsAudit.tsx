@@ -16,7 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { navigateToAiJobTarget } from "@/lib/aiJobs";
+import { navigateToAiJobTarget, useAiJobs, type AiJobSummary } from "@/lib/aiJobs";
 import { relativeTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -74,21 +74,50 @@ const KIND_LABEL: Record<string, string> = {
   chat_deep_dive: "CIRT deep-dive",
   finding_ai_triage: "Finding AI triage",
   osint_analysis: "OSINT AI analysis",
-  young_domain_analysis: "Malicious-site AI analysis",
   hunt_query_generation: "Hunt query generation",
-  email_draft_generation: "Email draft generation",
   detection_rule_generation: "Detection rule generation",
-  exercise_generation: "Exercise generation",
   osint_reanalyze: "OSINT bulk reanalysis",
   osint_global_ingest: "Global OSINT ingest",
 };
 
-function isActive(status: string): boolean {
+export function isOperationJobActive(status: string): boolean {
   return status === "queued" || status === "running";
 }
 
-function isFailed(job: OperationJob): boolean {
+export function isOperationJobComplete(status: string): boolean {
+  return ["completed", "done", "succeeded"].includes(status);
+}
+
+export function isOperationJobFailed(job: Pick<OperationJob, "status" | "errorMessage">): boolean {
   return job.status === "failed" || !!job.errorMessage;
+}
+
+export function operationJobProgress(job: Pick<OperationJob, "status" | "progressPct" | "errorMessage">): number {
+  if (isOperationJobFailed(job)) return 0;
+  const pct = Math.max(0, Math.min(100, Math.round(job.progressPct ?? 0)));
+  if (isOperationJobComplete(job.status)) return 100;
+  return Math.max(5, pct);
+}
+
+function operationJobFromAiJob(job: AiJobSummary): OperationJob {
+  return {
+    source: "ai_job",
+    id: job.id,
+    kind: job.kind,
+    label: job.targetLabel || job.kind,
+    status: job.status,
+    progressPct: job.progressPct,
+    providerLabel: job.providerLabel ?? null,
+    actor: job.createdBy ?? null,
+    createdAt: job.createdAt,
+    startedAt: job.startedAt ?? null,
+    finishedAt: job.completedAt ?? null,
+    heartbeatAt: job.heartbeatAt ?? null,
+    target: job.targetLabel ?? null,
+    targetUrl: job.targetUrl ?? null,
+    errorMessage: job.errorMessage ?? null,
+    cancellable: isOperationJobActive(job.status),
+  };
 }
 
 function jobTitle(job: OperationJob): string {
@@ -140,16 +169,16 @@ function StatTile({
 function JobRow({
   job, cancelling, onCancel, compact = false,
 }: { job: OperationJob; cancelling: boolean; onCancel: (job: OperationJob) => void; compact?: boolean }) {
-  const pct = Math.max(0, Math.min(100, job.progressPct ?? 0));
-  const stateIcon = isActive(job.status) ? (
+  const pct = operationJobProgress(job);
+  const stateIcon = isOperationJobActive(job.status) ? (
     <Loader2 size={compact ? 12 : 14} className="animate-spin" />
-  ) : isFailed(job) ? (
+  ) : isOperationJobFailed(job) ? (
     <AlertTriangle size={compact ? 12 : 14} />
   ) : (
     <CheckCircle2 size={compact ? 12 : 14} />
   );
-  const stateTone = isActive(job.status) ? "bg-cyan-500/10 text-cyan-600 dark:text-cyan-300" :
-    isFailed(job) ? "bg-red-500/10 text-red-600 dark:text-red-300" :
+  const stateTone = isOperationJobActive(job.status) ? "bg-cyan-500/10 text-cyan-600 dark:text-cyan-300" :
+    isOperationJobFailed(job) ? "bg-red-500/10 text-red-600 dark:text-red-300" :
       "bg-emerald-500/10 text-emerald-600 dark:text-emerald-300";
 
   if (compact) {
@@ -328,6 +357,7 @@ function JobRow({
 
 export default function OperationsAudit() {
   const { toast } = useToast();
+  const { jobs: liveAiJobs, loading: liveAiJobsLoading } = useAiJobs();
   const [tab, setTab] = useState("active");
   const [cancellingIds, setCancellingIds] = useState<Set<string>>(new Set());
 
@@ -335,26 +365,30 @@ export default function OperationsAudit() {
     queryKey: ["/api/v1/operations/audit"],
     refetchInterval: (q: any) => {
       const payload = q?.state?.data as OperationsPayload | undefined;
-      return payload?.jobs?.some((j) => isActive(j.status)) ? 4000 : false;
+      const hasActiveJob = payload?.jobs?.some((j) => isOperationJobActive(j.status)) || (payload?.globalIngest ? isOperationJobActive(payload.globalIngest.status) : false);
+      if (hasActiveJob) return 5_000;
+      return tab === "active" ? 30_000 : false;
     },
+    refetchIntervalInBackground: false,
   });
 
   const jobs = useMemo(() => {
     const rows = data?.globalIngest && data.globalIngest.status !== "idle"
       ? [data.globalIngest, ...(data?.jobs ?? [])]
       : (data?.jobs ?? []);
+    const mergedRows = [...liveAiJobs.map(operationJobFromAiJob), ...rows];
     const seen = new Set<string>();
-    return rows.filter((job) => {
+    return mergedRows.filter((job) => {
       const key = `${job.source}:${job.id}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
     });
-  }, [data]);
+  }, [data, liveAiJobs]);
 
-  const activeJobs = jobs.filter((job) => isActive(job.status));
-  const failedJobs = jobs.filter(isFailed);
-  const completedJobs = jobs.filter((job) => !isActive(job.status) && !isFailed(job));
+  const activeJobs = jobs.filter((job) => isOperationJobActive(job.status));
+  const failedJobs = jobs.filter(isOperationJobFailed);
+  const completedJobs = jobs.filter((job) => !isOperationJobActive(job.status) && !isOperationJobFailed(job));
   const visibleJobs = tab === "active" ? activeJobs : tab === "failed" ? failedJobs : jobs;
 
   const cancelOne = useMutation({
@@ -444,13 +478,13 @@ export default function OperationsAudit() {
           </TabsList>
 
           <TabsContent value="active" className="mt-0">
-            <JobsTable jobs={visibleJobs} loading={isLoading} cancellingIds={cancellingIds} onCancel={(job) => cancelOne.mutate(job)} />
+            <JobsTable jobs={visibleJobs} loading={isLoading || liveAiJobsLoading} cancellingIds={cancellingIds} onCancel={(job) => cancelOne.mutate(job)} />
           </TabsContent>
           <TabsContent value="failed" className="mt-0">
-            <JobsTable jobs={visibleJobs} loading={isLoading} cancellingIds={cancellingIds} onCancel={(job) => cancelOne.mutate(job)} />
+            <JobsTable jobs={visibleJobs} loading={isLoading || liveAiJobsLoading} cancellingIds={cancellingIds} onCancel={(job) => cancelOne.mutate(job)} />
           </TabsContent>
           <TabsContent value="all" className="mt-0">
-            <JobsTable jobs={visibleJobs} loading={isLoading} cancellingIds={cancellingIds} onCancel={(job) => cancelOne.mutate(job)} compact />
+            <JobsTable jobs={visibleJobs} loading={isLoading || liveAiJobsLoading} cancellingIds={cancellingIds} onCancel={(job) => cancelOne.mutate(job)} compact />
           </TabsContent>
           <TabsContent value="audit" className="mt-0">
             <AuditTable entries={data?.auditEntries ?? []} loading={isLoading} />

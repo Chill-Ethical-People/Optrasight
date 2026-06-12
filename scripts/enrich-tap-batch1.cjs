@@ -697,7 +697,7 @@ function headerPatch(actor) {
       immediate: ["Preserve IdP/VPN/EDR/DNS/proxy logs", "Disable suspect accounts and tokens", "Isolate confirmed hosts", "Snapshot cloud audit state"],
       shortTerm: ["Rotate privileged credentials", "Hunt priority ATT&CK techniques", "Review remote access and MFA reset activity", "Scope exfiltration"],
       mediumTerm: ["Close exposed edge paths", "Validate backup integrity", "Deploy missing detections", "Refresh CTI feed indicators with TTLs"],
-      strategic: ["Run tabletop exercise", "Review crisis communications", "Assess third-party exposure", "Update threat model quarterly"],
+      strategic: ["Run incident drill", "Review crisis communications", "Assess third-party exposure", "Update threat model quarterly"],
     }),
     countermeasures: j({
       d3fend: ["D3-MFA", "D3-ACH", "D3-LFP", "D3-NTA", "D3-SFA"],

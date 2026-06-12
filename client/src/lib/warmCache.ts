@@ -83,7 +83,6 @@ export async function warmExistingIntelCache(scope: WarmExistingIntelScope = "al
   const includeOsintSources = scope === "startup" || scope === "osint" || scope === "all";
   const includeThreatActors = scope === "startup" || scope === "tap" || scope === "all";
   const includeOsintFindings = scope === "osint" || scope === "all";
-  const includeTenantTags = scope === "startup" || scope === "tap" || scope === "all";
 
   if (includeOsintSources) {
     jobs.push(() => prefetchIfCold(
@@ -96,12 +95,6 @@ export async function warmExistingIntelCache(scope: WarmExistingIntelScope = "al
       ["/api/v1/threat-actors"],
       () => warmJson<ThreatActorsResp>("/api/v1/threat-actors"),
       seedThreatActorsCache,
-    ));
-  }
-  if (includeTenantTags) {
-    jobs.push(() => prefetchIfCold(
-      ["/api/v1/threat-actors-tenant-tags"],
-      () => warmJson("/api/v1/threat-actors-tenant-tags"),
     ));
   }
   if (includeOsintFindings) {

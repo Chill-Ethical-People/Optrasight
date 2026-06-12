@@ -1,208 +1,67 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link, useLocation } from "wouter";
-import { useQuery } from "@tanstack/react-query";
 import {
-  LayoutDashboard, Search, Globe, ShieldAlert, Activity, Camera,
-  Settings as SettingsIcon, LogOut, Plug, FileText, Building2,
-  Globe2, Compass, Network, BarChart3, ShieldCheck,
+  LayoutDashboard, LogOut, Building2,
   Sun, Moon, PanelLeftClose, PanelLeftOpen, ChevronDown, Menu,
-  ClipboardList, ListChecks, BriefcaseBusiness, ScanSearch,
-  Fingerprint, BrainCircuit, RadioTower,
+  ListChecks, Fingerprint, BrainCircuit, RadioTower, Users,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { AiJobsTray } from "@/components/AiJobsTray";
-import { ActiveScansBanner } from "@/components/ActiveScansBanner";
 import { GlobalCommandPalette } from "@/components/GlobalCommandPalette";
-import { BATCH_ONE_RELEASE } from "@/lib/release";
-
-/** Sentinel id used in the tenant switcher to represent "all clients". */
-export const GLOBAL_TENANT_ID = "__global__";
+import OsintChatbot from "@/components/OsintChatbot";
 import { useAuth } from "@/lib/auth";
 import { useUiState, type SidebarMode } from "@/lib/uiState";
+import { BATCH_ONE_RELEASE } from "@/lib/release";
 import { Logo } from "./Logo";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import type { Tenant } from "@shared/schema";
+
+/** Legacy sentinel retained only so old global-mode guards stay compile-time inert in BatchOne. */
+export const GLOBAL_TENANT_ID = "__global__";
 
 // Grouped navigation — collapsible sections keep the rail scannable.
 // Group ids are stable so collapse-state survives re-renders.
-type NavItem = { href: string; label: string; icon: typeof LayoutDashboard };
+type NavItem = { href: string; label: string; icon: typeof LayoutDashboard; adminOnly?: boolean };
 type NavGroup = { id: string; label: string; items: NavItem[] };
 
 const navGroups: NavGroup[] = [
-  ...(BATCH_ONE_RELEASE
-    ? [
-        {
-          id: "intel",
-          label: "Threat Intel",
-          items: [
-            { href: "/osint", label: "Intel Inbox", icon: RadioTower },
-            { href: "/threat-actors", label: "Actor Observatory", icon: Fingerprint },
-          ],
-        },
-        {
-          id: "admin",
-          label: "Operations",
-          items: [
-            { href: "/ai-setup", label: "AI Setup", icon: BrainCircuit },
-            { href: "/operations-audit", label: "Job Control", icon: ListChecks },
-          ],
-        },
-      ]
-    : [
-        {
-          id: "command",
-          label: "Command Center",
-          items: [
-            { href: "/", label: "Overview", icon: LayoutDashboard },
-            { href: "/findings", label: "Exposure Findings", icon: ShieldAlert },
-            { href: "/osint", label: "Intel Inbox", icon: RadioTower },
-          ],
-        },
-        {
-          id: "intel",
-          label: "Intel Operations",
-          items: [
-            { href: "/investigations", label: "Investigations", icon: BriefcaseBusiness },
-            { href: "/threat-actors", label: "Actor Observatory", icon: Fingerprint },
-            { href: "/threat-landscape", label: "Threat Landscape", icon: Compass },
-            { href: "/sources-analytics", label: "Source Health", icon: BarChart3 },
-          ],
-        },
-        {
-          id: "domain",
-          label: "Domain Abuse",
-          items: [
-            { href: "/malicious-site-scanner", label: "Malicious Site Scanner", icon: Globe2 },
-            { href: "/lookalikes", label: "Lookalikes", icon: Search },
-            { href: "/assets", label: "Assets", icon: Globe },
-            { href: "/scans", label: "Scans", icon: Activity },
-            { href: "/evidence", label: "Evidence", icon: Camera },
-          ],
-        },
-        {
-          id: "readiness",
-          label: "Detection & Readiness",
-          items: [
-            { href: "/coverage-radar", label: "Coverage Radar", icon: ScanSearch },
-            { href: "/detection-rules", label: "Detection Rules", icon: ShieldCheck },
-            { href: "/exercises", label: "Tabletop Exercises", icon: ClipboardList },
-          ],
-        },
-        {
-          id: "admin",
-          label: "Administration",
-          items: [
-            { href: "/ai-setup", label: "AI Setup", icon: BrainCircuit },
-            { href: "/integrations", label: "Integrations", icon: Plug },
-            { href: "/operations-audit", label: "Job Control", icon: ListChecks },
-            { href: "/settings", label: "Client Settings", icon: SettingsIcon },
-            { href: "/reports", label: "Reports", icon: FileText },
-          ],
-        },
-      ]),
+  {
+    id: "intel",
+    label: "Threat Intel",
+    items: [
+      { href: "/osint", label: "Intel Inbox", icon: RadioTower },
+      { href: "/threat-actors", label: "Actor Observatory", icon: Fingerprint },
+    ],
+  },
+  {
+    id: "admin",
+    label: "Operations",
+    items: [
+      { href: "/ai-setup", label: "AI Setup", icon: BrainCircuit },
+      { href: "/operations-audit", label: "Job Control", icon: ListChecks },
+      { href: "/platform-users", label: "Platform Users", icon: Users, adminOnly: true },
+    ],
+  },
 ];
 
 function TenantSwitcher() {
-  const { user, activeTenantId, setActiveTenant } = useAuth();
-  const isAdmin = user?.role === "admin";
-
-  const { data: tenants = [] } = useQuery<Tenant[]>({
-    queryKey: ["/api/v1/tenants"],
-    enabled: !!user,
-  });
+  const { user } = useAuth();
 
   if (!user) return null;
-  if (BATCH_ONE_RELEASE) {
-    return (
-      <div
-        className="flex items-center gap-2 px-3 h-9 rounded-md border bg-muted/30 text-sm"
-        data-testid="badge-release-scope"
-      >
-        <Building2 size={14} className="text-muted-foreground" />
-        <span className="font-medium truncate max-w-[180px]">
-          {user.tenant.name}
-        </span>
-        <Badge variant="secondary" className="text-[10px] uppercase tracking-wide">
-          Batch 1
-        </Badge>
-      </div>
-    );
-  }
-  const current = tenants.find((t) => t.id === activeTenantId);
-
-  if (!isAdmin) {
-    return (
-      <div
-        className="flex items-center gap-2 px-3 h-9 rounded-md border bg-muted/30 text-sm"
-        data-testid="badge-tenant-active"
-      >
-        <Building2 size={14} className="text-muted-foreground" />
-        <span className="font-medium truncate max-w-[160px]">
-          {user.tenant.name}
-        </span>
-        <Badge variant="secondary" className="text-[10px] uppercase tracking-wide">
-          {user.tenant.plan}
-        </Badge>
-      </div>
-    );
-  }
-
-  const isGlobal = activeTenantId === GLOBAL_TENANT_ID;
-  const triggerLabel = isGlobal
-    ? "Global view — all clients"
-    : current?.name ?? user.tenant.name;
   return (
-    <div className="flex items-center gap-2">
-      {isGlobal ? (
-        <Network size={14} className="text-primary" />
-      ) : (
-        <Building2 size={14} className="text-muted-foreground" />
-      )}
-      <Select
-        value={activeTenantId ?? user.tenant.id}
-        onValueChange={(v) => setActiveTenant(v)}
-      >
-        <SelectTrigger
-          className="h-9 min-w-[220px] text-sm"
-          data-testid="select-active-tenant"
-        >
-          <SelectValue placeholder="Pick tenant…">
-            {triggerLabel}
-          </SelectValue>
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem
-            value={GLOBAL_TENANT_ID}
-            data-testid="option-tenant-global"
-          >
-            <div className="flex items-center gap-2">
-              <Network size={14} className="text-primary" />
-              <span className="font-medium">Global view</span>
-              <span className="text-[10px] text-muted-foreground font-mono">all clients</span>
-            </div>
-          </SelectItem>
-          <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground">Single client</div>
-          {tenants.map((t) => (
-            <SelectItem
-              key={t.id} value={t.id}
-              data-testid={`option-tenant-${t.slug}`}
-            >
-              <div className="flex items-center gap-2">
-                <span>{t.name}</span>
-                <span className="text-[10px] text-muted-foreground font-mono">
-                  {t.slug}
-                </span>
-              </div>
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+    <div
+      className="flex items-center gap-2 px-3 h-9 rounded-md border bg-muted/30 text-sm"
+      data-testid="badge-release-scope"
+    >
+      <Building2 size={14} className="text-muted-foreground" />
+      <span className="font-medium truncate max-w-[180px]">
+        {user.tenant.name}
+      </span>
+      <Badge variant="secondary" className="text-[10px] uppercase tracking-wide">
+        Batch 1
+      </Badge>
     </div>
   );
 }
@@ -369,6 +228,15 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const collapsed = sidebarMode === "collapsed";
   const railWidth = collapsed ? "w-[72px]" : "w-[244px]";
+  const reviewOnly = user?.access_mode === "guest" || user?.role === "reviewer";
+  const visibleNavGroups = navGroups.map((group) => ({
+    ...group,
+    items: group.items.filter((item) => {
+      if (item.adminOnly && user?.role !== "admin") return false;
+      if (reviewOnly && !["/osint", "/threat-actors"].includes(item.href)) return false;
+      return true;
+    }),
+  })).filter((group) => group.items.length > 0);
 
   // Auto-close the mobile drawer on route change so users don't have to dismiss it manually.
   useEffect(() => { setMobileNavOpen(false); }, [location]);
@@ -379,13 +247,13 @@ export function AppShell({ children }: { children: ReactNode }) {
         className={`os-sidebar hidden md:flex ${railWidth} flex-col border-r border-sidebar-border bg-sidebar/95 text-sidebar-foreground transition-[width] duration-200 relative`}
         data-testid={`sidebar-${sidebarMode}`}
       >
-        {/* Brand lockup — preview spec: aperture mark + two-tone wordmark + TC sub @ 0.18em */}
+        {/* Brand lockup — aperture mark + two-tone wordmark + concise English subline. */}
         <div className={`os-brand-plate flex items-center border-b border-sidebar-border ${collapsed ? "justify-center py-5" : "gap-3 px-5 py-5"}`}>
           <Logo className="text-primary shrink-0" size={collapsed ? 28 : 32} />
           {!collapsed && (
             <div className="flex flex-col leading-tight min-w-0">
               <span className="os-wordmark text-[17px]"><span className="opt">Optra</span><span className="sight">Sight</span></span>
-              <span className="os-tc-sub">全向預警台</span>
+              <span className="os-brand-sub">Evidence-led operations</span>
             </div>
           )}
         </div>
@@ -409,7 +277,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         )}
         {/* Nav */}
         <nav className={`flex-1 overflow-y-auto ${collapsed ? "px-1 py-3 space-y-1" : "px-2 py-3"}`}>
-          {navGroups.map((group) => (
+          {visibleNavGroups.map((group) => (
             <NavGroupSection
               key={group.id}
               group={group}
@@ -430,7 +298,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <div className="flex flex-col min-w-0">
                 <span className="text-xs font-medium truncate" data-testid="text-user-email">{user.email}</span>
                 <span className="text-[10px] text-muted-foreground truncate">
-                  {user.role === "admin" ? "MSSP admin" : user.tenant?.name}
+                  {reviewOnly ? "Read-only reviewer" : user.role === "admin" ? "Platform admin" : user.tenant?.name}
                 </span>
               </div>
             </div>
@@ -486,12 +354,12 @@ export function AppShell({ children }: { children: ReactNode }) {
                     <Logo className="text-primary shrink-0" size={28} />
                     <div className="flex flex-col leading-tight text-left min-w-0">
                       <span className="os-wordmark text-[16px]"><span className="opt">Optra</span><span className="sight">Sight</span></span>
-                      <span className="os-tc-sub">全向預警台</span>
+                      <span className="os-brand-sub">Evidence-led operations</span>
                     </div>
                   </SheetTitle>
                 </SheetHeader>
                 <nav className="flex-1 overflow-y-auto px-2 py-3">
-                  {navGroups.map((group) => (
+                  {visibleNavGroups.map((group) => (
                     <NavGroupSection
                       key={group.id}
                       group={group}
@@ -511,7 +379,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                       <div className="flex flex-col min-w-0">
                         <span className="text-xs font-medium truncate">{user.email}</span>
                         <span className="text-[10px] text-muted-foreground truncate">
-                          {user.role === "admin" ? "MSSP admin" : user.tenant?.name}
+                          {reviewOnly ? "Read-only reviewer" : user.role === "admin" ? "Platform admin" : user.tenant?.name}
                         </span>
                       </div>
                     </div>
@@ -537,19 +405,17 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
           <div className="flex-1 min-w-3" />
           {/* Utility toolbar — fixed-height controls with enough breathing room for shortcut text. */}
-          <div className="os-topbar-actions os-util-pill" role="toolbar" aria-label="Workspace utilities">
+          <div className="os-topbar-actions os-util-pill" role="toolbar" aria-label="Platform utilities">
             <GlobalCommandPalette />
             <ThemeToggle />
             <AiJobsTray />
           </div>
-          {/* Tenant switcher: on small screens, the dropdown trigger is itself fine — only the label may truncate. */}
-          <div className="hidden sm:block shrink-0"><TenantSwitcher /></div>
+          {!BATCH_ONE_RELEASE && (
+            <div className="hidden sm:block shrink-0"><TenantSwitcher /></div>
+          )}
         </div>
-        {/* Global active-scans banner — visible on every page so long
-            background scans (Malicious Site Scanner) stay tracked while the
-            user navigates elsewhere. */}
-        {!BATCH_ONE_RELEASE && <ActiveScansBanner />}
         <div className="flex-1 min-w-0">{children}</div>
+        <OsintChatbot />
       </main>
     </div>
   );

@@ -35,7 +35,7 @@ services:
     environment:
       NODE_ENV: production
       OPTRASIGHT_STRICT: "1"
-      BRANDGUARD_AI_LIVE: "1"
+      OPTRASIGHT_AI_LIVE: "1"
     volumes:
       - ./data:/app/data
 ```
@@ -112,18 +112,18 @@ The `.backup` PRAGMA is safe to run while the server is live (WAL handles concur
 
 On a fresh `data/` volume the server seeds:
 
-* One demo tenant (`Acme Bank`, slug `acme`).
-* The MSSP admin user `admin@brandguard.local / admin1234`. **Rotate immediately** — see [SECURITY.md](./SECURITY.md).
-* The 100+ canonical OSINT sources.
+* One internal BatchOne workspace scope (`BatchOne Workspace`, slug `batchone-workspace`). This is an implementation boundary for local data, not a client tenant-switching feature.
+* Local seed accounts `admin@cep.com` and `reviewer@cep.com`. **Rotate immediately** — see [SECURITY.md](./SECURITY.md).
+* The curated BatchOne OSINT sources.
 * Per-tenant AI provider rows (all in `disabled` state until you supply a key at `/#/ai-setup`).
 
 After first boot:
 
 1. Log in.
-2. Create your real admin user, log out, log back in as the new admin, delete `admin@brandguard.local`.
+2. Change the temporary seed password, enroll MFA, then create named accounts and rotate or remove the seed accounts.
 3. Configure AI providers at `/#/ai-setup`. DeepSeek is recommended (live + productional, no fallback).
-4. Configure OSINT sources at `/#/sources-analytics`.
-5. Configure tenant profile (geos, industries, monitored technologies) at `/#/settings`.
+4. Review OSINT sources on the Intel Inbox sources tab.
+5. Use Platform Users for admin/reviewer account management.
 
 ## Logs
 

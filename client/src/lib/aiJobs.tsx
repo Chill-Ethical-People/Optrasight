@@ -10,7 +10,7 @@
 // Wire this provider once near the root of <App />. The <AiJobsTray /> bell
 // component renders the popover in the AppShell top bar.
 
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -118,27 +118,20 @@ const AiJobsContext = createContext<AiJobsContextValue>({
 function queryKeysForKind(kind: string): unknown[][] {
   switch (kind) {
     case "threat_actor_enrichment":
-      return [["/api/v1/threat-actors"], ["/api/v1/threat-actors-tenant-tags"]];
+      return [["/api/v1/threat-actors"], ["/api/v1/operations/audit"]];
     case "chat_triage":
     case "osint_triage":
-      return [["/api/v1/osint/findings"], ["/api/v1/osint/sources/health"]];
+      return [["/api/v1/osint/findings"], ["/api/v1/osint/sources/health"], ["/api/v1/operations/audit"]];
     case "chat_deep_dive":
     case "osint_deep_dive":
-      return [["/api/v1/osint/findings"]];
+      return [["/api/v1/osint/findings"], ["/api/v1/operations/audit"]];
     case "finding_ai_triage":
     case "osint_analysis":
-    case "email_draft_generation":
-      return [["/api/v1/osint/findings"], ["/api/v1/osint/sources/scorecard"], ["/api/v1/osint/sources/quadrant"], ["/api/v1/osint/sources/overlap"], ["/api/v1/osint/sources/heatmaps"]];
-    case "young_domain_analysis":
-      return [["/api/v1/malicious-site-scanner"], ["/api/v1/metrics"]];
+      return [["/api/v1/osint/findings"], ["/api/v1/osint/sources/scorecard"], ["/api/v1/osint/sources/quadrant"], ["/api/v1/osint/sources/overlap"], ["/api/v1/osint/sources/heatmaps"], ["/api/v1/operations/audit"]];
     case "hunt_query_generation":
-      return [["/api/v1/osint/hunt-queries"]];
-    case "detection_rule_generation":
-      return [["/api/v1/detection-rules"]];
-    case "exercise_generation":
-      return [["/api/v1/exercises"]];
+      return [["/api/v1/osint/hunt-queries"], ["/api/v1/operations/audit"]];
     case "osint_run":
-      return [["/api/v1/osint/findings"], ["/api/v1/osint/sources/health"]];
+      return [["/api/v1/osint/findings"], ["/api/v1/osint/sources/health"], ["/api/v1/operations/audit"]];
     default:
       return [];
   }
@@ -183,6 +176,9 @@ export function AiJobsProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!jobs.length) return;
+    if (jobs.some((job) => job.status === "running" || job.status === "queued")) {
+      queryClient.invalidateQueries({ queryKey: ["/api/v1/operations/audit"] });
+    }
     const last = lastStatusRef.current;
     const notifyJob = (job: AiJobSummary) => {
       if (notifiedRef.current.has(job.id)) return;

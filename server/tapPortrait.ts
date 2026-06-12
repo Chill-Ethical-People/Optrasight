@@ -20,6 +20,7 @@ import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import type { ThreatActorDTO } from "@shared/schema";
 import { storage } from "./storage";
+import { liveGenerateImage } from "./aiLive";
 
 const execFileP = promisify(execFile);
 
@@ -43,6 +44,10 @@ export class PortraitGeneratorUnavailableError extends Error {
 
 /** Coalesce duplicate concurrent requests for the same actor. */
 const inFlight = new Map<string, Promise<string>>();
+
+function isTapPortraitProvider(provider: { provider: string }): boolean {
+  return provider.provider === "openai" || provider.provider === "azure-openai" || provider.provider === "gemini";
+}
 
 /** Build the prompt from the actor profile.
  * Produces the approved OptraSight TAP poster language: fictional avatar,
@@ -82,7 +87,7 @@ export function buildPortraitPrompt(a: ThreatActorDTO): string {
     return "background of blank dossier shelves, circuit-board panels, abstract data rings, and dark-web archive blocks";
   })();
 
-  const composition = "square 1:1 OptraSight TAP card poster, low-angle or three-quarter view, varied full-figure or half-figure pose, strong hand or object gesture, jagged asymmetrical silhouette, diagonal foreground archive blocks, dramatic cyan rim light, crisp ink outlines, painterly digital illustration, bold graphic novel cyber poster, textured print grain, premium threat-intel dossier aesthetic";
+  const composition = "square 1:1 OptraSight TAP card poster, centered actor portrait with enough safe margin for circular and rounded-rectangle crops, low-angle or three-quarter view, varied full-figure or half-figure pose, strong hand or object gesture, jagged asymmetrical silhouette, diagonal foreground archive blocks, dramatic cyan rim light, crisp ink outlines, painterly digital illustration, bold graphic novel cyber poster, textured print grain, premium threat-intel dossier aesthetic";
 
   return [
     "Use case: stylized-concept.",
@@ -92,6 +97,7 @@ export function buildPortraitPrompt(a: ThreatActorDTO): string {
     `Scene/backdrop: ${motif}.`,
     "Style/medium: bold graphic novel cyber poster, painterly digital illustration, crisp ink outlines, high contrast, dramatic cyan rim light, textured print grain, premium threat-intel dossier aesthetic.",
     `Composition/framing: ${composition}.`,
+    "Match the current TAP portrait style: dark illustrated dossier-poster, readable lower title band, high-detail fictional avatar, no flat monogram, no generic logo badge, no simple gradient placeholder.",
     `Color palette: ${palette}.`,
     `Text (verbatim): "${a.primaryName}" only, clean readable lower-third title band.`,
     `Hard text rule: only the title ${a.primaryName} may be readable; no console text, file names, numbers, map labels, logos, flags, or extra typography.`,
@@ -150,12 +156,23 @@ async function runImageGen(prompt: string, baseName: string): Promise<string> {
   throw new Error(`asi-generate-image succeeded but no PNG found. stdout: ${stdout.slice(0, 200)}`);
 }
 
-export async function getPortraitGeneratorAvailability(): Promise<{
+export async function getPortraitGeneratorAvailability(tenantId?: string): Promise<{
   available: boolean;
   tool: string;
   installHint: string;
   message?: string;
 }> {
+  if (tenantId) {
+    const provider = storage.resolveAiPortraitProvider(tenantId);
+    if (provider && isTapPortraitProvider(provider)) {
+      return {
+        available: true,
+        tool: `${provider.provider}:auto-image-model`,
+        installHint: "",
+        message: `Using ${provider.label} from AI Setup with an image-capable model selected automatically.`,
+      };
+    }
+  }
   try {
     await execFileP("asi-generate-image", ["--help"], {
       timeout: 10_000,
@@ -203,7 +220,19 @@ export async function generateActorPortrait(
     storage.setThreatActorPortraitStatus(tenantId, actorId, "generating");
     try {
       const prompt = buildPortraitPrompt(actor);
-      const absPath = await runImageGen(prompt, actorId);
+      let absPath: string;
+      const provider = storage.resolveAiPortraitProvider(tenantId);
+      if (provider && isTapPortraitProvider(provider)) {
+        const generated = liveGenerateImage(provider, prompt, { timeoutSeconds: 300 });
+        if (!generated.ok || !generated.data) {
+          throw new Error(generated.message || "AI provider did not return portrait image data");
+        }
+        ensureDir();
+        absPath = join(PORTRAITS_DIR, `${actorId}.png`);
+        writeFileSync(absPath, generated.data);
+      } else {
+        absPath = await runImageGen(prompt, actorId);
+      }
 
       // Normalize: ensure the file is at PORTRAITS_DIR/<actorId>.png so the
       // public URL is stable and predictable.

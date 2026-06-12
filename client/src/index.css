@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 /* ============================================================
- * OptraSight · 全向預警台 — Signal-plane identity system
+ * OptraSight — Signal-plane identity system
  * Aperture indigo · signal cyan · evidence amber
  * ============================================================ */
 
@@ -83,7 +83,6 @@
 
   /* Typography */
   --font-sans: 'General Sans', 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-tc: 'Noto Sans TC', 'General Sans', 'Inter', sans-serif;
   --font-mono: 'Geist Mono', ui-monospace, 'SF Mono', 'JetBrains Mono', monospace;
   --font-serif: Georgia, serif;
 
@@ -251,11 +250,6 @@
  * Use as plain className anywhere in the app.
  * ============================================================ */
 @layer components {
-  /* Traditional Chinese typography helper */
-  .os-tc {
-    font-family: var(--font-tc);
-  }
-
   /* Monospaced numerics + IDs (tabular figures) */
   .os-mono {
     font-family: var(--font-mono);
@@ -492,6 +486,294 @@
     box-shadow: 0 12px 28px -24px hsl(var(--brand) / 0.55);
   }
 
+  .os-tap-card {
+    overflow: hidden;
+    background:
+      linear-gradient(180deg, hsl(var(--card) / 0.98), hsl(var(--card) / 0.92));
+  }
+
+  .os-tap-card-top {
+    border-bottom: 1px solid hsl(var(--border) / 0.72);
+    padding-bottom: 10px;
+  }
+
+  .os-tap-card-name {
+    color: hsl(var(--foreground));
+    font-size: 15px;
+  }
+
+  .os-tap-alias-row .border {
+    border-color: hsl(var(--border));
+  }
+
+  .os-tap-portrait-frame {
+    --tap-status-ring-a: hsl(var(--brand) / 0.74);
+    --tap-status-ring-b: hsl(var(--signal) / 0.72);
+    --tap-status-dot: hsl(var(--signal));
+    --tap-status-dot-soft: hsl(var(--signal) / 0.14);
+    --tap-status-ring-fill:
+      conic-gradient(from 220deg, var(--tap-status-ring-b), var(--tap-status-ring-a), var(--tap-status-ring-b));
+    --tap-status-frame-shadow:
+      0 0 0 3px var(--tap-status-dot),
+      0 0 0 5px hsl(var(--background)),
+      0 10px 22px -18px var(--tap-status-ring-a);
+    isolation: isolate;
+    overflow: visible;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: var(--tap-status-frame-shadow);
+  }
+
+  .os-tap-portrait-frame::before {
+    content: '';
+    position: absolute;
+    inset: -4px;
+    z-index: -1;
+    border-radius: 999px;
+    background: var(--tap-status-ring-fill);
+    box-shadow:
+      0 0 0 1px hsl(var(--background) / 0.86),
+      0 12px 28px -22px var(--tap-status-ring-a);
+  }
+
+  .os-tap-portrait-frame::after {
+    content: '';
+    position: absolute;
+    right: 5%;
+    bottom: 9%;
+    width: 18%;
+    height: 18%;
+    border-radius: 999px;
+    background: var(--tap-status-dot);
+    border: 2px solid hsl(var(--background));
+    box-shadow: 0 0 0 3px var(--tap-status-dot-soft);
+  }
+
+  .os-tap-portrait-status-draft {
+    --tap-status-ring-a: hsl(215 18% 52% / 0.84);
+    --tap-status-ring-b: hsl(220 14% 72% / 0.82);
+    --tap-status-dot: hsl(215 18% 42%);
+    --tap-status-dot-soft: hsl(215 18% 42% / 0.18);
+    --tap-status-ring-fill:
+      conic-gradient(from 220deg,
+        hsl(215 18% 42% / 0.95),
+        hsl(220 12% 70% / 0.9),
+        hsl(215 18% 42% / 0.95));
+    --tap-status-frame-shadow:
+      0 0 0 3px hsl(215 18% 42% / 0.95),
+      0 0 0 5px hsl(220 16% 94%),
+      0 10px 22px -18px hsl(215 18% 42% / 0.7);
+  }
+
+  .os-tap-portrait-status-reviewed {
+    --tap-status-ring-a: hsl(245 83% 58% / 0.9);
+    --tap-status-ring-b: hsl(224 76% 52% / 0.86);
+    --tap-status-dot: hsl(235 78% 55%);
+    --tap-status-dot-soft: hsl(235 78% 55% / 0.2);
+    --tap-status-ring-fill:
+      conic-gradient(from 220deg,
+        hsl(245 83% 58% / 0.98),
+        hsl(224 76% 52% / 0.94),
+        hsl(245 83% 58% / 0.98));
+    --tap-status-frame-shadow:
+      0 0 0 3px hsl(245 83% 58% / 0.98),
+      0 0 0 5px hsl(231 100% 96%),
+      0 10px 22px -18px hsl(235 78% 55% / 0.74);
+  }
+
+  .os-tap-portrait-status-approved {
+    --tap-status-ring-a: hsl(150 78% 28% / 0.98);
+    --tap-status-ring-b: hsl(142 74% 38% / 0.94);
+    --tap-status-dot: hsl(150 78% 28%);
+    --tap-status-dot-soft: hsl(150 78% 28% / 0.24);
+    --tap-status-ring-fill:
+      conic-gradient(from 220deg,
+        hsl(150 78% 28% / 1),
+        hsl(142 74% 38% / 0.98),
+        hsl(150 78% 28% / 1));
+    --tap-status-frame-shadow:
+      0 0 0 3px hsl(150 78% 28% / 1),
+      0 0 0 5px hsl(145 78% 92%),
+      0 10px 22px -18px hsl(150 78% 28% / 0.78);
+  }
+
+  .os-tap-portrait-status-archived {
+    --tap-status-ring-a: hsl(220 8% 40% / 0.84);
+    --tap-status-ring-b: hsl(220 8% 62% / 0.78);
+    --tap-status-dot: hsl(220 8% 40%);
+    --tap-status-dot-soft: hsl(220 8% 40% / 0.18);
+    --tap-status-ring-fill:
+      conic-gradient(from 220deg,
+        hsl(220 8% 40% / 0.96),
+        hsl(220 8% 62% / 0.9),
+        hsl(220 8% 40% / 0.96));
+    --tap-status-frame-shadow:
+      0 0 0 3px hsl(220 8% 40% / 0.96),
+      0 0 0 5px hsl(220 12% 94%),
+      0 10px 22px -18px hsl(220 8% 40% / 0.68);
+  }
+
+  .os-tap-portrait-core {
+    border: 1px solid hsl(var(--background) / 0.9);
+    background: hsl(var(--muted));
+  }
+
+  .os-tap-portrait-frame-dossier::before {
+    inset: -5px;
+    border-radius: 18px;
+    background:
+      linear-gradient(135deg, var(--tap-status-ring-a), var(--tap-status-ring-b) 38%, hsl(var(--border) / 0.72));
+    box-shadow:
+      0 0 0 1px hsl(var(--background) / 0.92),
+      0 18px 34px -28px var(--tap-status-ring-a);
+  }
+
+  .os-tap-portrait-frame-dossier::after {
+    display: none;
+  }
+
+  .os-tap-portrait-frame-dossier .os-tap-portrait-core {
+    border-color: hsl(var(--border));
+    background: hsl(var(--card));
+  }
+
+  .os-tap-portrait-frame-dossier img {
+    object-fit: contain;
+    background: hsl(var(--card));
+  }
+
+  .os-tap-meta-cell {
+    min-width: 0;
+    border: 1px solid hsl(var(--border));
+    border-radius: 8px;
+    background: hsl(var(--background) / 0.46);
+    padding: 8px;
+  }
+
+  .os-tap-triage-note {
+    box-shadow: inset 2px 0 0 hsl(var(--signal) / 0.68);
+  }
+
+  .os-tap-card-footer {
+    border-color: hsl(var(--border) / 0.72);
+  }
+
+  .os-tap-scope-chip {
+    max-width: 100%;
+    font-size: 10px;
+    font-weight: 500;
+    color: hsl(var(--muted-foreground));
+    background: hsl(var(--muted) / 0.42);
+  }
+
+  .dark .os-tap-card {
+    background:
+      linear-gradient(180deg, hsl(221 34% 11% / 0.98), hsl(222 47% 8% / 0.96));
+    border-color: hsl(217 24% 25%);
+    box-shadow:
+      inset 0 1px 0 hsl(0 0% 100% / 0.035),
+      0 16px 36px -34px hsl(0 0% 0% / 0.92);
+  }
+
+  .dark .os-tap-card-top {
+    border-color: hsl(217 24% 25% / 0.9);
+  }
+
+  .dark .os-tap-card-name {
+    color: hsl(210 40% 98%);
+  }
+
+  .dark .os-tap-alias-row .border {
+    color: hsl(214 26% 84%);
+    background: hsl(217 33% 14% / 0.72);
+    border-color: hsl(217 24% 30%);
+  }
+
+  .dark .os-tap-portrait-frame {
+    --tap-status-ring-a: hsl(243 86% 62% / 0.9);
+    --tap-status-ring-b: hsl(187 84% 56% / 0.84);
+    --tap-status-dot: hsl(187 84% 56%);
+    --tap-status-dot-soft: hsl(187 84% 56% / 0.18);
+  }
+
+  .dark .os-tap-portrait-frame::before {
+    background:
+      conic-gradient(from 220deg, var(--tap-status-ring-b), var(--tap-status-ring-a), hsl(217 24% 28%), var(--tap-status-ring-b));
+    box-shadow:
+      0 0 0 1px hsl(222 47% 8%),
+      0 14px 28px -22px var(--tap-status-ring-b);
+  }
+
+  .dark .os-tap-portrait-frame::after {
+    border-color: hsl(222 47% 8%);
+    box-shadow: 0 0 0 3px var(--tap-status-dot-soft);
+  }
+
+  .dark .os-tap-portrait-core {
+    border-color: hsl(222 47% 7%);
+    background: hsl(222 47% 10%);
+  }
+
+  .dark .os-tap-portrait-status-draft {
+    --tap-status-ring-a: hsl(215 20% 54% / 0.78);
+    --tap-status-ring-b: hsl(218 18% 34% / 0.86);
+    --tap-status-dot: hsl(215 20% 62%);
+    --tap-status-dot-soft: hsl(215 20% 62% / 0.18);
+  }
+
+  .dark .os-tap-portrait-status-reviewed {
+    --tap-status-ring-a: hsl(243 86% 66% / 0.92);
+    --tap-status-ring-b: hsl(217 91% 65% / 0.86);
+    --tap-status-dot: hsl(217 91% 68%);
+    --tap-status-dot-soft: hsl(217 91% 68% / 0.2);
+  }
+
+  .dark .os-tap-portrait-status-approved {
+    --tap-status-ring-a: hsl(158 72% 48% / 0.92);
+    --tap-status-ring-b: hsl(187 84% 56% / 0.86);
+    --tap-status-dot: hsl(158 72% 54%);
+    --tap-status-dot-soft: hsl(158 72% 54% / 0.22);
+  }
+
+  .dark .os-tap-portrait-status-archived {
+    --tap-status-ring-a: hsl(220 10% 54% / 0.78);
+    --tap-status-ring-b: hsl(222 15% 30% / 0.84);
+    --tap-status-dot: hsl(220 10% 64%);
+    --tap-status-dot-soft: hsl(220 10% 64% / 0.18);
+  }
+
+  .dark .os-tap-portrait-frame-dossier::before {
+    background:
+      linear-gradient(135deg, var(--tap-status-ring-a), var(--tap-status-ring-b) 42%, hsl(217 24% 28%));
+    box-shadow:
+      0 0 0 1px hsl(222 47% 8%),
+      0 18px 34px -28px var(--tap-status-ring-b);
+  }
+
+  .dark .os-tap-portrait-frame-dossier .os-tap-portrait-core,
+  .dark .os-tap-portrait-frame-dossier img {
+    background: hsl(222 47% 8%);
+  }
+
+  .dark .os-tap-meta-cell {
+    background: hsl(222 47% 8% / 0.72);
+    border-color: hsl(217 24% 26%);
+  }
+
+  .dark .os-tap-triage-note {
+    color: hsl(214 22% 78%);
+    background: hsl(243 75% 59% / 0.11);
+    border-color: hsl(243 72% 62% / 0.34);
+    box-shadow: inset 2px 0 0 hsl(187 84% 56% / 0.72);
+  }
+
+  .dark .os-tap-scope-chip {
+    color: hsl(215 20% 78%);
+    background: hsl(217 33% 17% / 0.78);
+    border-color: hsl(217 24% 28%);
+  }
+
   .os-app-shell {
     position: relative;
     isolation: isolate;
@@ -617,6 +899,7 @@
     background-size: 56px 56px;
     mask-image: radial-gradient(circle at 32% 48%, black, transparent 68%);
     pointer-events: none;
+    animation: os-grid-drift 18s linear infinite;
   }
   .os-identity-shell::after {
     content: '';
@@ -632,6 +915,7 @@
       inset 0 0 0 160px hsl(var(--signal) / 0.025),
       inset 0 0 0 240px hsl(var(--brand) / 0.02);
     pointer-events: none;
+    animation: os-orbit-breathe 7s ease-in-out infinite;
   }
 
   .os-orbit-card {
@@ -642,6 +926,7 @@
     box-shadow:
       inset 0 1px 0 hsl(0 0% 100% / 0.68),
       0 24px 70px -46px hsl(var(--brand) / 0.64);
+    animation: os-card-rise 560ms ease-out both;
   }
   .dark .os-orbit-card {
     box-shadow:
@@ -680,7 +965,14 @@
     transform-origin: left center;
     transform: rotate(-24deg);
     background: linear-gradient(90deg, hsl(var(--signal)), transparent);
+    animation: os-radar-sweep 5.4s linear infinite;
   }
+  .os-observatory-map [class*="rounded-full"] {
+    animation: os-signal-blink 2.4s ease-in-out infinite;
+  }
+  .os-observatory-map [class*="rounded-full"]:nth-child(3) { animation-delay: 0.35s; }
+  .os-observatory-map [class*="rounded-full"]:nth-child(4) { animation-delay: 0.7s; }
+  .os-observatory-map [class*="rounded-full"]:nth-child(5) { animation-delay: 1.05s; }
 
   .os-brand-proof {
     border: 1px solid hsl(var(--border));
@@ -838,15 +1130,48 @@
   .os-wordmark .opt   { color: hsl(var(--foreground)); }
   .os-wordmark .sight { color: hsl(var(--brand)); }
 
-  /* Sidebar bilingual sub-label (TC) */
-  .os-tc-sub {
-    font-family: var(--font-tc);
+  .os-brand-sub {
     font-size: 11px;
     color: hsl(var(--muted-foreground));
-    letter-spacing: 0.18em;
+    letter-spacing: 0.08em;
     font-weight: 500;
     margin-top: 3px;
     line-height: 1;
+  }
+
+  @keyframes os-radar-sweep {
+    from { transform: rotate(-24deg); }
+    to { transform: rotate(336deg); }
+  }
+
+  @keyframes os-grid-drift {
+    from { background-position: 0 0, 0 0; }
+    to { background-position: 56px 0, 0 56px; }
+  }
+
+  @keyframes os-orbit-breathe {
+    0%, 100% { opacity: 0.72; transform: scale(0.985); }
+    50% { opacity: 1; transform: scale(1.015); }
+  }
+
+  @keyframes os-signal-blink {
+    0%, 100% { opacity: 0.72; box-shadow: 0 0 0 0 hsl(var(--signal) / 0); }
+    50% { opacity: 1; box-shadow: 0 0 0 7px hsl(var(--signal) / 0.16); }
+  }
+
+  @keyframes os-card-rise {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .os-identity-shell::before,
+    .os-identity-shell::after,
+    .os-orbit-card,
+    .os-sweep,
+    .os-observatory-map [class*="rounded-full"] {
+      animation: none;
+    }
   }
 }
 
