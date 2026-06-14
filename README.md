@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="client/public/brand/optrasight-smooth-mark-transparent-core-clean.png" alt="OptraSight logo" width="92">
+  <img src="branding/logos/optrasight-logo-lockup-light-surface.svg" alt="OptraSight logo" width="440">
 </p>
 
 <h1 align="center">OptraSight</h1>
@@ -14,7 +14,7 @@
 
 <p align="center">
   <a href="https://chillethicalpeople.com">
-    <img src="client/public/brand/cep-mark-on-light.svg" alt="Chill Ethical People" width="42">
+    <img src="branding/logos/chill-ethical-people-lockup-bg-depth.svg" alt="Chill Ethical People" width="260">
   </a>
   <br>
   <sub>Maintained by Kensho under Chill Ethical People · contact@chillethicalpeople.com</sub>
