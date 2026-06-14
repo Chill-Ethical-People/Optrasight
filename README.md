@@ -1,8 +1,5 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="branding/logos/optrasight-logo-lockup-dark-surface.svg">
-    <img src="branding/logos/optrasight-logo-lockup-light-surface.svg" alt="OptraSight logo" width="440">
-  </picture>
+  <img src="client/public/brand/optrasight-smooth-mark-transparent-core-clean.png" alt="OptraSight logo" width="92">
 </p>
 
 <h1 align="center">OptraSight</h1>
@@ -16,7 +13,9 @@
 </p>
 
 <p align="center">
-  <img src="branding/logos/chill-ethical-people-lockup-bg-depth.svg" alt="Chill Ethical People" width="260">
+  <a href="https://chillethicalpeople.com">
+    <img src="client/public/brand/cep-mark-on-light.svg" alt="Chill Ethical People" width="42">
+  </a>
   <br>
   <sub>Maintained by Kensho under Chill Ethical People · contact@chillethicalpeople.com</sub>
 </p>
@@ -254,7 +253,7 @@ client/                 React, Vite, Tailwind, shadcn/Radix UI
 server/                 Express API, SQLite storage, AI dispatch, OSINT ingestion
 shared/                 Shared schema, DTOs, validation, access policy
 data/public/            Sanitized public BatchOne seed DBs and portraits
-scripts/                Seed restore/export, diagnostics, maintenance scripts
+scripts/                Public DB restore/export and release safety helpers
 spec/                   API and connector metadata snapshots
 tests/                  Security and regression tests
 ```
