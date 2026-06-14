@@ -2,22 +2,12 @@
   <img src="branding/logos/optrasight-logo-lockup-light-surface.svg" alt="OptraSight logo" width="440">
 </p>
 
-<h1 align="center">OptraSight</h1>
-
 <p align="center">Open-source cyber threat intelligence workstation for OSINT triage, threat actor profiles, AI-assisted analysis, and hunt-query generation.</p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0"></a>
   <img src="https://img.shields.io/badge/node-20.x%20%7C%2022.x-339933.svg?logo=node.js&logoColor=white" alt="Node 20.x | 22.x">
   <img src="https://img.shields.io/badge/stack-React%2018%20%C2%B7%20Express%205%20%C2%B7%20SQLite-4F46E5.svg" alt="Stack">
-</p>
-
-<p align="center">
-  <a href="https://chillethicalpeople.com">
-    <img src="branding/logos/chill-ethical-people-lockup-bg-depth.svg" alt="Chill Ethical People" width="260">
-  </a>
-  <br>
-  <sub>Maintained by Kensho under Chill Ethical People · contact@chillethicalpeople.com</sub>
 </p>
 
 OptraSight Batch One is an open-source cyber threat intelligence (CTI) workstation for security analysts, threat-intelligence teams, detection engineers, and managed security service providers. It connects open-source intelligence (OSINT) monitoring, evidence review, threat actor profiles, AI-assisted triage, and defensive hunt-query drafting in one local analyst workspace.
@@ -285,3 +275,11 @@ Useful guardrails:
 ## License
 
 Apache License 2.0. See [LICENSE](./LICENSE) and [NOTICE](./NOTICE).
+
+<p align="left">
+  <a href="https://chillethicalpeople.com">
+    <img src="branding/logos/chill-ethical-people-lockup-bg-depth.svg" alt="Chill Ethical People" width="220">
+  </a>
+  <br>
+  <sub>Maintained by Kensho under Chill Ethical People · contact@chillethicalpeople.com</sub>
+</p>
