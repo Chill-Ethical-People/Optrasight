@@ -2,12 +2,14 @@
 
 Use this prompt template with any image provider that supports square editorial illustration output. It matches the OptraSight TAP portrait style without relying on provider-specific parameters.
 
-There are two supported variants. The expected OptraSight TAP style is the **labeled portrait** variant: a dark, high-detail cyber-threat poster with a clean lower-third title band.
+There are two supported variants. The expected public OptraSight TAP style is the **labeled portrait** variant: a dark, high-detail cyber-threat poster with a clean lower-third title band, exact actor title, subtle distressed border, and a small CEP mark watermark in the lower-right of the title band.
 
 - **Clean card portrait:** no text inside the image. Use this when the UI renders the actor name separately.
-- **Labeled portrait:** the actor name is intentionally rendered inside the image. Use this for exports, reports, or image-only galleries.
+- **Labeled portrait:** the actor name is intentionally rendered inside the image. Use this for the public BatchOne portrait pack, exports, reports, or image-only galleries.
 
 Image models can still misspell text. For labeled portraits, keep the text short, spell the actor name explicitly, and reject/regenerate any result where the name is not exact.
+
+The accepted BatchOne style is not an initials badge or generic avatar. It is a square intelligence-dossier poster: actor-specific scene, distinct masked or symbolic subject, dark lower title plaque, condensed bold title lettering, cyan/red edge accents, gritty print texture, and restrained MSSP/security-operations tone.
 
 ## Clean Card Portrait
 
@@ -25,6 +27,7 @@ Visual language:
 - Background uses abstract cyber motifs connected to the actor profile: {MOTIF}.
 - Threat-level palette: {PALETTE}.
 - Keep the avatar readable at small card size, with strong silhouette and clean edges.
+- Use a restrained mature security-operations tone; avoid toy, mascot, emoji, or social-media avatar styling.
 
 Strict constraints:
 - No readable text, letters, numbers, logos, flags, watermarks, UI chrome, screenshots, or real organization marks.
@@ -36,27 +39,36 @@ Strict constraints:
 ## Labeled Portrait
 
 ```text
-Create a square 1:1 stylized editorial cyber-threat-actor portrait for "{PRIMARY_NAME}".
+Create a square 1:1 cyber threat actor dossier poster for "{PRIMARY_NAME}", matching the established OptraSight BatchOne TAP portrait style.
 
 Subject:
 - Fictional adversary avatar only; do not depict a real person or celebrity.
 - The main character does not need to be human. It may be a masked comic-style figure, symbolic animal-mask avatar, armored construct, sentient device, vault guardian, data spirit, abstract mascot, or cybernetic creature if that better fits the actor profile.
 - Poster-card composition, three-quarter or low-angle view when a face or mask exists, varied pose and silhouette, no gore.
+- The subject must be visually unique to this actor. Do not reuse another actor's posture, mask, color identity, or background concept.
 - Archetype cues: {ACTOR_TYPE}; {SPONSORSHIP}; motivation: {MOTIVATION}.
 
 Required text:
 - Render the exact threat actor name as a clear title inside the image: "{PRIMARY_NAME}".
 - The title must be spelled exactly as: {PRIMARY_NAME_SPELLED_OUT}.
-- Use one title only, placed in a clean lower-third title band.
-- Use uppercase, high-contrast, condensed sans-serif lettering.
-- Keep the title horizontal, readable, and separated from the face and background motifs.
-- Do not add any other words, aliases, captions, numbers, symbols, watermarks, or UI labels.
+- Use one title only, placed in a clean dark lower-third title band occupying roughly 18-24% of the image height.
+- Use high-contrast condensed bold block poster lettering with subtle bevel/shadow treatment.
+- Keep the title horizontal, centered, readable, uncropped, and separated from the face and background motifs.
+- Keep comfortable left and right margins around the title. Do not let the subject, border, or watermark overlap the actor name.
+- Do not add aliases, captions, numbers, UI labels, extra symbols, or any other readable words.
 
 Visual language:
-- Bold graphic novel cyber poster, painterly digital illustration, crisp ink outlines, high contrast, dramatic cyan rim light, textured print grain, premium threat-intel dossier aesthetic.
+- High-detail illustrated cyberpunk intelligence poster, gritty printed poster texture, crisp ink outlines, high contrast, dramatic cyan rim light, premium threat-intel dossier aesthetic.
 - Background uses abstract cyber motifs connected to the actor profile: {MOTIF}.
 - Threat-level palette: {PALETTE}.
 - Keep the avatar readable at small card size, with strong silhouette and clean edges.
+- Add a thin distressed poster border and subtle cyan-to-red or cyan-to-amber edge line treatment.
+- Keep the overall tone mature, restrained, and operational; avoid cute mascot, toy, consumer app, trading-card, or generic profile-picture styling.
+
+Watermark:
+- Add one small subtle CEP chain-link mark watermark in the lower-right corner of the title band.
+- Keep it low opacity and small enough that it does not interfere with the actor name.
+- Do not add any other watermark, logo, seal, brand, or mark.
 
 Profile-specific customization:
 - Do not make a generic hooded hacker portrait.
@@ -77,7 +89,8 @@ Geo / state-backing treatment:
 
 Strict constraints:
 - The only readable text in the image must be exactly "{PRIMARY_NAME}" in the lower-third title band.
-- No misspellings, repeated letters, extra punctuation, logos, flags, watermarks, UI chrome, screenshots, or real organization marks.
+- The only allowed mark is the small CEP watermark in the lower-right title band.
+- No misspellings, repeated letters, extra punctuation, extra logos, flags, UI chrome, screenshots, or real organization marks.
 - No photorealistic likeness of a known individual.
 - No weapons, blood, or explicit violence.
 ```
@@ -100,6 +113,15 @@ Palette mapping:
 | HIGH | Obsidian black, steel blue, glacier cyan, sharp red signal accents, pale document light |
 | MODERATE | Charcoal black, steel blue, cyan telemetry light, muted amber threat highlights |
 | LOW | Graphite black, teal-cyan signal light, desaturated steel, restrained red accents |
+
+Title plaque mapping:
+
+| Actor tone | Title treatment |
+| --- | --- |
+| Ransomware / extortion | Dark graphite lower band, warm beige or orange-red condensed title, subtle black bevel shadow |
+| Espionage / state-linked | Dark navy lower band, cool off-white title with cyan edge shadow |
+| Criminal marketplace / access broker | Blackened slate lower band, amber or muted red title accents |
+| Unknown / emerging actor | Charcoal lower band, off-white title with cyan/indigo edge light |
 
 Motif mapping:
 
@@ -149,5 +171,6 @@ Provider notes:
 
 - Prefer a square output such as `1024x1024` or `2048x2048`.
 - For clean card portraits, if the provider supports negative prompts, reuse the strict constraints as the negative prompt.
-- For labeled portraits, if the provider supports negative prompts, use: `misspelled text, extra text, duplicate title, random letters, unreadable typography, logo, watermark, UI text, captions, symbols`.
+- For labeled portraits, if the provider supports negative prompts, use: `misspelled text, extra text, duplicate title, random letters, unreadable typography, cropped title, oversized text, subject overlapping title, logo except small CEP mark, flags, UI text, captions, symbols`.
 - For labeled portraits, validate the final image manually or with OCR. Regenerate when the title is not exactly `{PRIMARY_NAME}`.
+- If the image provider cannot reliably render exact text, generate a clean backdrop without title text, then apply the local plate treatment from `data/public/portraits/curated-source/IMAGEGEN_PROMPTS.md`: dark title band, exact actor name in condensed bold type, thin cyan/red edge line, subtle inner border, and CEP mark watermark.
