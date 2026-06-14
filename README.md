@@ -28,6 +28,10 @@ Before running a downloaded release archive, verify its checksum and signature w
 
 This release is deliberately focused: a clean, inspectable workstation for open-source intelligence review and threat-actor analysis. It is built to be useful on day one, while leaving the product room to grow through future public releases.
 
+## Promo Video
+
+Watch the Batch One workflow from OSINT signal to Threat Actor Profile, hunt-query draft, and analyst action: [Watch the Batch One promo video](client/public/promo/optrasight-batch-one-promo.mp4).
+
 ## Repository Summary
 
 | Field | Details |
