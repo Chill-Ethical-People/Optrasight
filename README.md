@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="branding/logos/optrasight-logo-lockup-light-surface.svg" alt="OptraSight logo" width="440">
+  <img src="client/public/brand/optrasight-logo-lockup-light-surface.svg" alt="OptraSight logo" width="440">
 </p>
 
 <p align="center">Open-source cyber threat intelligence workstation for OSINT triage, threat actor profiles, AI-assisted analysis, and hunt-query generation.</p>
@@ -20,7 +20,9 @@ This release is deliberately focused: a clean, inspectable workstation for open-
 
 ## Promo Video
 
-Watch the Batch One workflow from OSINT signal to Threat Actor Profile, hunt-query draft, and analyst action: [Watch the Batch One promo video](client/public/promo/optrasight-batch-one-promo.mp4).
+Watch the Batch One workflow from OSINT signal to Threat Actor Profile, hunt-query draft, and analyst action.
+
+[Watch the Batch One promo video](client/public/promo/optrasight-batch-one-promo.mp4)
 
 ## Repository Summary
 
@@ -278,7 +280,7 @@ Apache License 2.0. See [LICENSE](./LICENSE) and [NOTICE](./NOTICE).
 
 <p align="left">
   <a href="https://chillethicalpeople.com">
-    <img src="branding/logos/chill-ethical-people-lockup-bg-depth.svg" alt="Chill Ethical People" width="220">
+    <img src="client/public/brand/chill-ethical-people-lockup-bg-depth.svg" alt="Chill Ethical People" width="220">
   </a>
   <br>
   <sub>Maintained by Kensho under Chill Ethical People · contact@chillethicalpeople.com</sub>
