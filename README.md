@@ -22,7 +22,21 @@ This release is deliberately focused: a clean, inspectable workstation for open-
 
 Watch the Batch One workflow from OSINT signal to Threat Actor Profile, hunt-query draft, and analyst action.
 
+<video src="client/public/promo/optrasight-batch-one-promo.mp4" controls muted playsinline width="720">
+  Watch the Batch One promo video.
+</video>
+
 [Watch the Batch One promo video](client/public/promo/optrasight-batch-one-promo.mp4)
+
+## Product Screenshots
+
+| Intel Inbox | Threat Actor Profiles |
+| --- | --- |
+| ![OptraSight Intel Inbox showing OSINT findings, source context, and analyst triage controls](client/public/screenshots/optrasight-intel-inbox-dark.png) | ![OptraSight Actor Observatory showing threat actor profiles, portraits, priority, aliases, and evidence context](client/public/screenshots/optrasight-threat-actor-profiles-dark.png) |
+
+| Threat Actor Profile Detail | AI Setup |
+| --- | --- |
+| ![OptraSight Threat Actor Profile detail dossier with actor identity, evidence, aliases, and investigation context](client/public/screenshots/optrasight-threat-actor-profile-detail-dark.png) | ![OptraSight AI Setup showing bring-your-own-provider configuration for analyst workflows](client/public/screenshots/optrasight-ai-setup-dark.png) |
 
 ## Repository Summary
 
@@ -42,6 +56,14 @@ OptraSight is relevant if you are searching for:
 - an AI-assisted SOC analyst workstation that keeps evidence traceability visible;
 - a hunt-query generator for Splunk SPL, Elastic KQL, Microsoft Sentinel KQL, Google Chronicle YARA-L, Palo Alto Cortex XQL, Sigma, and YARA;
 - a local-first security operations tool for evaluating public threat reports, indicators, tactics, techniques, procedures, and analyst notes.
+
+## Use Cases
+
+- Triage public OSINT findings with source context, severity, ATT&CK scope, affected technology, and analyst notes in one workflow.
+- Maintain Threat Actor Profiles with aliases, campaigns, indicators, tactics, techniques, procedures, confidence drivers, evidence references, and dossier exports.
+- Use configured AI providers to assist with finding analysis, CIRT-style triage, deep-dive review, actor enrichment, and hunt-query drafting.
+- Draft defensive hunt logic for Splunk SPL, Elastic KQL, Microsoft Sentinel KQL, Google Chronicle YARA-L, Palo Alto Cortex XQL, Sigma, and YARA.
+- Evaluate a local-first CTI workstation with sanitized public seed data, watermarked actor portraits, no bundled secrets, and strict provider error handling.
 
 ## Key Capabilities
 
