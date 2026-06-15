@@ -8,7 +8,7 @@
       "id": "urlscan",
       "name": "urlscan.io",
       "layer": "source_context",
-      "purpose": "Optional URL context lookup for source review when a tenant configures its own urlscan.io key.",
+      "purpose": "Optional URL context lookup for source review when an operator configures their own urlscan.io key.",
       "license": "External service terms",
       "invocation": { "kind": "http_api" },
       "env": [],
@@ -24,6 +24,6 @@
   ],
   "security_notes": [
     "API keys are stored in the separate secret database, not in this catalog.",
-    "This file is metadata only and must not include customer-specific credentials, tenant names, or private endpoints."
+    "This file is metadata only and must not include customer-specific credentials, workspace names, or private endpoints."
   ]
 }
