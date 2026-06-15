@@ -23,8 +23,10 @@ This release is deliberately focused: a clean, inspectable workstation for open-
 Watch the Batch One workflow from OSINT signal to Threat Actor Profile, hunt-query draft, and analyst action.
 
 <p align="center">
+  <strong>OptraSight Batch One promo video</strong><br>
   <video controls muted playsinline width="720" aria-label="OptraSight Batch One promo video">
     <source src="client/public/promo/optrasight-batch-one-promo.mp4" type="video/mp4">
+    Watch the Batch One workflow from OSINT signal to Threat Actor Profile, hunt-query draft, and analyst action.
   </video>
 </p>
 
