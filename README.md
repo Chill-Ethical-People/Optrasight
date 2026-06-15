@@ -237,10 +237,6 @@ npm run check              # lint + tests + typecheck baseline gate
 - npm 9+.
 - SQLite-compatible local filesystem.
 
-## GitHub Actions
-
-The release workflow runs linting, tests, the TypeScript baseline gate, production build, and optional Snyk scans. Configure `SNYK_TOKEN` as a repository or organization Actions secret to enable Snyk dependency scanning and Snyk monitor snapshots. Tagged releases also require the signing secrets documented in [VERIFYING.md](./VERIFYING.md).
-
 ## Production Build
 
 ```bash
