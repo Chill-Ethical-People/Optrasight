@@ -1,0 +1,91 @@
+node_modules/
+dist/
+.vite/
+
+# SQLite database files — never commit; exposes demo data at rest
+data.db
+data.db-shm
+data.db-wal
+data.db-journal
+data*.db
+data*.db-shm
+data*.db-wal
+data*.db-journal
+*.db.backup*
+
+# Portrait uploads + any other runtime data
+data/*
+!data/README.md
+!data/public/
+!data/public/**
+!data/secrets/
+data/secrets/*
+!data/secrets/optrasight-secrets.template.db
+data/*.db
+data/*.db-shm
+data/*.db-wal
+data/*.db-journal
+data/secrets/optrasight-secrets.db
+data/secrets/optrasight-secrets.db-shm
+data/secrets/optrasight-secrets.db-wal
+data/secrets/optrasight-secrets.db-journal
+data/portraits/
+data/dnstwist_screenshots/
+data/.optrasight-kek
+data/private/
+data/public/*.db-shm
+data/public/*.db-wal
+data/public/*.db-journal
+
+# Tooling caches & build artifacts
+.eslintcache
+*.tsbuildinfo
+coverage/
+
+# Test / browser-automation output
+playwright-report/
+test-results/
+
+# Generated local analysis output
+output/
+opensquat-nrd-latest.txt
+
+# Locally installed scanner checkouts / binaries
+tools/dnstwist/
+bin/
+
+.env
+.env.*
+!.env.example
+
+# Private keys / certificates — never commit (defense-in-depth for a security tool)
+*.pem
+*.key
+*.p12
+*.pfx
+
+*.log
+.DS_Store
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+
+# Local agent handoff notes; not public documentation
+AGENTS.md
+CLAUDE.md
+CHANGELOG.md
+.claude/
+.release-trash/
+.code-review-graph/
+
+# Local brand workshop / promotion drafts; app ships compiled public assets instead
+branding/
+docs/BRANDING_UPLIFT_GUIDE.md
+docs/promotion/
+optrasight-branding-guide.html
+optrasight-brand-direction-v2.html
+
+# OS
+Thumbs.db

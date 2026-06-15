@@ -1,0 +1,29 @@
+{
+  "title": "OptraSight BatchOne integration catalog",
+  "version": "batchone-2026-06",
+  "scope": "BatchOne release surface only",
+  "description": "Public-safe connector metadata for the BatchOne threat-intel workstation. This catalog lists only metadata needed by the BatchOne release line.",
+  "integrations": [
+    {
+      "id": "urlscan",
+      "name": "urlscan.io",
+      "layer": "source_context",
+      "purpose": "Optional URL context lookup for source review when an operator configures their own urlscan.io key.",
+      "license": "External service terms",
+      "invocation": { "kind": "http_api" },
+      "env": [],
+      "platform_endpoint": "internal capability only"
+    }
+  ],
+  "active_batchone_surfaces": [
+    "Intel Inbox source catalog and finding review",
+    "Actor Observatory threat actor profiles",
+    "AI Setup provider configuration",
+    "Job Control and audit review",
+    "Platform user administration"
+  ],
+  "security_notes": [
+    "API keys are stored in the separate secret database, not in this catalog.",
+    "This file is metadata only and must not include customer-specific credentials, workspace names, or private endpoints."
+  ]
+}
