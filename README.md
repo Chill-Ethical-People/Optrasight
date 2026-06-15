@@ -22,11 +22,11 @@ This release is deliberately focused: a clean, inspectable workstation for open-
 
 Watch the Batch One workflow from OSINT signal to Threat Actor Profile, hunt-query draft, and analyst action.
 
-<video src="client/public/promo/optrasight-batch-one-promo.mp4" controls muted playsinline width="720">
-  Watch the Batch One promo video.
-</video>
-
-[Watch the Batch One promo video](client/public/promo/optrasight-batch-one-promo.mp4)
+<p align="center">
+  <video controls muted playsinline width="720" aria-label="OptraSight Batch One promo video">
+    <source src="client/public/promo/optrasight-batch-one-promo.mp4" type="video/mp4">
+  </video>
+</p>
 
 ## Product Screenshots
 
@@ -236,6 +236,11 @@ npm run check              # lint + tests + typecheck baseline gate
 - Node.js 20+; CI targets Node 20.x and 22.x.
 - npm 9+.
 - SQLite-compatible local filesystem.
+
+## GitHub Actions
+
+The release workflow runs linting, tests, the TypeScript baseline gate, production build, and optional Snyk scans. Configure `SNYK_TOKEN` as a repository or organization Actions secret to enable Snyk dependency scanning and Snyk monitor snapshots. Tagged releases also require the signing secrets documented in [VERIFYING.md](./VERIFYING.md).
+
 ## Production Build
 
 ```bash
