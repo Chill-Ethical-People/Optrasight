@@ -158,8 +158,9 @@ jobs:
           Configure your own AI provider keys in AI Setup after first login.
           EOF
 
+          cp client/public/promo/optrasight-batch-one-promo.mp4 release/
           tar -czf "release/${RELEASE_NAME}.tar.gz" -C release "${RELEASE_NAME}"
-          sha256sum "release/${RELEASE_NAME}.tar.gz" > release/SHA256SUMS
+          sha256sum "release/${RELEASE_NAME}.tar.gz" release/optrasight-batch-one-promo.mp4 > release/SHA256SUMS
 
       - name: Validate signing secrets
         env:
@@ -183,7 +184,7 @@ jobs:
 
           printf '%s' "${GPG_PRIVATE_KEY}" | gpg --batch --import
 
-          for artifact in release/*.tar.gz release/SHA256SUMS; do
+          for artifact in release/*.tar.gz release/*.mp4 release/SHA256SUMS; do
             gpg --batch --yes --pinentry-mode loopback \
               --passphrase "${GPG_PASSPHRASE}" \
               --armor --detach-sign "${artifact}"
@@ -195,6 +196,7 @@ jobs:
           name: optrasight-batchone-${{ github.ref_name }}
           path: |
             release/*.tar.gz
+            release/*.mp4
             release/SHA256SUMS
             release/*.asc
           if-no-files-found: error
@@ -204,6 +206,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release create "${GITHUB_REF_NAME}" release/*.tar.gz release/SHA256SUMS release/*.asc \
+          gh release create "${GITHUB_REF_NAME}" release/*.tar.gz release/*.mp4 release/SHA256SUMS release/*.asc \
             --title "OptraSight ${GITHUB_REF_NAME}" \
             --generate-notes

@@ -24,7 +24,7 @@ Watch the Batch One workflow from OSINT signal to Threat Actor Profile, hunt-que
 
 <p align="center">
   <strong>OptraSight Batch One promo video</strong><br>
-  <video src="https://raw.githubusercontent.com/Chill-Ethical-People/Optrasight/main/client/public/promo/optrasight-batch-one-promo.mp4" controls muted playsinline width="720" aria-label="OptraSight Batch One promo video">
+  <video src="https://github.com/Chill-Ethical-People/Optrasight/releases/download/v0.1.0/optrasight-batch-one-promo.mp4" controls muted playsinline width="720" aria-label="OptraSight Batch One promo video">
     Watch the Batch One workflow from OSINT signal to Threat Actor Profile, hunt-query draft, and analyst action.
   </video>
 </p>
