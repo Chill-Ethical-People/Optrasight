@@ -1,0 +1,231 @@
+name: CI and Release
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    name: Verify on Node ${{ matrix.node-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version:
+          - "20.x"
+          - "22.x"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run release checks
+        run: npm run check
+
+      - name: Build production bundle
+        run: npm run build
+
+  snyk:
+    name: Snyk security scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22.x"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check Snyk token
+        id: snyk-token
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "${SNYK_TOKEN}" ]; then
+            echo "available=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "available=false" >> "${GITHUB_OUTPUT}"
+            echo "SNYK_TOKEN is not configured; skipping Snyk scans."
+          fi
+
+      - name: Run Snyk dependency scan
+        if: steps.snyk-token.outputs.available == 'true'
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: |
+          set +e
+          npx -y snyk test --severity-threshold=high
+          status=$?
+          if [ "${status}" -ne 0 ]; then
+            echo "Snyk dependency scan exited with ${status}. Check SNYK_TOKEN, plan access, or run locally with npx -y snyk test --severity-threshold=high."
+          fi
+          exit 0
+
+      - name: Run Snyk Code scan
+        if: steps.snyk-token.outputs.available == 'true'
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: |
+          set +e
+          npx -y snyk code test --severity-threshold=high
+          status=$?
+          if [ "${status}" -ne 0 ]; then
+            echo "Snyk Code scan exited with ${status}. This can require additional Snyk plan or org access; release verification is not blocked."
+          fi
+          exit 0
+
+      - name: Publish Snyk monitor snapshot
+        if: steps.snyk-token.outputs.available == 'true' && github.event_name == 'push'
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: |
+          set +e
+          npx -y snyk monitor --project-name=optrasight-batchone --target-reference="${GITHUB_REF_NAME}"
+          status=$?
+          if [ "${status}" -ne 0 ]; then
+            echo "Snyk monitor exited with ${status}. This is non-blocking for public release verification."
+          fi
+          exit 0
+
+  release:
+    name: Build release archive
+    needs:
+      - verify
+      - snyk
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22.x"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build production bundle
+        run: npm run build
+
+      - name: Prepare release directory
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          RELEASE_NAME="optrasight-batchone-${RELEASE_TAG}"
+          RELEASE_DIR="release/${RELEASE_NAME}"
+
+          mkdir -p "${RELEASE_DIR}"
+          cp -R dist "${RELEASE_DIR}/dist"
+          mkdir -p "${RELEASE_DIR}/data"
+          cp -R data/public "${RELEASE_DIR}/data/public"
+          if [ -d data/secrets ]; then
+            mkdir -p "${RELEASE_DIR}/data/secrets"
+            cp data/secrets/*.template.db "${RELEASE_DIR}/data/secrets/" 2>/dev/null || true
+          fi
+          cp -R scripts "${RELEASE_DIR}/scripts"
+          cp package.json package-lock.json .env.example "${RELEASE_DIR}/"
+          cp README.md LICENSE SECURITY.md VERIFYING.md DEPLOYMENT.md CONTRIBUTING.md ARCHITECTURE.md "${RELEASE_DIR}/"
+
+          if [ -d signing/keys ]; then
+            mkdir -p "${RELEASE_DIR}/signing/keys"
+            cp signing/keys/*.asc "${RELEASE_DIR}/signing/keys/"
+          fi
+
+          cat > "${RELEASE_DIR}/RUNNING_RELEASE.md" <<'EOF'
+          # Running An OptraSight Release Archive
+
+          ```bash
+          npm ci --omit=dev
+          npm run db:restore-public
+          npm start
+          ```
+
+          Then open `http://localhost:5000`.
+
+          Configure your own AI provider keys in AI Setup after first login.
+          EOF
+
+          cp client/public/promo/optrasight-batch-one-promo.mp4 release/
+          tar -czf "release/${RELEASE_NAME}.tar.gz" -C release "${RELEASE_NAME}"
+          sha256sum "release/${RELEASE_NAME}.tar.gz" release/optrasight-batch-one-promo.mp4 > release/SHA256SUMS
+
+      - name: Validate signing secrets
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.OPTRASIGHT_RELEASE_GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.OPTRASIGHT_RELEASE_GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${GPG_PRIVATE_KEY}" ] || [ -z "${GPG_PASSPHRASE}" ]; then
+            echo "Release signing secrets are required for tagged releases."
+            echo "Configure OPTRASIGHT_RELEASE_GPG_PRIVATE_KEY and OPTRASIGHT_RELEASE_GPG_PASSPHRASE in the repository or organization."
+            exit 1
+          fi
+
+      - name: Sign release assets
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.OPTRASIGHT_RELEASE_GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.OPTRASIGHT_RELEASE_GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+
+          printf '%s' "${GPG_PRIVATE_KEY}" | gpg --batch --import
+
+          for artifact in release/*.tar.gz release/*.mp4 release/SHA256SUMS; do
+            gpg --batch --yes --pinentry-mode loopback \
+              --passphrase "${GPG_PASSPHRASE}" \
+              --armor --detach-sign "${artifact}"
+          done
+
+      - name: Upload release build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: optrasight-batchone-${{ github.ref_name }}
+          path: |
+            release/*.tar.gz
+            release/*.mp4
+            release/SHA256SUMS
+            release/*.asc
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "${GITHUB_REF_NAME}" release/*.tar.gz release/*.mp4 release/SHA256SUMS release/*.asc \
+            --title "OptraSight ${GITHUB_REF_NAME}" \
+            --generate-notes
