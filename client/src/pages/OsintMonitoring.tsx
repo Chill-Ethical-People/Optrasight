@@ -1,6 +1,8 @@
 import { useMemo, useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { STATIC_DEMO_MODE } from "@/lib/staticDemoApi";
+import { showStaticDemoNotice } from "@/lib/staticDemoNotice";
 import { cn } from "@/lib/utils";
 import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/lib/auth";
@@ -405,11 +407,24 @@ function SourcesTab() {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => refresh.mutate()}
+                onClick={() => {
+                  if (STATIC_DEMO_MODE) {
+                    showStaticDemoNotice({ kind: "source", action: "Source refresh restricted" });
+                    return;
+                  }
+                  refresh.mutate();
+                }}
                 disabled={refresh.isPending || ingestStatus?.busy}
                 data-testid="button-refresh-all-sources"
-                className="gap-1.5 text-xs"
-                title="Walk the full source catalog and pull the last 12 months of threat intel (admin only)"
+                className={cn(
+                  "gap-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50",
+                  STATIC_DEMO_MODE && "opacity-55 hover:opacity-70",
+                )}
+                title={
+                  STATIC_DEMO_MODE
+                    ? "Source refresh is disabled in the static public demo"
+                    : "Walk the full source catalog and pull the last 12 months of threat intel (admin only)"
+                }
               >
                 {ingestStatus?.busy ? (
                   <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Ingesting…</>
@@ -641,7 +656,7 @@ function FindingsTab() {
   const [keyword, setKeyword] = useState<string>("");
   const [hideAdvertisements, setHideAdvertisements] = useState(true);
   // v2.15 — day-range filter (also drives chatbot triage scope).
-  const [range, setRange] = useState<RangeKey>("7d");
+  const [range, setRange] = useState<RangeKey>("all");
   const [findingsPage, setFindingsPage] = useState(1);
   const [findingsPageSize, setFindingsPageSize] = useState<number>(25);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
@@ -733,8 +748,9 @@ function FindingsTab() {
     },
   });
   const rawFindings = data?.findings || [];
-  // v2.15 — day-range filter: keep findings whose publishedAt/createdAt is within
-  // the selected window. "All" returns everything.
+  // v2.15 — day-range filter. Prefer the source fetch timestamp so "1d/7d"
+  // reflects the analyst action of refreshing feeds, then fall back to finding
+  // ingest time and source-provided publish time.
   const allFindings = useMemo(() => {
     const hours = RANGE_HOURS[range];
     const scoped = hideAdvertisements
@@ -743,7 +759,7 @@ function FindingsTab() {
     if (!hours) return scoped;
     const cutoff = Date.now() - hours * 3_600_000;
     return scoped.filter((f) => {
-      const ts = Date.parse((f.publishedAt as any) || (f.createdAt as any) || "");
+      const ts = Date.parse((f.sourceFetchedAt as any) || (f.createdAt as any) || (f.publishedAt as any) || "");
       if (!isFinite(ts)) return true; // keep undated items rather than silently drop them
       return ts >= cutoff;
     });
@@ -977,18 +993,48 @@ function FindingsTab() {
             {hideAdvertisements ? "Advertisements hidden" : "Show advertisements"}
           </Button>
           <div className="flex-1" />
-          <Button onClick={() => scan.mutate()} disabled={scan.isPending} variant="outline" data-testid="button-osint-scan">
+          <Button
+            onClick={() => {
+              if (STATIC_DEMO_MODE) {
+                showStaticDemoNotice({ kind: "source", action: "Live scan restricted" });
+                return;
+              }
+              scan.mutate();
+            }}
+            disabled={scan.isPending}
+            variant="outline"
+            data-testid="button-osint-scan"
+          >
             {scan.isPending ? <><Loader2 size={14} className="mr-1.5 animate-spin" />Scanning</> : <><Search size={14} className="mr-1.5" />Scan now</>}
           </Button>
-          <Button onClick={() => analyze.mutate()} disabled={analyze.isPending || aiDisabled} title={aiAvailability.disabledReason} data-testid="button-osint-analyze">
+          <Button
+            onClick={() => {
+              if (STATIC_DEMO_MODE) {
+                showStaticDemoNotice({ kind: "ai", action: "Live AI analysis restricted" });
+                return;
+              }
+              analyze.mutate();
+            }}
+            disabled={analyze.isPending || (!STATIC_DEMO_MODE && aiDisabled)}
+            title={STATIC_DEMO_MODE ? "Available in the local Batch One app" : aiAvailability.disabledReason}
+            data-testid="button-osint-analyze"
+          >
             {analyze.isPending ? <><Loader2 size={14} className="mr-1.5 animate-spin" />Analysing</> : <><Sparkles size={14} className="mr-1.5" />AI analyse</>}
           </Button>
           <Dialog open={huntOpen} onOpenChange={setHuntOpen}>
             <DialogTrigger asChild>
               <Button
                 variant="default"
-                disabled={aiDisabled || !selectedIds.length}
-                title={aiAvailability.disabledReason}
+                disabled={!STATIC_DEMO_MODE && (aiDisabled || !selectedIds.length)}
+                title={STATIC_DEMO_MODE ? "Available in the local Batch One app" : aiAvailability.disabledReason}
+                onClick={(event) => {
+                  if (STATIC_DEMO_MODE) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    showStaticDemoNotice({ kind: "ai", action: "Hunt-query generation restricted" });
+                  }
+                }}
+                className={cn(STATIC_DEMO_MODE && "opacity-60 hover:opacity-75")}
                 data-testid="button-open-hunt-dialog"
               >
                 <Code2 size={14} className="mr-1.5" /> Hunt query ({selectedIds.length})
@@ -1003,10 +1049,17 @@ function FindingsTab() {
           </Dialog>
           <Button
             variant="outline"
-            disabled={!selectedIds.length}
+            disabled={false}
             data-testid="button-preview-stix"
-            title="Preview STIX object counts and validation before export."
-            onClick={() => setStixOpen(true)}
+            title={STATIC_DEMO_MODE ? "Available in the local Batch One app" : "Preview STIX object counts and validation before export."}
+            className={cn((STATIC_DEMO_MODE || !selectedIds.length) && "opacity-55 hover:opacity-70")}
+            onClick={() => {
+              if (STATIC_DEMO_MODE || !selectedIds.length) {
+                showStaticDemoNotice({ kind: "export", action: "STIX preview restricted" });
+                return;
+              }
+              setStixOpen(true);
+            }}
           >
             <FileJson size={14} className="mr-1.5" /> STIX preview ({selectedIds.length})
           </Button>
@@ -1078,8 +1131,17 @@ function FindingsTab() {
       ) : findings.length === 0 ? (
         <Card className="p-12 text-center">
           <Radar className="mx-auto mb-3 text-muted-foreground" size={28} />
-          <div className="text-sm font-medium">No findings yet</div>
-          <div className="text-xs text-muted-foreground mt-1">Run an OSINT scan to ingest the latest threat intel.</div>
+          <div className="text-sm font-medium">{rawFindings.length > 0 ? "No findings in this view" : "No findings yet"}</div>
+          <div className="text-xs text-muted-foreground mt-1">
+            {rawFindings.length > 0
+              ? "Widen the time range or filters to review the parsed threat intel already in this workspace."
+              : "Run an OSINT scan to ingest the latest threat intel."}
+          </div>
+          {rawFindings.length > 0 && range !== "all" && (
+            <Button variant="outline" size="sm" className="mt-4" onClick={() => setRange("all")}>
+              Show all findings
+            </Button>
+          )}
         </Card>
       ) : (
         <div className="space-y-2">
@@ -1366,7 +1428,7 @@ function scoreEntry<T extends { name: string; aliases: string[] }>(entry: T, nee
 // the literal string — satisfying the v2.28 "allow custom-add" requirement.
 function TypeaheadChipFieldEditor<T extends { name: string; aliases: string[] }>({
   label, values, onChange, dict, dictLoading, placeholder, emptyLabel,
-  renderChip, testIdPrefix, listTestId, getMeta,
+  renderChip, testIdPrefix, listTestId, getMeta, disabled = false,
 }: {
   label: string;
   values: string[];
@@ -1379,6 +1441,7 @@ function TypeaheadChipFieldEditor<T extends { name: string; aliases: string[] }>
   testIdPrefix: string;
   listTestId?: string;
   getMeta?: (v: string) => T | null;
+  disabled?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [query, setQuery] = useState("");
@@ -1497,7 +1560,7 @@ function TypeaheadChipFieldEditor<T extends { name: string; aliases: string[] }>
     <div data-testid={`field-${testIdPrefix}`}>
       <FieldLabel
         label={label}
-        onAction={start}
+        onAction={disabled ? null : start}
         actionIcon={values.length === 0 ? "plus" : "pencil"}
         actionAriaLabel={values.length === 0 ? `Add ${label}` : `Edit ${label}`}
         testId={`button-edit-${testIdPrefix}`}
@@ -1510,6 +1573,7 @@ function TypeaheadChipFieldEditor<T extends { name: string; aliases: string[] }>
               <button
                 type="button"
                 onClick={() => onChange(values.filter((x) => x !== v))}
+                disabled={disabled}
                 className="text-muted-foreground/60 hover:text-destructive text-[10px] opacity-0 group-hover:opacity-100 transition-opacity"
                 aria-label={`Remove ${v}`}
                 data-testid={`button-remove-${testIdPrefix}-${v.replace(/\s+/g, "-").toLowerCase()}`}
@@ -1531,7 +1595,7 @@ function TypeaheadChipFieldEditor<T extends { name: string; aliases: string[] }>
 // that swaps the view into an inline textarea. Save commits via `onChange`.
 function ChipFieldEditor<T extends string>({
   label, values, placeholder, emptyLabel, onChange, renderChip,
-  fontMono = false, testIdPrefix, listTestId,
+  fontMono = false, testIdPrefix, listTestId, disabled = false,
 }: {
   label: string;
   values: T[];
@@ -1542,6 +1606,7 @@ function ChipFieldEditor<T extends string>({
   fontMono?: boolean;
   testIdPrefix: string;
   listTestId?: string;
+  disabled?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -1581,7 +1646,7 @@ function ChipFieldEditor<T extends string>({
     <div data-testid={`field-${testIdPrefix}`}>
       <FieldLabel
         label={label}
-        onAction={startEdit}
+        onAction={disabled ? null : startEdit}
         actionIcon={values.length === 0 ? "plus" : "pencil"}
         actionAriaLabel={values.length === 0 ? `Add ${label}` : `Edit ${label}`}
         testId={`button-edit-${testIdPrefix}`}
@@ -1774,6 +1839,7 @@ function isAiJobTerminal(status?: AiJobStatusResp["status"]): boolean {
 function FindingDetailSheet({ findingId, onClose }: { findingId: string | null; onClose: () => void }) {
   const { toast } = useToast();
   const open = !!findingId;
+  const detailReadOnly = STATIC_DEMO_MODE;
   const [analysisJobId, setAnalysisJobId] = useState<string | null>(null);
   const { data, isLoading } = useQuery<OsintFindingDTO>({
     queryKey: ["/api/v1/osint/findings", findingId],
@@ -1840,6 +1906,9 @@ function FindingDetailSheet({ findingId, onClose }: { findingId: string | null; 
 
   const analyzeOne = useMutation({
     mutationFn: async () => {
+      if (detailReadOnly) {
+        throw new Error("Static demo is read-only.");
+      }
       const r = await apiRequest("POST", "/api/v1/osint/findings/ai-analyze", {
         ids: [findingId], onlyUnanalyzed: false,
       });
@@ -1860,6 +1929,9 @@ function FindingDetailSheet({ findingId, onClose }: { findingId: string | null; 
   // by every per-field inline editor + chip-delete affordance.
   const patchField = useMutation({
     mutationFn: async (patch: OsintFindingPatch) => {
+      if (detailReadOnly) {
+        throw new Error("Static demo is read-only.");
+      }
       const r = await apiRequest("PATCH", `/api/v1/osint/findings/${findingId}`, patch);
       return r.json();
     },
@@ -1876,6 +1948,10 @@ function FindingDetailSheet({ findingId, onClose }: { findingId: string | null; 
 
   // Build the iocs patch payload for a single group key by replacing its list.
   function patchIocGroup(key: keyof FindingIoCs, list: string[]) {
+    if (detailReadOnly) {
+      showStaticDemoNotice({ kind: "write", action: "Intel detail editing restricted" });
+      return;
+    }
     const current: any = { ...(data?.iocs || {}) };
     if (list.length) current[key] = list;
     else delete current[key];
@@ -1978,7 +2054,13 @@ function FindingDetailSheet({ findingId, onClose }: { findingId: string | null; 
               <div className="flex items-center gap-2 flex-wrap">
                 <Button
                   size="sm"
-                  onClick={() => analyzeOne.mutate()}
+                  onClick={() => {
+                    if (detailReadOnly) {
+                      showStaticDemoNotice({ kind: "ai", action: "Finding analysis restricted" });
+                      return;
+                    }
+                    analyzeOne.mutate();
+                  }}
                   disabled={analysisInFlight}
                   data-testid="button-detail-analyze"
                 >
@@ -2059,8 +2141,14 @@ function FindingDetailSheet({ findingId, onClose }: { findingId: string | null; 
                   />
                   <Select
                     value={data.status}
-                    onValueChange={(v) => patchField.mutate({ status: v as any })}
-                    disabled={patchField.isPending}
+                    onValueChange={(v) => {
+                      if (detailReadOnly) {
+                        showStaticDemoNotice({ kind: "write", action: "Intel detail editing restricted" });
+                        return;
+                      }
+                      patchField.mutate({ status: v as any });
+                    }}
+                    disabled={detailReadOnly || patchField.isPending}
                   >
                     <SelectTrigger className="h-8 text-xs w-full" data-testid="select-detail-status">
                       <SelectValue />
@@ -2090,6 +2178,7 @@ function FindingDetailSheet({ findingId, onClose }: { findingId: string | null; 
                 emptyLabel="no CVE references parsed"
                 fontMono
                 onChange={(next) => patchField.mutate({ cveIds: next })}
+                disabled={detailReadOnly || patchField.isPending}
                 renderChip={(c) => (
                   <a
                     href={`https://nvd.nist.gov/vuln/detail/${c}`}
@@ -2109,7 +2198,7 @@ function FindingDetailSheet({ findingId, onClose }: { findingId: string | null; 
               <IocSectionEditable
                 iocs={data.iocs}
                 onChangeGroup={patchIocGroup}
-                disabled={patchField.isPending}
+                disabled={detailReadOnly || patchField.isPending}
               />
 
               {/* Tag groups (Affected tech / Threat actors / Analyst tags)
@@ -2121,6 +2210,7 @@ function FindingDetailSheet({ findingId, onClose }: { findingId: string | null; 
                   label="Affected technology"
                   values={data.affectedTech || []}
                   onChange={(next) => patchField.mutate({ affectedTech: next })}
+                  disabled={detailReadOnly || patchField.isPending}
                   dict={dicts?.technologies || []}
                   dictLoading={dictsLoading}
                   placeholder="Type to search 100+ tracked technologies…"
@@ -2141,6 +2231,7 @@ function FindingDetailSheet({ findingId, onClose }: { findingId: string | null; 
                   label="Threat actors"
                   values={data.threatActors || []}
                   onChange={(next) => patchField.mutate({ threatActors: next })}
+                  disabled={detailReadOnly || patchField.isPending}
                   dict={dicts?.threatActors || []}
                   dictLoading={dictsLoading}
                   placeholder="Type to search 100+ tracked threat actors…"
@@ -2177,6 +2268,7 @@ function FindingDetailSheet({ findingId, onClose }: { findingId: string | null; 
                   placeholder="comma-separated, e.g. payment-fraud, watchlist"
                   emptyLabel="no analyst tags yet"
                   onChange={(next) => patchField.mutate({ analystTags: next })}
+                  disabled={detailReadOnly || patchField.isPending}
                   renderChip={(t) => (
                     <Badge className="text-[10px] bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 border" data-testid={`badge-detail-analyst-tag-${t}`}>
                       {t}

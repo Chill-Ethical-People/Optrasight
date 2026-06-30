@@ -128,7 +128,7 @@ function geminiApiModel(model: string): string {
 }
 
 function supportsGeminiUrlContext(model: string): boolean {
-  return /^gemini-(?:flash-latest|3\.5-flash|3\.1-pro|3\.1-flash-lite|3-flash|2\.5-(?:pro|flash|flash-lite))/i.test(geminiApiModel(model));
+  return /^gemini-(?:flash-latest|3\.5-flash|3\.1-pro|3\.1-flash-lite|3-flash)/i.test(geminiApiModel(model));
 }
 
 function geminiFallbackModel(model: string): string | null {
@@ -151,35 +151,42 @@ function providerApiModel(kind: AiProviderKind, model: string): string {
   if (kind === "gemini") return geminiApiModel(m);
   const key = m.toLowerCase();
   if (kind === "openai" || kind === "azure-openai") {
-    if (/^gpt-5\./.test(key) || key === "gpt-5") return "gpt-4.1-mini";
-    return m || "gpt-4.1-mini";
+    return m || "gpt-5.4-mini";
   }
   if (kind === "anthropic") {
     const aliases: Record<string, string> = {
-      "claude-opus-4-7": "claude-opus-4-1-20250805",
-      "claude-sonnet-4-6": "claude-sonnet-4-20250514",
-      "claude-haiku-4-5": "claude-3-5-haiku-20241022",
-      "claude-3-5-sonnet": "claude-3-7-sonnet-20250219",
-      "claude-3-5-sonnet-latest": "claude-3-7-sonnet-20250219",
-      "claude-3-5-haiku-latest": "claude-3-5-haiku-20241022",
+      "claude-3-5-sonnet": "claude-sonnet-4-6",
+      "claude-3-5-sonnet-latest": "claude-sonnet-4-6",
+      "claude-3-5-haiku-latest": "claude-haiku-4-5",
+      "claude-sonnet-latest": "claude-sonnet-4-6",
+      "claude-opus-latest": "claude-opus-4-7",
+      "claude-haiku-latest": "claude-haiku-4-5",
     };
-    return aliases[key] || m || "claude-sonnet-4-20250514";
+    return aliases[key] || m || "claude-sonnet-4-6";
   }
   if (kind === "deepseek") {
-    if (key === "deepseek-v4-pro") return "deepseek-reasoner";
-    if (key === "deepseek-v4-flash") return "deepseek-chat";
-    return m || "deepseek-chat";
+    if (key === "deepseek-chat") return "deepseek-v4-flash";
+    if (key === "deepseek-reasoner") return "deepseek-v4-pro";
+    return m || "deepseek-v4-flash";
   }
   if (kind === "perplexity") {
     if (key === "sonar-large") return "sonar-pro";
     return m || "sonar-pro";
   }
   if (kind === "kimi") {
-    if (key === "kimi-latest") return "moonshot-v1-128k";
+    if (key === "kimi-latest") return "kimi-k2.6";
     if (key === "kimi-k2-instruct") return "kimi-k2-0711-preview";
-    return m || "moonshot-v1-128k";
+    return m || "kimi-k2.6";
   }
   return m;
+}
+
+function openAiUsesCompletionTokenParam(kind: AiProviderKind, model: string): boolean {
+  return (kind === "openai" || kind === "azure-openai") && /^(?:gpt-5|o\d|o[134](?:-|$))/i.test(model);
+}
+
+function openAiSupportsTemperature(kind: AiProviderKind, model: string): boolean {
+  return !(kind === "openai" || kind === "azure-openai") || !/^(?:o\d|o[134](?:-|$))/i.test(model);
 }
 
 function portraitModelForProvider(kind: AiProviderKind, model: string): string {
@@ -579,9 +586,12 @@ export function liveChatJsonDiagnostic(provider: AiProvider, opts: LiveChatOptio
           { role: "system", content: jsonSystem },
           { role: "user",   content: userContent },
         ],
-        temperature,
       };
-      if (maxTokens !== null) requestBody.max_tokens = maxTokens;
+      if (openAiSupportsTemperature(kind, model)) requestBody.temperature = temperature;
+      if (maxTokens !== null) {
+        if (openAiUsesCompletionTokenParam(kind, model)) requestBody.max_completion_tokens = maxTokens;
+        else requestBody.max_tokens = maxTokens;
+      }
       // OpenAI + DeepSeek + Azure-OpenAI + Kimi accept response_format json_object.
       if (kind === "openai" || kind === "deepseek" || kind === "azure-openai" || kind === "kimi") {
         requestBody.response_format = { type: "json_object" };
@@ -783,7 +793,29 @@ export function livePing(provider: AiProvider): LivePingResult {
   const t0 = Date.now();
   try {
     if (kind === "openai" || kind === "deepseek" || kind === "perplexity" || kind === "azure-openai" || kind === "ollama" || kind === "kimi") {
-      // Perplexity historically does not expose /v1/models; fall back to a tiny chat-completion sanity check on failure.
+      const selectedModel = providerApiModel(kind, provider.model);
+      const probeHeaders: Record<string, string> = {};
+      if (apiKey) probeHeaders["Authorization"] = `Bearer ${apiKey}`;
+      if (!/^gpt-image-/i.test(selectedModel)) {
+        const probe = curlPost(chatCompletionsUrl(kind, base), probeHeaders, JSON.stringify({
+          model: selectedModel,
+          messages: [{ role: "user", content: "Reply with ok." }],
+          ...(openAiUsesCompletionTokenParam(kind, selectedModel) ? { max_completion_tokens: 8 } : { max_tokens: 8 }),
+        }));
+        const latencyMs = Date.now() - t0;
+        if (probe.ok) {
+          return { ok: true, latencyMs, message: `${provider.label} (${selectedModel}) — connected via chat` };
+        }
+        // Some OpenAI accounts expose newest model ids in /models before they
+        // are enabled for chat-completions. Treat that as a failed selected
+        // model test so users do not route jobs to a model that cannot run.
+        if (kind === "openai" || kind === "azure-openai" || kind === "deepseek" || kind === "kimi" || kind === "perplexity") {
+          return { ok: false, latencyMs, message: `${provider.label}: ${probe.status ? `HTTP ${probe.status}` : "network"}${probe.error ? ` — ${probe.error}` : ""}` };
+        }
+      }
+
+      // Image-only OpenAI models and local Ollama discovery can still be
+      // validated by model listing when a chat probe is not meaningful.
       const url = modelsUrl(kind, base);
       const headers: Record<string, string> = {};
       if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
@@ -791,22 +823,6 @@ export function livePing(provider: AiProvider): LivePingResult {
       const latencyMs = Date.now() - t0;
       if (r.ok) {
         return { ok: true, latencyMs, message: `${provider.label} (${provider.model}) — connected` };
-      }
-      // Some OpenAI-compatible providers either do not expose /v1/models or
-      // apply stricter auth/model validation there than on chat completions.
-      // Fall back to a tiny chat completion for the providers we actively use.
-      if (kind === "perplexity" || kind === "deepseek" || kind === "kimi" || kind === "ollama") {
-        const t1 = Date.now();
-        const probeHeaders: Record<string, string> = {};
-        if (apiKey) probeHeaders["Authorization"] = `Bearer ${apiKey}`;
-        const probe = curlPost(chatCompletionsUrl(kind, base), probeHeaders, JSON.stringify({
-          model: provider.model,
-          messages: [{ role: "user", content: "Reply with ok." }],
-          max_tokens: 8,
-        }));
-        const lat = Date.now() - t1;
-        if (probe.ok) return { ok: true, latencyMs: lat, message: `${provider.label} (${provider.model}) — connected via chat` };
-        return { ok: false, latencyMs: lat, message: `${provider.label}: ${probe.status ? `HTTP ${probe.status}` : "network"}${probe.error ? ` — ${probe.error}` : ""}` };
       }
       return { ok: false, latencyMs, message: `${provider.label}: ${r.status ? `HTTP ${r.status}` : "network"}${r.error ? ` — ${r.error}` : ""}` };
     }

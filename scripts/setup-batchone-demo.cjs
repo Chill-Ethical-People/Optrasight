@@ -199,7 +199,7 @@ function seedWorkspace(db, tenantId, ts) {
       id, tenant_id, email, password, role, account_type, display_name, status,
       password_must_change, mfa_enabled, mfa_secret_enc, mfa_verified_at,
       created_at, last_login_at, failed_login_count, failed_mfa_count, account_locked_until
-    ) VALUES (?, ?, ?, ?, ?, 'platform', ?, 'active', 0, 0, NULL, NULL, ?, NULL, 0, 0, NULL)
+    ) VALUES (?, ?, ?, ?, ?, 'platform', ?, 'active', 1, 0, NULL, NULL, ?, NULL, 0, 0, NULL)
   `);
   for (const user of [
     { email: "admin@cep.com", password: "ChangeMe!2026Admin", role: "admin", name: "Seed Platform Admin" },
