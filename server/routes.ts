@@ -122,7 +122,8 @@ const globalOsintRun: {
   error: string | null;
   progressPct: number;
   progressDetail: { attempted: number; total: number; parsed: number; feedsOk: number } | null;
-} = { busy: false, startedAt: null, finishedAt: null, summary: null, error: null, progressPct: 0, progressDetail: null };
+  workspaceId: string | null;
+} = { busy: false, startedAt: null, finishedAt: null, summary: null, error: null, progressPct: 0, progressDetail: null, workspaceId: null };
 
 function requireAuth(req: AuthedRequest, res: Response, next: NextFunction) {
   const auth = req.header("authorization") || "";
@@ -144,6 +145,13 @@ function requireAuth(req: AuthedRequest, res: Response, next: NextFunction) {
   if (req.query.tenant) {
     return res.status(403).json({ detail: "Tenant switching is not available in BatchOne." });
   }
+  if (accountSetupRequired(u) && !isAccountSetupRoute(req.path)) {
+    return res.status(428).json({
+      detail: "Account setup required before platform functions unlock.",
+      passwordMustChange: !!(u as any).passwordMustChange,
+      mfaRequired: !((u as any).mfaEnabled && (u as any).mfaVerifiedAt),
+    });
+  }
   if (!isBatchOneApiAllowed({ method: req.method, path: req.path, accessMode: req.accessMode })) {
     return res.status(403).json({
       detail: req.accessMode === "guest"
@@ -153,6 +161,18 @@ function requireAuth(req: AuthedRequest, res: Response, next: NextFunction) {
   }
   req.effectiveTenantId = u.tenantId;
   next();
+}
+
+function accountSetupRequired(u: any): boolean {
+  return !!u.passwordMustChange || !(u.mfaEnabled && u.mfaVerifiedAt);
+}
+
+function isAccountSetupRoute(path: string): boolean {
+  return path === "/api/v1/me"
+    || path === "/api/v1/auth/logout"
+    || path === "/api/v1/auth/change-password"
+    || path === "/api/v1/auth/mfa/setup"
+    || path === "/api/v1/auth/mfa/verify";
 }
 
 function requestCrossTenant(req: AuthedRequest): boolean {
@@ -422,7 +442,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     if (!parsed.success) return res.status(400).json({ detail: fromZodError(parsed.error).message });
     const baseUrlError = await validateAiProviderBaseUrl(parsed.data.provider, parsed.data.baseUrl);
     if (baseUrlError) return res.status(400).json({ detail: baseUrlError });
-    res.json(storage.upsertAiProvider(req.effectiveTenantId!, parsed.data));
+    const provider = storage.upsertAiProvider(req.effectiveTenantId!, parsed.data);
+    const assignedDefaultTasks = parsed.data.isDefault
+      ? storage.assignProviderToUnassignedAiTasks(req.effectiveTenantId!, provider.id, AI_TASKS_FOR_RELEASE)
+      : [];
+    res.json({ ...provider, assignedDefaultTasks });
   });
   app.put("/api/v1/ai/providers/:pid", requireAuth, async (req: AuthedRequest, res) => {
     if (!requireAdmin(req, res)) return;
@@ -430,7 +454,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     if (!parsed.success) return res.status(400).json({ detail: fromZodError(parsed.error).message });
     const baseUrlError = await validateAiProviderBaseUrl(parsed.data.provider, parsed.data.baseUrl);
     if (baseUrlError) return res.status(400).json({ detail: baseUrlError });
-    res.json(storage.upsertAiProvider(req.effectiveTenantId!, parsed.data));
+    const provider = storage.upsertAiProvider(req.effectiveTenantId!, parsed.data);
+    const assignedDefaultTasks = parsed.data.isDefault
+      ? storage.assignProviderToUnassignedAiTasks(req.effectiveTenantId!, provider.id, AI_TASKS_FOR_RELEASE)
+      : [];
+    res.json({ ...provider, assignedDefaultTasks });
   });
   app.delete("/api/v1/ai/providers/:pid", requireAuth, (req: AuthedRequest, res) => {
     if (!requireAdmin(req, res)) return;
@@ -607,6 +635,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const maxPerSource = Math.min(Math.max(Number(req.body?.maxPerSource ?? 60), 5), 500);
     const maxTotal = Math.min(Math.max(Number(req.body?.maxTotal ?? 10000), 100), 50000);
     const actor = req.user?.email || "admin";
+    const workspaceId = req.effectiveTenantId!;
     if (globalOsintRun.busy) {
       return res.status(202).json({ status: "already_running", started: globalOsintRun.startedAt, durationMs: Date.now() - (globalOsintRun.startedAt ? new Date(globalOsintRun.startedAt).getTime() : Date.now()) });
     }
@@ -617,15 +646,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     globalOsintRun.error = null;
     globalOsintRun.progressPct = 0;
     globalOsintRun.progressDetail = null;
+    globalOsintRun.workspaceId = workspaceId;
     // Fire-and-forget; client polls /api/v1/admin/osint/ingest/status.
     (async () => {
       try {
         const result = await storage.runGlobalOsintIngest({
+          workspaceId,
           days,
           maxPerSource,
           maxTotal,
           actor,
-          onProgress: (progress) => {
+          onProgress: (progress: { attempted: number; total: number; parsed: number; feedsOk: number }) => {
             globalOsintRun.progressDetail = progress;
             globalOsintRun.progressPct = progress.total > 0
               ? Math.min(99, Math.max(0, Math.round((progress.attempted / progress.total) * 100)))
@@ -646,14 +677,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.get("/api/v1/admin/osint/ingest/status", requireAuth, (req: AuthedRequest, res) => {
     if (!requireAdmin(req, res)) return;
+    const sameWorkspace = globalOsintRun.workspaceId === req.effectiveTenantId;
     res.json({
       busy: globalOsintRun.busy,
       startedAt: globalOsintRun.startedAt,
       finishedAt: globalOsintRun.finishedAt,
-      summary: globalOsintRun.summary,
-      error: globalOsintRun.error,
-      progressPct: globalOsintRun.progressPct,
-      progressDetail: globalOsintRun.progressDetail,
+      summary: sameWorkspace ? globalOsintRun.summary : null,
+      error: sameWorkspace ? globalOsintRun.error : null,
+      progressPct: sameWorkspace ? globalOsintRun.progressPct : 0,
+      progressDetail: sameWorkspace ? globalOsintRun.progressDetail : null,
     });
   });
   app.get("/api/v1/osint/findings", requireAuth, (req: AuthedRequest, res) => {
@@ -758,10 +790,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           title: parsed.data.title,
           createdBy: req.user!.email,
         });
-        storage.updateAiJobTarget(jobId, {
-          targetLabel: out.title,
-          targetUrl: `/#/osint?tab=hunt-queries&hunt=${encodeURIComponent(out.id)}`,
-        });
+        if (out?.id) {
+          storage.updateAiJobTarget(jobId, {
+            targetLabel: out.title,
+            targetUrl: `/#/osint?tab=hunt-queries&hunt=${encodeURIComponent(out.id)}`,
+          });
+        }
         return out;
       },
       providerLabel: (out) => out.aiProviderLabel,
@@ -1179,18 +1213,22 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const targetUrl = `/#/osint?ai=triage&job=${encodeURIComponent(jobId)}`;
     storage.updateAiJobTarget(jobId, { targetUrl });
     setImmediate(async () => {
-      storage.markAiJobRunning(jobId);
-      storage.updateAiJobProgress(jobId, 15);
-      const hb = setInterval(() => { try { storage.setAiJobHeartbeat(jobId); } catch { /* ignore */ } }, 30000);
+      let hb: ReturnType<typeof setInterval> | null = null;
       try {
-        storage.updateAiJobProgress(jobId, 35);
+        storage.markAiJobRunning(jobId);
+        storage.setAiJobProgress(jobId, 15);
+        if (!storage.resolveAiProvider(tenantId, "osint_overview")) {
+          throw new Error("No live-tested AI provider is configured for CIRT triage. Open AI Setup, enable a provider, and assign it to OSINT overview.");
+        }
+        hb = setInterval(() => { try { storage.setAiJobHeartbeat(jobId); } catch { /* ignore */ } }, 30000);
+        storage.setAiJobProgress(jobId, 35);
         const out = await runChatTriage(storage, { tenantId, range, findingIds });
-        storage.updateAiJobProgress(jobId, 90);
+        storage.setAiJobProgress(jobId, 90);
         storage.completeAiJob(jobId, out, (out as any)?.providerLabel ?? null);
       } catch (e: any) {
-        storage.failAiJob(jobId, e);
+        try { storage.failAiJob(jobId, e); } catch { /* keep worker exceptions contained */ }
       } finally {
-        clearInterval(hb);
+        if (hb) clearInterval(hb);
       }
     });
     res.status(202).json({ jobId, status: "queued", kind: "chat_triage", targetLabel: `CIRT triage — ${range}`, targetUrl });
@@ -1236,18 +1274,22 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const targetUrl = `/#/osint?ai=deep-dive&job=${encodeURIComponent(jobId)}`;
     storage.updateAiJobTarget(jobId, { targetUrl });
     setImmediate(async () => {
-      storage.markAiJobRunning(jobId);
-      storage.updateAiJobProgress(jobId, 15);
-      const hb = setInterval(() => { try { storage.setAiJobHeartbeat(jobId); } catch { /* ignore */ } }, 30000);
+      let hb: ReturnType<typeof setInterval> | null = null;
       try {
-        storage.updateAiJobProgress(jobId, 35);
+        storage.markAiJobRunning(jobId);
+        storage.setAiJobProgress(jobId, 15);
+        if (!storage.resolveAiProvider(tenantId, "osint_analysis")) {
+          throw new Error("No live-tested AI provider is configured for CIRT deep dive. Open AI Setup, enable a provider, and assign it to OSINT analysis.");
+        }
+        hb = setInterval(() => { try { storage.setAiJobHeartbeat(jobId); } catch { /* ignore */ } }, 30000);
+        storage.setAiJobProgress(jobId, 35);
         const out = await runChatDeepDive(storage, { tenantId, findingIds });
-        storage.updateAiJobProgress(jobId, 90);
+        storage.setAiJobProgress(jobId, 90);
         storage.completeAiJob(jobId, out, (out as any)?.providerLabel ?? null);
       } catch (e: any) {
-        storage.failAiJob(jobId, e);
+        try { storage.failAiJob(jobId, e); } catch { /* keep worker exceptions contained */ }
       } finally {
-        clearInterval(hb);
+        if (hb) clearInterval(hb);
       }
     });
     res.status(202).json({ jobId, status: "queued", kind: "chat_deep_dive", targetLabel: `CIRT deep-dive — ${findingIds.length} finding${findingIds.length === 1 ? "" : "s"}`, targetUrl });
@@ -1377,7 +1419,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       },
       jobs,
       auditEntries: storage.listAudit(req.effectiveTenantId!, { limit: 200 }),
-      globalIngest: req.user?.role === "admin" ? {
+      globalIngest: req.user?.role === "admin" && globalOsintRun.workspaceId === req.effectiveTenantId ? {
         source: "global_ingest",
         id: "global-osint-ingest",
         kind: "osint_global_ingest",

@@ -32,7 +32,7 @@ function useHashLocationWithoutQuery() {
 function ProtectedRoutes() {
   const { user } = useAuth();
   if (!user) return <Login />;
-  if (user.passwordMustChange) return <AccountSecuritySetup />;
+  if (user.passwordMustChange || !(user.mfaEnabled && user.mfaVerifiedAt)) return <AccountSecuritySetup />;
   const reviewOnly = user.access_mode === "guest" || user.role === "reviewer";
   if (BATCH_ONE_RELEASE && typeof window !== "undefined") {
     const hash = window.location.hash || "#/";

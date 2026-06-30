@@ -36,13 +36,13 @@ const PROVIDER_META: Record<
 > = {
   openai: {
     label: "OpenAI",
-    defaultModel: "gpt-4.1-mini",
+    defaultModel: "gpt-5.4-mini",
     tone: "from-emerald-500/15 to-emerald-500/5 border-emerald-500/30",
     needsKey: true,
   },
   anthropic: {
     label: "Anthropic",
-    defaultModel: "claude-sonnet-4-20250514",
+    defaultModel: "claude-sonnet-4-6",
     tone: "from-orange-500/15 to-orange-500/5 border-orange-500/30",
     needsKey: true,
   },
@@ -73,14 +73,14 @@ const PROVIDER_META: Record<
   },
   deepseek: {
     label: "DeepSeek",
-    defaultModel: "deepseek-chat",
+    defaultModel: "deepseek-v4-flash",
     defaultBase: "https://api.deepseek.com",
     tone: "from-indigo-500/15 to-indigo-500/5 border-indigo-500/30",
     needsKey: true,
   },
   kimi: {
     label: "Kimi (Moonshot)",
-    defaultModel: "moonshot-v1-128k",
+    defaultModel: "kimi-k2.6",
     defaultBase: "https://api.moonshot.ai",
     tone: "from-fuchsia-500/15 to-fuchsia-500/5 border-fuchsia-500/30",
     needsKey: true,
@@ -93,6 +93,10 @@ const PROVIDER_META: Record<
 // integration. Users can still type a newer account/deployment-specific id.
 const MODEL_PRESETS: Record<AiProviderKind, string[]> = {
   openai: [
+    "gpt-5.5",
+    "gpt-5.4",
+    "gpt-5.4-mini",
+    "gpt-5.4-nano",
     "gpt-image-2",
     "gpt-image-1.5",
     "gpt-image-1",
@@ -105,31 +109,36 @@ const MODEL_PRESETS: Record<AiProviderKind, string[]> = {
     "o4-mini",
   ],
   anthropic: [
+    "claude-opus-4-7",
+    "claude-sonnet-4-6",
+    "claude-haiku-4-5",
     "claude-opus-4-1-20250805",
-    "claude-opus-4-20250514",
-    "claude-sonnet-4-20250514",
     "claude-3-7-sonnet-20250219",
-    "claude-3-5-haiku-20241022",
   ],
   gemini: [
     "gemini-flash-latest",
     "gemini-3.5-flash",
     "gemini-3.1-pro",
+    "gemini-3.1-flash-lite",
     "gemini-3-flash",
     "gemini-3.1-flash-image",
     "gemini-3-pro-image",
   ],
-  "azure-openai": ["gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini", "o3-mini"],
+  "azure-openai": ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4o"],
   ollama: ["llama3.1:8b", "llama3.1:70b", "qwen2.5:14b", "mistral:7b", "deepseek-r1:14b"],
   perplexity: ["sonar-pro", "sonar", "sonar-reasoning-pro", "sonar-deep-research"],
-  deepseek: ["deepseek-chat", "deepseek-reasoner"],
+  deepseek: ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat", "deepseek-reasoner"],
   // Moonshot Kimi — OpenAI-compatible endpoint, multiple vision-capable models.
-  kimi: ["moonshot-v1-128k", "moonshot-v1-32k", "moonshot-v1-8k", "kimi-k2-0711-preview"],
+  kimi: ["kimi-k2.7-code", "kimi-k2.6", "moonshot-v1-128k", "moonshot-v1-32k", "moonshot-v1-8k", "kimi-k2-0711-preview"],
 };
 
 // Short note shown next to each model chip on hover so the user knows what each is for.
 const MODEL_DESCRIPTIONS: Record<string, string> = {
   // OpenAI
+  "gpt-5.5": "Newest OpenAI flagship text model where enabled",
+  "gpt-5.4": "Current OpenAI high-capability text model",
+  "gpt-5.4-mini": "Balanced current OpenAI model for BatchOne analysis",
+  "gpt-5.4-nano": "Low-latency current OpenAI model",
   "gpt-image-2": "Latest OpenAI image generation model for TAP portraits",
   "gpt-image-1.5": "OpenAI image generation model",
   "gpt-image-1": "OpenAI image generation model",
@@ -141,6 +150,9 @@ const MODEL_DESCRIPTIONS: Record<string, string> = {
   o3: "Reasoning model",
   "o4-mini": "Fast reasoning model",
   // Anthropic
+  "claude-opus-4-7": "Latest Claude Opus model where enabled",
+  "claude-sonnet-4-6": "Current Claude Sonnet model",
+  "claude-haiku-4-5": "Current Claude Haiku model",
   "claude-opus-4-1-20250805": "Claude Opus 4.1",
   "claude-opus-4-20250514": "Claude Opus 4",
   "claude-sonnet-4-20250514": "Claude Sonnet 4",
@@ -152,8 +164,11 @@ const MODEL_DESCRIPTIONS: Record<string, string> = {
   "gemini-flash-latest": "Latest Gemini Flash alias",
   "gemini-3.5-flash": "Current stable Gemini Flash model",
   "gemini-3.1-pro": "Preview Gemini Pro model",
+  "gemini-3.1-flash-lite": "Lightweight Gemini Flash model",
   "gemini-3-flash": "Preview Gemini Flash model",
   // DeepSeek
+  "deepseek-v4-flash": "Current DeepSeek chat model",
+  "deepseek-v4-pro": "Current DeepSeek reasoning model",
   "deepseek-chat": "DeepSeek chat model",
   "deepseek-reasoner": "DeepSeek reasoning model",
   // Perplexity
@@ -168,6 +183,8 @@ const MODEL_DESCRIPTIONS: Record<string, string> = {
   "mistral:7b": "Mistral 7B — small, fast",
   "deepseek-r1:14b": "DeepSeek-R1 distilled — local reasoning",
   // Kimi / Moonshot
+  "kimi-k2.7-code": "Latest Kimi coding model where enabled",
+  "kimi-k2.6": "Current Kimi multimodal/chat model",
   "moonshot-v1-128k": "128K-context, balanced quality/cost",
   "moonshot-v1-32k": "32K-context for shorter prompts (cheaper)",
   "moonshot-v1-8k": "8K-context for low-volume cheap calls",
@@ -182,30 +199,23 @@ function normaliseModelForProvider(provider: AiProviderKind, model?: string | nu
     provider === "gemini" &&
     (/^gemini-1(?:\.|$|-)/i.test(m) ||
       /^gemini-2(?:\.|$|-)/i.test(m) ||
-      key === "gemini-pro" ||
-      key === "gemini-3.1-flash-lite")
+      key === "gemini-pro")
   )
     return "gemini-flash-latest";
-  if ((provider === "openai" || provider === "azure-openai") && (/^gpt-5\./.test(key) || key === "gpt-5"))
-    return "gpt-4.1-mini";
   if (provider === "anthropic") {
     const aliases: Record<string, string> = {
-      "claude-opus-4-7": "claude-opus-4-1-20250805",
-      "claude-sonnet-4-6": "claude-sonnet-4-20250514",
-      "claude-haiku-4-5": "claude-3-5-haiku-20241022",
-      "claude-3-5-sonnet": "claude-3-7-sonnet-20250219",
-      "claude-3-5-sonnet-latest": "claude-3-7-sonnet-20250219",
-      "claude-3-5-haiku-latest": "claude-3-5-haiku-20241022",
+      "claude-3-5-sonnet": "claude-sonnet-4-6",
+      "claude-3-5-sonnet-latest": "claude-sonnet-4-6",
+      "claude-3-5-haiku-latest": "claude-haiku-4-5",
+      "claude-sonnet-latest": "claude-sonnet-4-6",
+      "claude-opus-latest": "claude-opus-4-7",
+      "claude-haiku-latest": "claude-haiku-4-5",
     };
     return aliases[key] || m;
   }
-  if (provider === "deepseek") {
-    if (key === "deepseek-v4-pro") return "deepseek-reasoner";
-    if (key === "deepseek-v4-flash") return "deepseek-chat";
-  }
   if (provider === "perplexity" && key === "sonar-large") return "sonar-pro";
   if (provider === "kimi") {
-    if (key === "kimi-latest") return "moonshot-v1-128k";
+    if (key === "kimi-latest") return "kimi-k2.6";
     if (key === "kimi-k2-instruct") return "kimi-k2-0711-preview";
   }
   return m;
@@ -538,16 +548,23 @@ function ProviderEditDialog({
       };
       if (apiKey) payload.apiKey = apiKey;
       if (initial?.id) {
-        await apiRequest("PUT", `/api/v1/ai/providers/${initial.id}`, payload);
+        return apiRequest("PUT", `/api/v1/ai/providers/${initial.id}`, payload);
       } else {
-        await apiRequest("POST", "/api/v1/ai/providers", payload);
+        return apiRequest("POST", "/api/v1/ai/providers", payload);
       }
     },
-    onSuccess: () => {
+    onSuccess: (saved: any) => {
       setApiKey("");
       setShowKey(false);
-      toast({ title: initial?.id ? "Provider updated" : "Provider added", description: label });
+      const assigned = Array.isArray(saved?.assignedDefaultTasks) ? saved.assignedDefaultTasks.length : 0;
+      toast({
+        title: initial?.id ? "Provider updated" : "Provider added",
+        description: assigned > 0
+          ? `${label} was assigned to ${assigned} unassigned AI task${assigned === 1 ? "" : "s"}.`
+          : label,
+      });
       queryClient.invalidateQueries({ queryKey: ["/api/v1/ai/providers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/v1/ai/assignments"] });
       onOpenChange(false);
     },
     onError: (e: any) => toast({ variant: "destructive", title: "Failed", description: String(e.message ?? e) }),

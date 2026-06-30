@@ -1127,6 +1127,7 @@ export interface OsintFindingDTO {
   sourceId: string;
   sourceName: string;
   sourceCategory: string;
+  sourceFetchedAt?: string | null;
   title: string;
   url: string | null;
   publishedAt: string;

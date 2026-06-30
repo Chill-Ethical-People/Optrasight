@@ -656,7 +656,7 @@ function FindingsTab() {
   const [keyword, setKeyword] = useState<string>("");
   const [hideAdvertisements, setHideAdvertisements] = useState(true);
   // v2.15 — day-range filter (also drives chatbot triage scope).
-  const [range, setRange] = useState<RangeKey>("7d");
+  const [range, setRange] = useState<RangeKey>("all");
   const [findingsPage, setFindingsPage] = useState(1);
   const [findingsPageSize, setFindingsPageSize] = useState<number>(25);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
@@ -748,8 +748,9 @@ function FindingsTab() {
     },
   });
   const rawFindings = data?.findings || [];
-  // v2.15 — day-range filter: keep findings whose publishedAt/createdAt is within
-  // the selected window. "All" returns everything.
+  // v2.15 — day-range filter. Prefer the source fetch timestamp so "1d/7d"
+  // reflects the analyst action of refreshing feeds, then fall back to finding
+  // ingest time and source-provided publish time.
   const allFindings = useMemo(() => {
     const hours = RANGE_HOURS[range];
     const scoped = hideAdvertisements
@@ -758,7 +759,7 @@ function FindingsTab() {
     if (!hours) return scoped;
     const cutoff = Date.now() - hours * 3_600_000;
     return scoped.filter((f) => {
-      const ts = Date.parse((f.publishedAt as any) || (f.createdAt as any) || "");
+      const ts = Date.parse((f.sourceFetchedAt as any) || (f.createdAt as any) || (f.publishedAt as any) || "");
       if (!isFinite(ts)) return true; // keep undated items rather than silently drop them
       return ts >= cutoff;
     });
@@ -1130,8 +1131,17 @@ function FindingsTab() {
       ) : findings.length === 0 ? (
         <Card className="p-12 text-center">
           <Radar className="mx-auto mb-3 text-muted-foreground" size={28} />
-          <div className="text-sm font-medium">No findings yet</div>
-          <div className="text-xs text-muted-foreground mt-1">Run an OSINT scan to ingest the latest threat intel.</div>
+          <div className="text-sm font-medium">{rawFindings.length > 0 ? "No findings in this view" : "No findings yet"}</div>
+          <div className="text-xs text-muted-foreground mt-1">
+            {rawFindings.length > 0
+              ? "Widen the time range or filters to review the parsed threat intel already in this workspace."
+              : "Run an OSINT scan to ingest the latest threat intel."}
+          </div>
+          {rawFindings.length > 0 && range !== "all" && (
+            <Button variant="outline" size="sm" className="mt-4" onClick={() => setRange("all")}>
+              Show all findings
+            </Button>
+          )}
         </Card>
       ) : (
         <div className="space-y-2">

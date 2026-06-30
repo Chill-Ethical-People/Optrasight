@@ -41,6 +41,8 @@ export function startOsintBackgroundJobs(): void {
   // v2.27 — reap async AI jobs that were left running by a prior process so
   // the UI doesn't poll a zombie job forever after a restart.
   try {
+    const interrupted = storage.failInterruptedAiJobsOnBoot();
+    if (interrupted > 0) console.log(`[osint-bg] marked ${interrupted} interrupted AI job(s) failed after restart`);
     const reaped = storage.reaperAiJobs();
     if (reaped > 0) console.log(`[osint-bg] reaped ${reaped} orphaned AI job(s)`);
   } catch (e) {

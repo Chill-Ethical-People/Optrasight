@@ -124,6 +124,7 @@ function ensureSchema() {
       affected_tech TEXT NOT NULL DEFAULT '[]',
       threat_actors TEXT NOT NULL DEFAULT '[]',
       summary TEXT, raw_snippet TEXT,
+      source_fetched_at TEXT,
       ai_summary TEXT, ai_relevance_score INTEGER,
       ai_recommendation TEXT, ai_analyzed_at TEXT, ai_provider_label TEXT,
       draft_email TEXT, draft_email_at TEXT,
@@ -787,19 +788,59 @@ function isBlockedInitialPassword(value: string): boolean {
   return BLOCKED_INITIAL_PASSWORD_SHA256.has(digest);
 }
 
+const AI_PROVIDER_SEED_DEFAULTS: Array<{ provider: AiProviderKind; label: string; model: string }> = [
+  { provider: "openai", label: "OpenAI", model: "gpt-5.4-mini" },
+  { provider: "anthropic", label: "Anthropic", model: "claude-sonnet-4-6" },
+  { provider: "gemini", label: "Google Gemini", model: "gemini-flash-latest" },
+  { provider: "perplexity", label: "Perplexity", model: "sonar-pro" },
+  { provider: "deepseek", label: "DeepSeek", model: "deepseek-v4-flash" },
+  { provider: "kimi", label: "Kimi (Moonshot)", model: "kimi-k2.6" },
+  { provider: "ollama", label: "Ollama (local)", model: "llama3.1:8b" },
+];
+
+const AI_PROVIDER_DEFAULT_MODEL_BY_KIND = new Map(
+  AI_PROVIDER_SEED_DEFAULTS.map((p) => [p.provider, p.model]),
+);
+
+const STALE_SEEDED_AI_MODELS = new Set([
+  "gpt-4o-mini",
+  "claude-3-5-sonnet",
+  "claude-3-5-haiku",
+  "gemini-1.5-pro",
+  "gemini-2.5-flash",
+  "gemini-2.5-pro",
+  "deepseek-chat",
+  "deepseek-reasoner",
+  "sonar-large",
+  "moonshot-v1-8k",
+]);
+
+function refreshSeedAiProviderModels(existing: AiProvider[]) {
+  const t = now();
+  for (const row of existing) {
+    const nextModel = AI_PROVIDER_DEFAULT_MODEL_BY_KIND.get(row.provider as AiProviderKind);
+    if (!nextModel) continue;
+    if (!STALE_SEEDED_AI_MODELS.has(String(row.model || ""))) continue;
+    db.update(aiProviders)
+      .set({
+        model: nextModel,
+        lastTestedAt: null,
+        lastTestOk: null,
+        lastTestMessage: "Model default was refreshed. Test the provider again before routing AI tasks.",
+        updatedAt: t,
+      })
+      .where(eq(aiProviders.id, row.id))
+      .run();
+  }
+}
+
 function seedAiProvidersIfEmpty(tenantId: string) {
   const existing = db.select().from(aiProviders).where(eq(aiProviders.tenantId, tenantId)).all();
-  if (existing.length) return;
-  const seedSpec = [
-    { provider: "openai" as AiProviderKind,        label: "OpenAI",          model: "gpt-4.1-mini" },
-    { provider: "anthropic" as AiProviderKind,     label: "Anthropic",       model: "claude-sonnet-4-20250514" },
-    { provider: "gemini" as AiProviderKind,        label: "Google Gemini",   model: "gemini-flash-latest" },
-    { provider: "perplexity" as AiProviderKind,    label: "Perplexity",      model: "sonar-pro" },
-    { provider: "deepseek" as AiProviderKind,      label: "DeepSeek",        model: "deepseek-chat" },
-    { provider: "kimi" as AiProviderKind,          label: "Kimi (Moonshot)", model: "moonshot-v1-128k" },
-    { provider: "ollama" as AiProviderKind,        label: "Ollama (local)",  model: "llama3.1:8b" },
-  ];
-  for (const p of seedSpec) {
+  if (existing.length) {
+    refreshSeedAiProviderModels(existing);
+    return;
+  }
+  for (const p of AI_PROVIDER_SEED_DEFAULTS) {
     const pid = id();
     db.insert(aiProviders).values({
       id: pid, tenantId, provider: p.provider, label: p.label, model: p.model,
@@ -811,6 +852,12 @@ function seedAiProvidersIfEmpty(tenantId: string) {
       config: "{}", createdAt: now(), updatedAt: now(),
     }).run();
   }
+}
+
+function providerSupportsAiTask(provider: Pick<AiProvider, "provider"> | undefined | null, task: string): boolean {
+  if (!provider) return false;
+  if (task !== "tap_portrait") return true;
+  return ["openai", "azure-openai", "gemini"].includes(String(provider.provider));
 }
 
 function seedOsintSourcesIfEmpty() {
@@ -889,13 +936,19 @@ function seedIfEmpty() {
       accountType: "platform",
       displayName: "Seed Platform Admin",
       status: "active",
-      passwordMustChange: false,
+      passwordMustChange: true,
       mfaEnabled: false,
       mfaSecretEnc: null,
       mfaVerifiedAt: null,
       createdAt: now(),
       lastLoginAt: null,
     }).run();
+  }
+}
+
+function ensureAiProvidersForExistingWorkspaces() {
+  for (const tenant of db.select().from(tenants).all()) {
+    seedAiProvidersIfEmpty(tenant.id);
   }
 }
 
@@ -918,7 +971,16 @@ function ensurePlatformSeedUsers() {
   ];
   for (const seed of seeds) {
     const existing = db.select().from(users).where(eq(users.email, seed.email)).get();
-    if (existing) continue;
+    if (existing) {
+      const patch: Record<string, any> = {};
+      if (verifyPassword(seed.password, existing.password).ok && !existing.passwordMustChange) {
+        patch.passwordMustChange = true;
+      }
+      if (Object.keys(patch).length > 0) {
+        db.update(users).set(patch as any).where(eq(users.id, existing.id)).run();
+      }
+      continue;
+    }
     const uid = id();
     db.insert(users).values({
       id: uid,
@@ -929,7 +991,7 @@ function ensurePlatformSeedUsers() {
       accountType: "platform",
       displayName: seed.displayName,
       status: "active",
-      passwordMustChange: false,
+      passwordMustChange: true,
       mfaEnabled: false,
       mfaSecretEnc: null,
       mfaVerifiedAt: null,
@@ -943,6 +1005,7 @@ ensureSchema();
 migrateCredentialSecretsOutOfPublicDb();
 seedOsintSourcesIfEmpty();
 seedIfEmpty();
+ensureAiProvidersForExistingWorkspaces();
 ensurePlatformSeedUsers();
 
 // v2.30 — Startup backfill of cluster_id for findings published within the
@@ -1548,6 +1611,26 @@ export const storage = {
         }).run();
       }
     }
+  },
+  assignProviderToUnassignedAiTasks(tid: string, providerId: string, tasks: readonly string[]): string[] {
+    const provider = db.select().from(aiProviders)
+      .where(and(eq(aiProviders.id, providerId), eq(aiProviders.tenantId, tid)))
+      .get();
+    if (!provider) return [];
+    const t = now();
+    const assigned: string[] = [];
+    for (const task of tasks) {
+      if (!providerSupportsAiTask(provider, task)) continue;
+      const exists = db.select().from(aiTaskAssignments)
+        .where(and(eq(aiTaskAssignments.tenantId, tid), eq(aiTaskAssignments.task, task)))
+        .get();
+      if (exists) continue;
+      db.insert(aiTaskAssignments).values({
+        id: id(), tenantId: tid, task, providerId, updatedAt: t,
+      }).run();
+      assigned.push(task);
+    }
+    return assigned;
   },
   /** Resolve the live-tested provider configured for a task. Only fall back
    *  when no explicit assignment exists, so selected providers are never
@@ -2372,15 +2455,17 @@ export const storage = {
           sqlite.prepare(`INSERT INTO osint_findings (
             id, tenant_id, source_id, title, url, published_at, severity,
             cve_ids, affected_tech, threat_actors, summary, raw_snippet,
+            source_fetched_at,
             ai_summary, ai_relevance_score, ai_recommendation, ai_analyzed_at, ai_provider_label,
             draft_email, draft_email_at, status, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'new', ?)`).run(
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'new', ?)`).run(
             fid, tid, src.id, it.title.slice(0, 280), it.url, it.publishedAt, it.severity,
-            j(cveIds), j(it.affectedTech), j(it.threatActors), it.summary, it.rawSnippet, now()
+            j(cveIds), j(it.affectedTech), j(it.threatActors), it.summary, it.rawSnippet, now(), now()
           );
           items.push({
             id: fid, tenantId: tid, sourceId: src.id,
             sourceName: it.sourceName, sourceCategory: it.sourceCategory,
+            sourceFetchedAt: now(),
             title: it.title, url: it.url, publishedAt: it.publishedAt, severity: it.severity,
             cveIds, affectedTech: it.affectedTech, threatActors: it.threatActors,
             summary: it.summary, aiSummary: null, aiRelevanceScore: null, aiRecommendation: null,
@@ -2510,15 +2595,17 @@ export const storage = {
         sqlite.prepare(`INSERT INTO osint_findings (
           id, tenant_id, source_id, title, url, published_at, severity,
           cve_ids, affected_tech, threat_actors, summary, raw_snippet,
+          source_fetched_at,
           ai_summary, ai_relevance_score, ai_recommendation, ai_analyzed_at, ai_provider_label,
           draft_email, draft_email_at, status, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'new', ?)`).run(
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'new', ?)`).run(
           fid, tid, src.id, tmpl.titleFn(label), url, publishedAt, tmpl.sev,
-          j(cveIds), j([tmpl.tech]), j(tmpl.actors), summary, rawSnippet, now()
+          j(cveIds), j([tmpl.tech]), j(tmpl.actors), summary, rawSnippet, now(), now()
         );
         items.push({
           id: fid, tenantId: tid, sourceId: src.id,
           sourceName: src.name, sourceCategory: src.category,
+          sourceFetchedAt: now(),
           title: tmpl.titleFn(label), url, publishedAt, severity: tmpl.sev,
           cveIds, affectedTech: [tmpl.tech], threatActors: tmpl.actors,
           summary, aiSummary: null, aiRelevanceScore: null, aiRecommendation: null,
@@ -2545,6 +2632,7 @@ export const storage = {
    * BatchOne writes parsed source items into the single local workspace.
    */
   async runGlobalOsintIngest(opts?: {
+    workspaceId?: string;
     days?: number;             // backfill window in days; default 365
     maxPerSource?: number;     // hard cap per single source; default 60
     maxTotal?: number;         // hard cap on total parsed items; default 10000
@@ -2560,7 +2648,9 @@ export const storage = {
     const { runBroadIngest } = await import("./osintFetcher");
     const result = await runBroadIngest({ sinceIso, maxPerSource, maxTotal, onProgress: opts?.onProgress });
 
-    const workspaceRows = sqlite.prepare("SELECT id FROM tenants LIMIT 1").all() as Array<{ id: string }>;
+    const workspaceRows = opts?.workspaceId
+      ? sqlite.prepare("SELECT id FROM tenants WHERE id = ? LIMIT 1").all(opts.workspaceId) as Array<{ id: string }>
+      : sqlite.prepare("SELECT id FROM tenants WHERE slug = 'batchone-workspace' LIMIT 1").all() as Array<{ id: string }>;
     const workspaceIds = workspaceRows.map((r) => r.id);
     if (workspaceIds.length === 0) {
       return { count: 0, workspaces: 0, tenants: 0, feedsTried: result.feedsTried, feedsOk: result.feedsOk, errors: result.errors, durationMs: Date.now() - t0 };
@@ -2591,20 +2681,25 @@ export const storage = {
     const insertStmt = sqlite.prepare(`INSERT OR IGNORE INTO osint_findings (
       id, tenant_id, source_id, title, url, published_at, severity,
       cve_ids, affected_tech, threat_actors, iocs, content_hash, summary, raw_snippet,
+      source_fetched_at,
       ai_summary, ai_relevance_score, ai_recommendation, ai_analyzed_at, ai_provider_label,
       draft_email, draft_email_at, status, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'new', ?)`);
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'new', ?)`);
 
     // For each parsed item: resolve canonical source row, then insert one row per tenant.
-    const existingKeySet = new Set<string>(
-      (sqlite.prepare("SELECT tenant_id || '::' || source_id || '::' || substr(url, 1, 200) AS k FROM osint_findings").all() as Array<{ k: string }>).map((r) => r.k.toLowerCase())
+    const existingKeyRows = sqlite.prepare("SELECT id, tenant_id || '::' || source_id || '::' || substr(url, 1, 200) AS k FROM osint_findings").all() as Array<{ id: string; k: string }>;
+    const existingKeyMap = new Map<string, string>(
+      existingKeyRows.map((r) => [r.k.toLowerCase(), r.id])
     );
     // Per-workspace content-hash set for cross-source dedupe at write time.
-    const existingHashSet = new Set<string>(
-      (sqlite.prepare("SELECT tenant_id || '::' || COALESCE(content_hash, '') AS k FROM osint_findings WHERE content_hash IS NOT NULL AND content_hash != ''").all() as Array<{ k: string }>).map((r) => r.k.toLowerCase())
+    const existingHashRows = sqlite.prepare("SELECT id, tenant_id || '::' || COALESCE(content_hash, '') AS k FROM osint_findings WHERE content_hash IS NOT NULL AND content_hash != ''").all() as Array<{ id: string; k: string }>;
+    const existingHashMap = new Map<string, string>(
+      existingHashRows.map((r) => [r.k.toLowerCase(), r.id])
     );
+    const markFindingObserved = sqlite.prepare("UPDATE osint_findings SET source_fetched_at = ? WHERE id = ?");
 
     const tx = sqlite.transaction(() => {
+      const fetchedAt = now();
       const fetchedSourceIds = new Set<string>();
       for (const it of result.items) {
         // Resolve canonical source.
@@ -2638,16 +2733,21 @@ export const storage = {
         const contentHash = (it as any).contentHash || "";
         for (const tid of workspaceIds) {
           const urlKey = `${tid}::${src!.id}::${(it.url || it.title).slice(0, 200)}`.toLowerCase();
-          if (existingKeySet.has(urlKey)) continue;
           const hashKey = contentHash ? `${tid}::${contentHash}`.toLowerCase() : "";
-          if (hashKey && existingHashSet.has(hashKey)) continue;
-          existingKeySet.add(urlKey);
-          if (hashKey) existingHashSet.add(hashKey);
+          const existingId = existingKeyMap.get(urlKey) || (hashKey ? existingHashMap.get(hashKey) : undefined);
+          if (existingId) {
+            markFindingObserved.run(fetchedAt, existingId);
+            continue;
+          }
+          existingKeyMap.set(urlKey, "");
+          if (hashKey) existingHashMap.set(hashKey, "");
           const fid = id();
+          existingKeyMap.set(urlKey, fid);
+          if (hashKey) existingHashMap.set(hashKey, fid);
           insertStmt.run(
             fid, tid, src!.id, it.title.slice(0, 280), it.url, it.publishedAt, it.severity,
             j(cveIds), j(it.affectedTech), j(it.threatActors), iocsJson, contentHash || null,
-            it.summary, it.rawSnippet, now(),
+            it.summary, it.rawSnippet, fetchedAt, fetchedAt,
           );
           inserted += 1;
         }
@@ -2678,7 +2778,7 @@ export const storage = {
     if (opts?.severity) { where.push("severity = ?"); params.push(opts.severity); }
     if (opts?.status)   { where.push("status = ?"); params.push(opts.status); }
     if (opts?.sourceId) { where.push("source_id = ?"); params.push(opts.sourceId); }
-    const sql = `SELECT * FROM osint_findings WHERE ${where.join(" AND ")} ORDER BY published_at DESC LIMIT 500`;
+    const sql = `SELECT * FROM osint_findings WHERE ${where.join(" AND ")} ORDER BY created_at DESC, published_at DESC LIMIT 1000`;
     const rows = sqlite.prepare(sql).all(...params) as any[];
     const sourceMap = new Map(storage.listOsintSources().map((s) => [s.id, s]));
     const out: OsintFindingDTO[] = [];
@@ -2698,6 +2798,7 @@ export const storage = {
       out.push({
         id: r.id, tenantId: r.tenant_id, sourceId: r.source_id,
         sourceName: src?.name ?? "unknown", sourceCategory: src?.category ?? "unknown",
+        sourceFetchedAt: r.source_fetched_at ?? null,
         title: r.title, url: r.url, publishedAt: r.published_at, severity: r.severity,
         cveIds: JSON.parse(r.cve_ids || "[]"),
         affectedTech: techArr,
@@ -2730,6 +2831,7 @@ export const storage = {
     return {
       id: r.id, tenantId: r.tenant_id, sourceId: r.source_id,
       sourceName: src?.name ?? "unknown", sourceCategory: src?.category ?? "unknown",
+      sourceFetchedAt: r.source_fetched_at ?? null,
       title: r.title, url: r.url, publishedAt: r.published_at, severity: r.severity,
       cveIds: JSON.parse(r.cve_ids || "[]"),
       affectedTech: JSON.parse(r.affected_tech || "[]"),
@@ -2765,6 +2867,7 @@ export const storage = {
     return {
       id: r.id, tenantId: r.tenant_id, sourceId: r.source_id,
       sourceName: src?.name ?? "unknown", sourceCategory: src?.category ?? "unknown",
+      sourceFetchedAt: r.source_fetched_at ?? null,
       title: r.title, url: r.url, publishedAt: r.published_at, severity: r.severity,
       cveIds: JSON.parse(r.cve_ids || "[]"),
       affectedTech: JSON.parse(r.affected_tech || "[]"),
@@ -4581,6 +4684,7 @@ export const storage = {
   },
 
   listOperationsJobs(tid: string, opts?: { max?: number }): any[] {
+    try { storage.reaperAiJobs(); } catch { /* list should still render if cleanup fails */ }
     const max = Math.max(20, Math.min(300, opts?.max ?? 120));
     const activeStatuses = new Set(["queued", "running"]);
     const terminalSuccessStatuses = new Set(["completed", "done", "succeeded"]);
@@ -4787,6 +4891,9 @@ export const storage = {
   setAiJobProgress(id: string, pct: number): void {
     sqlite.prepare("UPDATE ai_jobs SET progress_pct = ? WHERE id = ? AND status != 'cancelled'").run(Math.max(0, Math.min(100, Math.round(pct))), id);
   },
+  updateAiJobProgress(id: string, pct: number): void {
+    sqlite.prepare("UPDATE ai_jobs SET progress_pct = ? WHERE id = ? AND status != 'cancelled'").run(Math.max(0, Math.min(100, Math.round(pct))), id);
+  },
   completeAiJob(id: string, result: any, providerLabel?: string | null): void {
     sqlite.prepare(
       "UPDATE ai_jobs SET status = 'completed', result_json = ?, provider_label = ?, completed_at = ?, progress_pct = 100 WHERE id = ? AND status != 'cancelled'",
@@ -4829,6 +4936,7 @@ export const storage = {
    *  omitted so the polling endpoint can stay cheap. The dedicated /full route
    *  in routes.ts uses includeResult=true to stream the entire payload. */
   getAiJob(tenantId: string, id: string, opts?: { includeResult?: boolean }): any | undefined {
+    try { storage.reaperAiJobs(); } catch { /* keep polling endpoint available */ }
     const r = sqlite.prepare("SELECT * FROM ai_jobs WHERE id = ? AND tenant_id = ?").get(id, tenantId) as any;
     if (!r) return undefined;
     const includeResult = opts?.includeResult !== false;
@@ -4864,6 +4972,7 @@ export const storage = {
    *  window so the user can be notified about recently-finished work without
    *  loading every historical job. */
   listActiveAiJobs(tenantId: string, opts?: { lookbackMinutes?: number; max?: number }): any[] {
+    try { storage.reaperAiJobs(); } catch { /* tray can still show the last known state */ }
     const lookback = opts?.lookbackMinutes ?? 30;
     const max = Math.min(50, opts?.max ?? 20);
     const cutoff = new Date(Date.now() - lookback * 60 * 1000).toISOString();
@@ -4934,6 +5043,12 @@ export const storage = {
    */
   reaperAiJobs(maxRuntimeMs = 15 * 60 * 1000): number {
     const cutoff = new Date(Date.now() - maxRuntimeMs).toISOString();
+    const nowIso = new Date().toISOString();
+    const errored = sqlite.prepare(
+      `UPDATE ai_jobs SET status = 'failed', completed_at = COALESCE(completed_at, ?)
+        WHERE status IN ('queued','running')
+          AND error_json IS NOT NULL`,
+    ).run(nowIso);
     // v2.30.5 — only reap jobs that have NOT sent a heartbeat in the cutoff
     // window. Long-running enrichments now ping the heartbeat periodically so
     // legitimate work isn't killed prematurely.
@@ -4945,10 +5060,30 @@ export const storage = {
           AND (heartbeat_at IS NULL OR heartbeat_at < ?)`,
     ).run(
       JSON.stringify({ name: "AiJobAborted", message: "Job exceeded the server-side runtime budget. Re-run to try again." }),
-      new Date().toISOString(),
+      nowIso,
       cutoff,
       cutoff,
       cutoff,
+    );
+    return (errored.changes || 0) + (r.changes || 0);
+  },
+  failInterruptedAiJobsOnBoot(): number {
+    const bootIso = new Date().toISOString();
+    const r = sqlite.prepare(
+      `UPDATE ai_jobs
+          SET status = 'failed',
+              error_json = ?,
+              completed_at = ?,
+              progress_pct = CASE WHEN progress_pct > 0 THEN progress_pct ELSE 0 END
+        WHERE status IN ('queued','running')
+          AND created_at < ?`,
+    ).run(
+      JSON.stringify({
+        name: "AiJobInterrupted",
+        message: "Job was interrupted by a server restart before it could finish. Re-run to try again.",
+      }),
+      bootIso,
+      bootIso,
     );
     return r.changes || 0;
   },
