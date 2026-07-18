@@ -10,7 +10,8 @@
 
 ## Verification
 
-- [ ] `npm run lint`
+- [ ] `npm run format:baseline`
+- [ ] `npm run lint:strict`
 - [ ] `npm run typecheck:baseline`
 - [ ] `npm test`
 - [ ] `npm run build`

@@ -4,6 +4,9 @@
   "description": "OptraSight — evidence-led threat intelligence, exposure monitoring, and detection readiness in one signal-plane observatory.",
   "version": "1.0.0",
   "license": "Apache-2.0",
+  "engines": {
+    "node": "20.x || 22.x"
+  },
   "type": "module",
   "scripts": {
     "dev": "NODE_ENV=development tsx server/index.ts",
@@ -13,13 +16,15 @@
     "lint:strict": "eslint . --cache --max-warnings=0",
     "format": "prettier . --write",
     "format:check": "prettier . --check",
+    "format:baseline": "OPTRASIGHT_PRETTIER_BASELINE=110 node scripts/prettier-baseline.cjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "security:snyk": "npx -y snyk test --file=package-lock.json --package-manager=npm",
     "start": "NODE_ENV=production node dist/index.cjs",
     "typecheck": "tsc --noEmit --pretty false --incremental false",
     "typecheck:baseline": "OPTRASIGHT_TSC_BASELINE=85 node scripts/typecheck-baseline.cjs",
-    "check": "npm run lint && npm run test && npm run typecheck:baseline",
+    "check": "npm run format:baseline && npm run lint:strict && npm run test && npm run typecheck:baseline",
     "db:push": "drizzle-kit push",
     "db:export-public": "node scripts/export-public-dbs.cjs",
     "db:restore-public": "node scripts/restore-public-batchone.cjs",
@@ -92,7 +97,7 @@
     "tw-animate-css": "^1.2.5",
     "vaul": "^1.1.2",
     "wouter": "^3.3.5",
-    "ws": "^8.18.0",
+    "ws": "^8.21.1",
     "zod": "^3.24.2",
     "zod-validation-error": "^3.5.4"
   },
