@@ -8,6 +8,9 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0"></a>
   <img src="https://img.shields.io/badge/node-20.x%20%7C%2022.x-339933.svg?logo=node.js&logoColor=white" alt="Node 20.x | 22.x">
   <img src="https://img.shields.io/badge/stack-React%2018%20%C2%B7%20Express%205%20%C2%B7%20SQLite-4F46E5.svg" alt="Stack">
+  <a href="https://github.com/Chill-Ethical-People/Optrasight/actions/workflows/release.yml"><img src="https://github.com/Chill-Ethical-People/Optrasight/actions/workflows/release.yml/badge.svg?branch=main" alt="Code quality workflow"></a>
+  <a href="https://github.com/Chill-Ethical-People/Optrasight/actions/workflows/codeql.yml"><img src="https://github.com/Chill-Ethical-People/Optrasight/actions/workflows/codeql.yml/badge.svg?branch=main" alt="CodeQL security analysis"></a>
+  <a href="https://snyk.io/test/github/Chill-Ethical-People/Optrasight"><img src="https://snyk.io/test/github/Chill-Ethical-People/Optrasight/badge.svg" alt="Known Vulnerabilities"></a>
 </p>
 
 OptraSight Batch One is an open-source cyber threat intelligence (CTI) workstation for security analysts, threat-intelligence teams, detection engineers, and managed security service providers. It connects open-source intelligence (OSINT) monitoring, evidence review, Threat Actor Profiles, AI-assisted triage, and defensive hunt-query drafting in one local analyst workspace.
@@ -232,12 +235,13 @@ npm run db:export-public   # export sanitized public seed DBs from a populated w
 npm run lint               # ESLint
 npm test                   # Vitest
 npm run typecheck          # full TypeScript check
-npm run check              # lint + tests + typecheck baseline gate
+npm run check              # formatting baseline + zero-warning lint + tests + typecheck baseline
+npm run security:snyk      # authenticated Snyk dependency scan
 ```
 
 ## Requirements
 
-- Node.js 20+; CI targets Node 20.x and 22.x.
+- Node.js 20.x or 22.x (the repository pins Node 22 through `.nvmrc`; Node 25 is not supported for local native-module builds).
 - npm 9+.
 - SQLite-compatible local filesystem.
 
