@@ -2876,7 +2876,7 @@ function EText({
         placeholder={placeholder}
         onChange={(e) => {
           const raw = e.target.value;
-          let next: any = raw;
+          let next: any;
           if (type === "number") next = raw.trim() === "" ? null : Number(raw);
           else next = raw === "" ? null : raw;
           ctx.set({ [k]: next } as EditDraft);
@@ -3968,7 +3968,7 @@ function DiamondTab({ a }: { a: ThreatActorFullDTO }) {
             : <div className="text-xs whitespace-pre-wrap">{renderAny(c.data)}</div>}
         </Card>
       ))}
-      <Card className={cn("p-4 md:col-span-2", !editMode && Object.keys(a.diamondMeta ?? {}).length === 0 && "hidden")}>
+      <Card className="p-4 md:col-span-2">
         <div className="text-sm font-semibold mb-2">Meta-features</div>
         {editMode ? (
           <div className="space-y-3">
@@ -4616,7 +4616,7 @@ function buildStix(a: ThreatActorFullDTO) {
 }
 
 function stixPatternFor(i: ThreatActorIocDTO): string {
-  const v = i.value.replace(/'/g, "\\'");
+  const v = i.value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
   switch (i.iocType) {
     case "ipv4":   return `[ipv4-addr:value = '${v}']`;
     case "ipv6":   return `[ipv6-addr:value = '${v}']`;

@@ -22,6 +22,7 @@ import {
   type RuleStatus, type RuleSeverity, type SiemTargetId, SIEM_TARGETS, SIEM_TARGET_IDS,
   type SearchResultDTO,
   MONITORED_TECHNOLOGIES,
+  IOC_TYPES,
   OSINT_CATEGORY_LABELS, OSINT_CATEGORY_ORDER, OSINT_OVERVIEW_PERSONAS, type OsintOverviewPersona,
   type OsintSourceRowDTO, type OsintOverviewResultDTO,
 } from "@shared/schema";
@@ -518,8 +519,8 @@ function loadKek(): Buffer {
     writeFileSync(keyPath, key.toString("base64"), { mode: 0o600 });
     try { chmodSync(keyPath, 0o600); } catch { /* best-effort */ }
     return key;
-  } catch {
-    return createHash("sha256").update(`optrasight-local-${process.cwd()}`).digest();
+  } catch (err) {
+    throw new Error(`Unable to initialize OptraSight key-encryption key: ${(err as Error).message}`);
   }
 }
 
@@ -778,14 +779,14 @@ const SEED_TENANTS = [
   },
 ];
 
-const BLOCKED_INITIAL_PASSWORD_SHA256 = new Set([
-  "ec62f5d9f10bb6ab56516e28978e1a5e1bfe2ffc40f3b0cc990efc49f9ce621b",
-  "833126ae95cdb91fe9e83ec1944bdbc7a73bfb36c861f71e9464423f8062ac91",
-]);
+const BLOCKED_INITIAL_PASSWORD_SCRYPTS = [
+  Buffer.from("SJ5Gc6rf+bvcydKkoA3oi33e6ph2OmYLPjnu/saoHVI=", "base64"),
+  Buffer.from("ALp9U58x6iRKyX53vx1kvp+uK6yJeSzuuESSLLH+6VM=", "base64"),
+];
 
 function isBlockedInitialPassword(value: string): boolean {
-  const digest = createHash("sha256").update(value, "utf8").digest("hex");
-  return BLOCKED_INITIAL_PASSWORD_SHA256.has(digest);
+  const digest = scryptSync(value, "optrasight-seed-password-blocklist-v1", 32, { N: 16384, r: 8, p: 1 });
+  return BLOCKED_INITIAL_PASSWORD_SCRYPTS.some((blocked) => timingSafeEqual(blocked, digest));
 }
 
 const AI_PROVIDER_SEED_DEFAULTS: Array<{ provider: AiProviderKind; label: string; model: string }> = [
@@ -801,6 +802,8 @@ const AI_PROVIDER_SEED_DEFAULTS: Array<{ provider: AiProviderKind; label: string
 const AI_PROVIDER_DEFAULT_MODEL_BY_KIND = new Map(
   AI_PROVIDER_SEED_DEFAULTS.map((p) => [p.provider, p.model]),
 );
+
+const ALLOWED_IOC_BUCKETS = new Set<string>(IOC_TYPES);
 
 const STALE_SEEDED_AI_MODELS = new Set([
   "gpt-4o-mini",
@@ -2448,7 +2451,6 @@ export const storage = {
             ).run(sid, it.sourceCategory, it.sourceName, it.sourceUrl);
             src = { id: sid, category: it.sourceCategory, name: it.sourceName, url: it.sourceUrl, reliability: "A", region: null, language: "en" } as any;
           }
-          if (!src) continue;
           fetchedSourceIds.add(src.id);
           const fid = id();
           const cveIds = it.cveIds.slice(0, 8);
@@ -2920,7 +2922,7 @@ export const storage = {
     if (patch.iocs && typeof patch.iocs === "object") {
       const cleanIocs: Record<string, string[]> = {};
       for (const [k, v] of Object.entries(patch.iocs)) {
-        if (!Array.isArray(v)) continue;
+        if (!ALLOWED_IOC_BUCKETS.has(k) || !Array.isArray(v)) continue;
         const cleaned = Array.from(new Set(v.map((s) => String(s).trim()).filter(Boolean)));
         if (cleaned.length) cleanIocs[k] = cleaned;
       }
