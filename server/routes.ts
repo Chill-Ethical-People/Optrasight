@@ -34,9 +34,8 @@ import { generateActorPortrait, getPortraitGeneratorAvailability, PORTRAITS_DIR 
 import { validateAiProviderBaseUrl } from "./aiProviderSecurity";
 import express from "express";
 import rateLimit from "express-rate-limit";
-import { randomUUID } from "node:crypto";
-import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, readdirSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { readFileSync, existsSync, unlinkSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 
 type RunAiJobOptions<T = any> = {
   tenantId: string;
@@ -69,25 +68,6 @@ function bearerToken(authHeader: string | undefined): string | null {
 
 function actorIdParam(value: string): string | null {
   return /^[A-Za-z0-9_-]{1,96}$/.test(value) ? value : null;
-}
-
-function portraitFilePath(fileName: string): string {
-  const target = resolve(PORTRAITS_DIR, fileName);
-  const root = `${resolve(PORTRAITS_DIR)}/`;
-  if (!target.startsWith(root) || basename(target) !== fileName) {
-    throw new Error("invalid portrait path");
-  }
-  return target;
-}
-
-function isPngPortrait(head: Buffer): boolean {
-  return head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4E && head[3] === 0x47;
-}
-
-function maybePortraitBasenameFromUrl(url: string | null | undefined): string | null {
-  if (!url?.startsWith("/portraits/")) return null;
-  const name = url.slice("/portraits/".length).split("?")[0] ?? "";
-  return /^[A-Za-z0-9._-]+\.(?:png|jpg|webp|gif)$/.test(name) ? name : null;
 }
 
 function runAiJob<T = any>(opts: RunAiJobOptions<T>) {
@@ -1001,58 +981,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  // v2.32.1 — manual portrait upload. Lets analysts replace the AI-generated
-  // sigil with their own image (mugshot, ATT&CK actor card screenshot, etc).
-  // Accepts JSON `{ fileName, contentBase64 }` to stay consistent with the
-  // exercise PPTX upload pattern — no multer dependency needed.
-  //
-  // The image is stored at  data/portraits/<aid>.<ext>  (original extension
-  // preserved so we don't re-encode). Any previously saved portrait file for
-  // this actor (regardless of extension) is removed first so we never leak
-  // stale bytes through aggressive HTTP caching. The persisted URL gets a
-  // `?v=<timestamp>` cache-buster so the <img> in the SPA picks up the new
-  // image immediately even though `/portraits/*` is served `immutable`.
+  // Public BatchOne intentionally does not accept browser-supplied portrait
+  // bytes into the local filesystem. Use curated-source portraits or AI
+  // generation instead; both paths keep the upload surface out of the API.
   app.post("/api/v1/threat-actors/:aid/portrait/upload", routeRateLimit({ keyPrefix: "tap-portrait-upload", windowMs: 60_000, max: 6 }), requireAuth, (req: AuthedRequest, res) => {
-    const tid = req.effectiveTenantId!;
-    const aid = actorIdParam(String(req.params.aid ?? ""));
-    if (!aid) return res.status(400).json({ detail: "invalid threat actor id" });
-    const actor = storage.getThreatActor(tid, aid);
-    if (!actor) return res.status(404).json({ detail: "threat actor not found" });
-
-    const fileName = typeof req.body?.fileName === "string" ? req.body.fileName : "";
-    const b64 = typeof req.body?.contentBase64 === "string" ? req.body.contentBase64 : "";
-    if (!fileName || !b64) return res.status(400).json({ detail: "fileName + contentBase64 required" });
-
-    const buf = Buffer.from(b64, "base64");
-    if (buf.byteLength === 0)         return res.status(400).json({ detail: "empty file" });
-    if (buf.byteLength > 5 * 1024 * 1024) return res.status(413).json({ detail: "file too large (5MB max)" });
-
-    // Sanity-check PNG magic bytes and store under a server-generated name.
-    // Keeping the extension fixed avoids any client-controlled path segment.
-    const head = buf.subarray(0, 12);
-    if (!isPngPortrait(head)) return res.status(400).json({ detail: "portrait upload must be a valid PNG image" });
-
-    try { mkdirSync(PORTRAITS_DIR, { recursive: true }); } catch { /* ok */ }
-
-    // Remove any prior portrait file for this actor regardless of extension.
-    try {
-      for (const f of readdirSync(PORTRAITS_DIR)) {
-        const previous = maybePortraitBasenameFromUrl(actor.portraitUrl);
-        if (f.startsWith(`${aid}.`) || f === previous) {
-          try { unlinkSync(join(PORTRAITS_DIR, f)); } catch { /* swallow */ }
-        }
-      }
-    } catch { /* directory may be empty */ }
-
-    const uploadName = `${randomUUID()}.png`;
-    const target = portraitFilePath(uploadName);
-    writeFileSync(target, buf);
-
-    // Cache-bust on every upload so the browser re-fetches even though the
-    // immutable Cache-Control would otherwise pin the old bytes for 7 days.
-    const publicUrl = `/portraits/${uploadName}?v=${Date.now()}`;
-    storage.setThreatActorPortrait(tid, aid, publicUrl);
-    res.status(201).json({ portraitUrl: publicUrl, status: "ready", bytes: buf.byteLength });
+    res.status(410).json({
+      detail: "Manual portrait upload is disabled in the public BatchOne release. Use curated portraits or AI portrait generation.",
+    });
   });
 
   // v2.32.1 — remove uploaded / generated portrait. Resets state so the lazy
