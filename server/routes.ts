@@ -34,6 +34,7 @@ import { generateActorPortrait, getPortraitGeneratorAvailability, PORTRAITS_DIR 
 import { validateAiProviderBaseUrl } from "./aiProviderSecurity";
 import express from "express";
 import rateLimit from "express-rate-limit";
+import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, readdirSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 
@@ -70,13 +71,27 @@ function actorIdParam(value: string): string | null {
   return /^[A-Za-z0-9_-]{1,96}$/.test(value) ? value : null;
 }
 
-function portraitFilePath(actorId: string, ext: string): string {
-  const target = resolve(PORTRAITS_DIR, `${actorId}.${ext}`);
+function portraitFilePath(fileName: string): string {
+  const target = resolve(PORTRAITS_DIR, fileName);
   const root = `${resolve(PORTRAITS_DIR)}/`;
-  if (!target.startsWith(root) || basename(target) !== `${actorId}.${ext}`) {
+  if (!target.startsWith(root) || basename(target) !== fileName) {
     throw new Error("invalid portrait path");
   }
   return target;
+}
+
+function portraitExtFromMagic(head: Buffer): "png" | "jpg" | "webp" | "gif" | null {
+  if (head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4E && head[3] === 0x47) return "png";
+  if (head[0] === 0xFF && head[1] === 0xD8 && head[2] === 0xFF) return "jpg";
+  if (head[0] === 0x52 && head[1] === 0x49 && head[2] === 0x46 && head[3] === 0x46 && head[8] === 0x57 && head[9] === 0x45 && head[10] === 0x42 && head[11] === 0x50) return "webp";
+  if (head[0] === 0x47 && head[1] === 0x49 && head[2] === 0x46 && head[3] === 0x38) return "gif";
+  return null;
+}
+
+function maybePortraitBasenameFromUrl(url: string | null | undefined): string | null {
+  if (!url?.startsWith("/portraits/")) return null;
+  const name = url.slice("/portraits/".length).split("?")[0] ?? "";
+  return /^[A-Za-z0-9._-]+\.(?:png|jpg|webp|gif)$/.test(name) ? name : null;
 }
 
 function runAiJob<T = any>(opts: RunAiJobOptions<T>) {
@@ -314,7 +329,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json(setup);
   });
 
-  app.post("/api/v1/auth/mfa/verify", requireAuth, (req: AuthedRequest, res) => {
+  app.post("/api/v1/auth/mfa/verify", routeRateLimit({ keyPrefix: "mfa-verify", windowMs: 60_000, max: 10 }), requireAuth, (req: AuthedRequest, res) => {
     const parsed = mfaVerifySchema.safeParse(req.body || {});
     if (!parsed.success) return res.status(400).json({ detail: fromZodError(parsed.error).message });
     try {
@@ -951,7 +966,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json(updated);
   });
 
-  app.delete("/api/v1/threat-actors/:aid", requireAuth, (req: AuthedRequest, res) => {
+  app.delete("/api/v1/threat-actors/:aid", routeRateLimit({ keyPrefix: "tap-delete", windowMs: 60_000, max: 12 }), requireAuth, (req: AuthedRequest, res) => {
     const aid = actorIdParam(String(req.params.aid ?? ""));
     if (!aid) return res.status(400).json({ detail: "invalid threat actor id" });
     const ok = storage.deleteThreatActor(req.effectiveTenantId!, aid, req.user!.email);
@@ -1012,12 +1027,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const b64 = typeof req.body?.contentBase64 === "string" ? req.body.contentBase64 : "";
     if (!fileName || !b64) return res.status(400).json({ detail: "fileName + contentBase64 required" });
 
-    // Whitelist common image formats. Default to .png if extension is unknown
-    // so the file is still routable through express.static's mime lookup.
-    const extMatch = fileName.toLowerCase().match(/\.(png|jpe?g|webp|gif)$/);
-    if (!extMatch) return res.status(400).json({ detail: "file must be PNG, JPEG, WebP, or GIF" });
-    const ext = extMatch[1] === "jpeg" ? "jpg" : extMatch[1];
-
     const buf = Buffer.from(b64, "base64");
     if (buf.byteLength === 0)         return res.status(400).json({ detail: "empty file" });
     if (buf.byteLength > 5 * 1024 * 1024) return res.status(413).json({ detail: "file too large (5MB max)" });
@@ -1026,35 +1035,28 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     // can't slip past the extension check. We check the first 12 bytes against
     // the canonical signatures for each allowed format.
     const head = buf.subarray(0, 12);
-    const looksLikeImage = (
-      // PNG: 89 50 4E 47 0D 0A 1A 0A
-      (head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4E && head[3] === 0x47) ||
-      // JPEG: FF D8 FF
-      (head[0] === 0xFF && head[1] === 0xD8 && head[2] === 0xFF) ||
-      // WebP: RIFF....WEBP
-      (head[0] === 0x52 && head[1] === 0x49 && head[2] === 0x46 && head[3] === 0x46 && head[8] === 0x57 && head[9] === 0x45 && head[10] === 0x42 && head[11] === 0x50) ||
-      // GIF: GIF87a / GIF89a
-      (head[0] === 0x47 && head[1] === 0x49 && head[2] === 0x46 && head[3] === 0x38)
-    );
-    if (!looksLikeImage) return res.status(400).json({ detail: "file does not look like a valid image" });
+    const ext = portraitExtFromMagic(head);
+    if (!ext) return res.status(400).json({ detail: "file does not look like a valid image" });
 
     try { mkdirSync(PORTRAITS_DIR, { recursive: true }); } catch { /* ok */ }
 
     // Remove any prior portrait file for this actor regardless of extension.
     try {
       for (const f of readdirSync(PORTRAITS_DIR)) {
-        if (f.startsWith(`${aid}.`)) {
+        const previous = maybePortraitBasenameFromUrl(actor.portraitUrl);
+        if (f.startsWith(`${aid}.`) || f === previous) {
           try { unlinkSync(join(PORTRAITS_DIR, f)); } catch { /* swallow */ }
         }
       }
     } catch { /* directory may be empty */ }
 
-    const target = portraitFilePath(aid, ext);
+    const uploadName = `${randomUUID()}.${ext}`;
+    const target = portraitFilePath(uploadName);
     writeFileSync(target, buf);
 
     // Cache-bust on every upload so the browser re-fetches even though the
     // immutable Cache-Control would otherwise pin the old bytes for 7 days.
-    const publicUrl = `/portraits/${aid}.${ext}?v=${Date.now()}`;
+    const publicUrl = `/portraits/${uploadName}?v=${Date.now()}`;
     storage.setThreatActorPortrait(tid, aid, publicUrl);
     res.status(201).json({ portraitUrl: publicUrl, status: "ready", bytes: buf.byteLength });
   });
