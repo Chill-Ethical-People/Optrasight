@@ -80,12 +80,8 @@ function portraitFilePath(fileName: string): string {
   return target;
 }
 
-function portraitExtFromMagic(head: Buffer): "png" | "jpg" | "webp" | "gif" | null {
-  if (head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4E && head[3] === 0x47) return "png";
-  if (head[0] === 0xFF && head[1] === 0xD8 && head[2] === 0xFF) return "jpg";
-  if (head[0] === 0x52 && head[1] === 0x49 && head[2] === 0x46 && head[3] === 0x46 && head[8] === 0x57 && head[9] === 0x45 && head[10] === 0x42 && head[11] === 0x50) return "webp";
-  if (head[0] === 0x47 && head[1] === 0x49 && head[2] === 0x46 && head[3] === 0x38) return "gif";
-  return null;
+function isPngPortrait(head: Buffer): boolean {
+  return head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4E && head[3] === 0x47;
 }
 
 function maybePortraitBasenameFromUrl(url: string | null | undefined): string | null {
@@ -1031,12 +1027,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     if (buf.byteLength === 0)         return res.status(400).json({ detail: "empty file" });
     if (buf.byteLength > 5 * 1024 * 1024) return res.status(413).json({ detail: "file too large (5MB max)" });
 
-    // Sanity-check magic bytes — lightweight content-sniff so a renamed .exe
-    // can't slip past the extension check. We check the first 12 bytes against
-    // the canonical signatures for each allowed format.
+    // Sanity-check PNG magic bytes and store under a server-generated name.
+    // Keeping the extension fixed avoids any client-controlled path segment.
     const head = buf.subarray(0, 12);
-    const ext = portraitExtFromMagic(head);
-    if (!ext) return res.status(400).json({ detail: "file does not look like a valid image" });
+    if (!isPngPortrait(head)) return res.status(400).json({ detail: "portrait upload must be a valid PNG image" });
 
     try { mkdirSync(PORTRAITS_DIR, { recursive: true }); } catch { /* ok */ }
 
@@ -1050,7 +1044,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
     } catch { /* directory may be empty */ }
 
-    const uploadName = `${randomUUID()}.${ext}`;
+    const uploadName = `${randomUUID()}.png`;
     const target = portraitFilePath(uploadName);
     writeFileSync(target, buf);
 
