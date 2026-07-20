@@ -38,7 +38,7 @@ import { fetchSourcesBatch } from "./sourceFetch";
 import { OSINT_SOURCES, REMOVED_OSINT_SOURCE_IDS } from "./osintSeed";
 import { ensureClusterIdPersisted, backfillClusters } from "./osintClustering";
 import { secretStore } from "./secretStore";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const sqlite = new Database("data.db");
@@ -511,12 +511,19 @@ function loadKek(): Buffer {
   }
   const keyPath = join(DATA_DIR, ".optrasight-kek");
   try {
-    if (existsSync(keyPath)) {
+    try {
       const v = readFileSync(keyPath, "utf8").trim();
       if (v) return Buffer.from(v, "base64");
+    } catch (readErr: any) {
+      if (readErr?.code !== "ENOENT") throw readErr;
     }
     const key = randomBytes(32);
-    writeFileSync(keyPath, key.toString("base64"), { mode: 0o600 });
+    const fd = openSync(keyPath, "wx", 0o600);
+    try {
+      writeFileSync(fd, key.toString("base64"));
+    } finally {
+      closeSync(fd);
+    }
     try { chmodSync(keyPath, 0o600); } catch { /* best-effort */ }
     return key;
   } catch (err) {

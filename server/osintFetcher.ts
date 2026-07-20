@@ -59,6 +59,17 @@ export interface ParsedItem {
 
 const FETCH_TIMEOUT_MS = 9000;
 const FEED_CONCURRENCY = 8;
+const OSV_SOURCE_NAME_RE: Record<string, RegExp> = {
+  npm: /^OSV — npm$/i,
+  PyPI: /^OSV — PyPI$/i,
+  Maven: /^OSV — Maven$/i,
+  RubyGems: /^OSV — RubyGems$/i,
+  NuGet: /^OSV — NuGet$/i,
+  Packagist: /^OSV — Packagist$/i,
+  Go: /^OSV — Go$/i,
+  "crates.io": /^OSV — crates\.io$/i,
+  Pub: /^OSV — Pub$/i,
+};
 
 async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
   if (!(await isSafeSourceFetchUrl(url))) throw new Error("unsafe source URL");
@@ -737,7 +748,7 @@ function buildDeepParsers(): DeepParser[] {
   for (const eco of OSV_ECOS) {
     parsers.push({
       id: `deep-osv-${eco}`,
-      sourceId: findCatalogId("CVE_VULN", new RegExp(`^OSV — ${eco.toLowerCase()}$`, "i")) || `osrc-osv-${eco}`,
+      sourceId: findCatalogId("CVE_VULN", OSV_SOURCE_NAME_RE[eco]) || `osrc-osv-${eco}`,
       sourceName: `OSV — ${eco}`,
       sourceCategory: "CVE_VULN",
       sourceUrl: `https://osv.dev/list?ecosystem=${eco}`,
