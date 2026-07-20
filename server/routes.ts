@@ -314,7 +314,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json(setup);
   });
 
-  app.post("/api/v1/auth/mfa/verify", requireAuth, (req: AuthedRequest, res) => {
+  app.post("/api/v1/auth/mfa/verify", routeRateLimit({ keyPrefix: "mfa-verify", windowMs: 60_000, max: 10 }), requireAuth, (req: AuthedRequest, res) => {
     const parsed = mfaVerifySchema.safeParse(req.body || {});
     if (!parsed.success) return res.status(400).json({ detail: fromZodError(parsed.error).message });
     try {
@@ -951,7 +951,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json(updated);
   });
 
-  app.delete("/api/v1/threat-actors/:aid", requireAuth, (req: AuthedRequest, res) => {
+  app.delete("/api/v1/threat-actors/:aid", routeRateLimit({ keyPrefix: "tap-delete", windowMs: 60_000, max: 12 }), requireAuth, (req: AuthedRequest, res) => {
     const aid = actorIdParam(String(req.params.aid ?? ""));
     if (!aid) return res.status(400).json({ detail: "invalid threat actor id" });
     const ok = storage.deleteThreatActor(req.effectiveTenantId!, aid, req.user!.email);

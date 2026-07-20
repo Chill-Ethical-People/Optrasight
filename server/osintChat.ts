@@ -569,7 +569,13 @@ export interface RunChatConverseResult {
 
 function extractHttpUrls(text: string): string[] {
   const matches = text.match(/\bhttps?:\/\/[^\s<>"'`)\]]+/gi) ?? [];
-  return Array.from(new Set(matches.map((url) => url.replace(/[),.;:!?]+$/g, "")))).slice(0, 6);
+  return Array.from(new Set(matches.map((url) => trimUrlPunctuation(url)))).slice(0, 6);
+}
+
+function trimUrlPunctuation(url: string): string {
+  let end = url.length;
+  while (end > 0 && "),.;:!?".includes(url[end - 1])) end -= 1;
+  return url.slice(0, end);
 }
 
 const CONVERSE_SYSTEM = `You are OptraSight's analyst assistant for threat intelligence, source review, TAP dossiers, hunt-query reasoning, and security-operations triage.

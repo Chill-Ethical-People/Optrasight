@@ -3963,24 +3963,20 @@ function DiamondTab({ a }: { a: ThreatActorFullDTO }) {
       {cells.map((c) => (
         <Card key={c.title} className="p-4">
           <div className="text-sm font-semibold mb-2 inline-flex items-center gap-1.5">{c.icon}{c.title}</div>
-          {editMode
-            ? <EJson a={a} k={c.k} emptyText="—" />
-            : <div className="text-xs whitespace-pre-wrap">{renderAny(c.data)}</div>}
+          <EJson a={a} k={c.k} emptyText="—" />
         </Card>
       ))}
       <Card className="p-4 md:col-span-2">
         <div className="text-sm font-semibold mb-2">Meta-features</div>
-        {editMode ? (
-          <div className="space-y-3">
-            <div className="grid gap-3 md:grid-cols-4">
-              <EObjectValue a={a} k="diamondMeta" field="confidence" label="Confidence" kind="select" options={WEP_CONFIDENCE} />
-              <EObjectValue a={a} k="diamondMeta" field="rank" label="Rank" kind="select" options={["Priority", "Elevated", "Monitor", "Low", "Unknown"]} />
-              <EObjectValue a={a} k="diamondMeta" field="cutoff" label="Cutoff" kind="datetime" />
-              <EObjectValue a={a} k="diamondMeta" field="sourceCount" label="Source count" kind="number" />
-            </div>
-            <EJson a={a} k="diamondMeta" label="Advanced JSON" emptyText="—" buttonOnly />
+        <div className="space-y-3">
+          <div className="grid gap-3 md:grid-cols-4">
+            <EObjectValue a={a} k="diamondMeta" field="confidence" label="Confidence" kind="select" options={WEP_CONFIDENCE} />
+            <EObjectValue a={a} k="diamondMeta" field="rank" label="Rank" kind="select" options={["Priority", "Elevated", "Monitor", "Low", "Unknown"]} />
+            <EObjectValue a={a} k="diamondMeta" field="cutoff" label="Cutoff" kind="datetime" />
+            <EObjectValue a={a} k="diamondMeta" field="sourceCount" label="Source count" kind="number" />
           </div>
-        ) : <div className="text-xs whitespace-pre-wrap">{renderAny(a.diamondMeta)}</div>}
+          <EJson a={a} k="diamondMeta" label="Advanced JSON" emptyText="—" buttonOnly />
+        </div>
       </Card>
     </div>
   );

@@ -42,10 +42,9 @@ export function log(message: string, source = "express") {
     hour12: true,
   });
 
-  const cleanSource = source.replace(/[\r\n\t]/g, " ").slice(0, 40);
-  const cleanMessage = message.replace(/[\r\n\t]/g, " ").slice(0, 2000);
-  // lgtm[js/log-injection] cleanSource and cleanMessage have control characters stripped above.
-  console.log(`${formattedTime} [${cleanSource}] ${cleanMessage}`);
+  const cleanSource = JSON.stringify(source.replace(/[\r\n\t]/g, " ").slice(0, 40));
+  const cleanMessage = JSON.stringify(message.replace(/[\r\n\t]/g, " ").slice(0, 2000));
+  console.log(`${formattedTime} source=${cleanSource} message=${cleanMessage}`);
 }
 
 function redactForLog(value: unknown, depth = 0): unknown {
