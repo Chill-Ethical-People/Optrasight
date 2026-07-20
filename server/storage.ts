@@ -17,14 +17,22 @@ import {
   type AiTask, type AiProviderKind,
   type OsintSource,
   type AuditLogEntry,
-  type OsintFindingDTO, type HuntQueryDTO, type ThreatLandscapeDTO,
-  type DetectionRuleDTO, type RuleDeploymentDTO, type DeploymentMode, type DeploymentStatus,
+  type ClientProfileDTO, type ClientDigestDTO, type ClientTaxonomyKind, type ClientTaxonomyOptionDTO,
+  type ClientAnalysisScopeDTO, type OsintFindingDTO, type HuntQueryDTO, type ThreatLandscapeDTO,
+  type DetectionRuleDTO, type RuleDeploymentDTO, type RuleValidationDTO, type DeploymentMode, type DeploymentStatus,
+  type RuleSyntaxStatus, type RuleTestStatus, type RuleFalsePositiveRisk,
   type RuleStatus, type RuleSeverity, type SiemTargetId, SIEM_TARGETS, SIEM_TARGET_IDS,
   type SearchResultDTO,
-  MONITORED_TECHNOLOGIES,
+  GEOS, INDUSTRIES, MONITORED_TECHNOLOGIES,
   OSINT_CATEGORY_LABELS, OSINT_CATEGORY_ORDER, OSINT_OVERVIEW_PERSONAS, type OsintOverviewPersona,
   type OsintSourceRowDTO, type OsintOverviewResultDTO,
 } from "@shared/schema";
+import {
+  CLIENT_DIGEST_TEMPLATE_TOKENS,
+  DEFAULT_CLIENT_DIGEST_BODY_TEMPLATE,
+  DEFAULT_CLIENT_DIGEST_SUBJECT_TEMPLATE,
+  LEGACY_CLIENT_DIGEST_BODY_TEMPLATE,
+} from "@shared/clientDigestTemplate";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
 import { createCipheriv, createDecipheriv, createHash, createHmac, scryptSync, timingSafeEqual } from "node:crypto";
@@ -37,6 +45,9 @@ import { fetchSourcesBatch } from "./sourceFetch";
 import { OSINT_SOURCES, REMOVED_OSINT_SOURCE_IDS } from "./osintSeed";
 import { ensureClusterIdPersisted, backfillClusters } from "./osintClustering";
 import { secretStore } from "./secretStore";
+import { getXBearerTokenForIngest } from "./socialIntegrations";
+import { getKelaIngestConfig } from "./kelaIntegration";
+import { getCommunityIngestConfigs } from "./communityIntegrations";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
@@ -51,7 +62,7 @@ function ensureSchema() {
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS tenants (
       id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE,
-      plan TEXT NOT NULL DEFAULT 'starter', created_at TEXT NOT NULL
+      plan TEXT NOT NULL DEFAULT 'starter', operating_mode TEXT, created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS tenant_scopes (
       tenant_id TEXT PRIMARY KEY,
@@ -60,6 +71,52 @@ function ensureSchema() {
       ip_ranges TEXT NOT NULL DEFAULT '[]',
       executive_emails TEXT NOT NULL DEFAULT '[]'
     );
+    CREATE TABLE IF NOT EXISTS client_profiles (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      client_types TEXT NOT NULL DEFAULT '[]',
+      geo_ids TEXT NOT NULL DEFAULT '[]',
+      industry_ids TEXT NOT NULL DEFAULT '[]',
+      technology_ids TEXT NOT NULL DEFAULT '[]',
+      mapping_terms TEXT NOT NULL DEFAULT '[]',
+      notification_emails TEXT NOT NULL DEFAULT '[]',
+      digest_enabled INTEGER NOT NULL DEFAULT 0,
+      digest_cadence TEXT NOT NULL DEFAULT 'weekly',
+      digest_subject_template TEXT,
+      digest_body_template TEXT,
+      email_logo_url TEXT,
+      last_digest_at TEXT,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_client_profiles_tenant
+      ON client_profiles(tenant_id, is_active, updated_at);
+    CREATE TABLE IF NOT EXISTS client_digests (
+      id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, client_id TEXT NOT NULL,
+      cadence TEXT NOT NULL, period_start TEXT NOT NULL, period_end TEXT NOT NULL,
+      recipients TEXT NOT NULL DEFAULT '[]', subject TEXT NOT NULL, body_md TEXT NOT NULL,
+      finding_ids TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'draft',
+      ai_provider_label TEXT, created_at TEXT NOT NULL, created_by TEXT NOT NULL,
+      reviewed_at TEXT, reviewed_by TEXT,
+      UNIQUE(tenant_id, client_id, cadence, period_start, period_end)
+    );
+    CREATE INDEX IF NOT EXISTS idx_client_digests_client
+      ON client_digests(tenant_id, client_id, created_at DESC);
+    CREATE TABLE IF NOT EXISTS client_taxonomy_options (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      label TEXT NOT NULL,
+      aliases TEXT NOT NULL DEFAULT '[]',
+      fingerprint TEXT NOT NULL,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE(tenant_id, kind, fingerprint)
+    );
+    CREATE INDEX IF NOT EXISTS idx_client_taxonomy_tenant
+      ON client_taxonomy_options(tenant_id, kind, created_at);
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, email TEXT NOT NULL UNIQUE,
       password TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'threat_intel_expert',
@@ -128,7 +185,10 @@ function ensureSchema() {
       ai_summary TEXT, ai_relevance_score INTEGER,
       ai_recommendation TEXT, ai_analyzed_at TEXT, ai_provider_label TEXT,
       draft_email TEXT, draft_email_at TEXT,
-      status TEXT NOT NULL DEFAULT 'new', created_at TEXT NOT NULL
+      status TEXT NOT NULL DEFAULT 'new',
+      ai_client_matches TEXT NOT NULL DEFAULT '[]',
+      client_match_decisions TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_osint_findings_tenant ON osint_findings(tenant_id);
     CREATE TABLE IF NOT EXISTS hunt_queries (
@@ -166,6 +226,7 @@ function ensureSchema() {
       mitre_techniques TEXT NOT NULL DEFAULT '[]',
       affected_tech TEXT NOT NULL DEFAULT '[]',
       threat_actors TEXT NOT NULL DEFAULT '[]',
+      client_ids TEXT NOT NULL DEFAULT '[]',
       sigma_yaml TEXT,
       queries TEXT NOT NULL DEFAULT '{}',
       notes TEXT,
@@ -186,6 +247,22 @@ function ensureSchema() {
       UNIQUE(tenant_id, rule_id, siem_id)
     );
     CREATE INDEX IF NOT EXISTS idx_rule_deployments_rule ON rule_deployments(tenant_id, rule_id);
+    CREATE TABLE IF NOT EXISTS rule_validations (
+      id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL,
+      rule_id TEXT NOT NULL, client_id TEXT NOT NULL, siem_id TEXT NOT NULL,
+      rule_version INTEGER NOT NULL,
+      telemetry_sources TEXT NOT NULL DEFAULT '[]',
+      syntax_status TEXT NOT NULL DEFAULT 'not_checked',
+      test_status TEXT NOT NULL DEFAULT 'not_tested',
+      test_method TEXT, expected_result TEXT, observed_result TEXT,
+      false_positive_risk TEXT NOT NULL DEFAULT 'unknown',
+      external_reference TEXT, notes TEXT,
+      tested_at TEXT, tested_by TEXT,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      UNIQUE(tenant_id, rule_id, client_id, siem_id, rule_version)
+    );
+    CREATE INDEX IF NOT EXISTS idx_rule_validations_rule
+      ON rule_validations(tenant_id, rule_id, rule_version);
     -- v2.30.3 — Threat Actor Profiles (TAP). Header + body in threat_actors;
     -- sub-resources (TTPs, tools, campaigns, IoCs, references, rule links)
     -- in dedicated tables for structured querying.
@@ -343,6 +420,14 @@ function ensureSchema() {
     // v2.8 — IoC parsing + cross-source dedupe.
     `ALTER TABLE osint_findings ADD COLUMN iocs TEXT NOT NULL DEFAULT '{}'`,
     `ALTER TABLE osint_findings ADD COLUMN content_hash TEXT`,
+    `ALTER TABLE osint_findings ADD COLUMN published_at_inferred INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE osint_findings ADD COLUMN publisher_severity TEXT`,
+    `ALTER TABLE osint_findings ADD COLUMN technical_severity TEXT`,
+    `ALTER TABLE osint_findings ADD COLUMN client_impact_severity TEXT`,
+    `ALTER TABLE osint_findings ADD COLUMN analyst_final_severity TEXT`,
+    `ALTER TABLE osint_findings ADD COLUMN analyst_severity_rationale TEXT`,
+    `ALTER TABLE osint_findings ADD COLUMN analyst_severity_at TEXT`,
+    `ALTER TABLE osint_findings ADD COLUMN analyst_severity_by TEXT`,
     // v2.16 — per-finding source-content cache + CIRT deep-dive cache.
     // The background analyzer fills these so deep-dive can return instantly
     // for already-analyzed findings instead of running a 60-120s live AI call.
@@ -359,6 +444,26 @@ function ensureSchema() {
     `ALTER TABLE osint_findings ADD COLUMN analyst_tags TEXT NOT NULL DEFAULT '[]'`,
     `ALTER TABLE osint_findings ADD COLUMN analyst_edited_at TEXT`,
     `ALTER TABLE osint_findings ADD COLUMN analyst_edited_by TEXT`,
+    // Batch Two — explicit analyst assessment and client profile tags.
+    `ALTER TABLE osint_findings ADD COLUMN analyst_assessment TEXT`,
+    `ALTER TABLE osint_findings ADD COLUMN analyst_disposition TEXT`,
+    `ALTER TABLE osint_findings ADD COLUMN analyst_confidence TEXT`,
+    `ALTER TABLE osint_findings ADD COLUMN analyst_impact TEXT`,
+    `ALTER TABLE osint_findings ADD COLUMN analyst_next_action TEXT`,
+    `ALTER TABLE osint_findings ADD COLUMN analyst_assessed_at TEXT`,
+    `ALTER TABLE osint_findings ADD COLUMN analyst_assessed_by TEXT`,
+    `ALTER TABLE osint_findings ADD COLUMN client_tags TEXT NOT NULL DEFAULT '[]'`,
+    `ALTER TABLE osint_findings ADD COLUMN ai_client_matches TEXT NOT NULL DEFAULT '[]'`,
+    `ALTER TABLE osint_findings ADD COLUMN client_match_decisions TEXT NOT NULL DEFAULT '{}'`,
+    `ALTER TABLE client_profiles ADD COLUMN mapping_terms TEXT NOT NULL DEFAULT '[]'`,
+    `ALTER TABLE client_profiles ADD COLUMN digest_enabled INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE client_profiles ADD COLUMN digest_cadence TEXT NOT NULL DEFAULT 'weekly'`,
+    `ALTER TABLE client_profiles ADD COLUMN digest_subject_template TEXT`,
+    `ALTER TABLE client_profiles ADD COLUMN digest_body_template TEXT`,
+    `ALTER TABLE client_profiles ADD COLUMN email_logo_url TEXT`,
+    `ALTER TABLE client_profiles ADD COLUMN last_digest_at TEXT`,
+    `ALTER TABLE detection_rules ADD COLUMN client_ids TEXT NOT NULL DEFAULT '[]'`,
+    `ALTER TABLE tenants ADD COLUMN operating_mode TEXT`,
     // v2.29 — AI categorisation of the intel item.
     //   threat_intel  — actionable threat advisory / incident report
     //   regular_report — quarterly landscape / vendor M-Trends-style review
@@ -386,10 +491,21 @@ function ensureSchema() {
     try { sqlite.exec(stmt); } catch { /* column already exists */ }
   }
   sqlite.prepare(`
+    UPDATE tenants
+       SET operating_mode = 'mss'
+     WHERE operating_mode IS NULL
+       AND EXISTS (SELECT 1 FROM client_profiles WHERE client_profiles.tenant_id = tenants.id)
+  `).run();
+  sqlite.prepare(`
     UPDATE users
        SET account_type = 'platform'
      WHERE COALESCE(account_type, '') NOT IN ('client', 'platform')
   `).run();
+  sqlite.prepare(`
+    UPDATE client_profiles
+       SET digest_body_template = ?, updated_at = ?
+     WHERE digest_body_template = ?
+  `).run(DEFAULT_CLIENT_DIGEST_BODY_TEMPLATE, now(), LEGACY_CLIENT_DIGEST_BODY_TEMPLATE);
 
   // v2.16 — tenant-level background-job settings + indexes for the analyzer
   // queue. Idempotent.
@@ -728,6 +844,145 @@ const p = <T = any>(v: string | null | undefined, d: T): T => {
 const now = () => new Date().toISOString();
 const id = () => randomUUID();
 
+type InternalTaxonomyOption = ClientTaxonomyOptionDTO & { legacyId?: string };
+
+function stableTaxonomyId(kind: ClientTaxonomyKind, sourceId: string): string {
+  const hex = createHash("sha256").update(`optrasight-taxonomy\0${kind}\0${sourceId}`).digest("hex").slice(0, 32).split("");
+  hex[12] = "5";
+  hex[16] = ((parseInt(hex[16], 16) & 0x3) | 0x8).toString(16);
+  return `${hex.slice(0, 8).join("")}-${hex.slice(8, 12).join("")}-${hex.slice(12, 16).join("")}-${hex.slice(16, 20).join("")}-${hex.slice(20).join("")}`;
+}
+
+function taxonomyFingerprint(kind: ClientTaxonomyKind, label: string): string {
+  const normalized = label.normalize("NFKC").trim().toLocaleLowerCase("en-US").replace(/[^a-z0-9]+/g, " ").trim();
+  return createHash("sha256").update(`${kind}\0${normalized}`).digest("hex");
+}
+
+function builtInTaxonomyOptions(): InternalTaxonomyOption[] {
+  return [
+    ...GEOS.map((option) => ({
+      id: stableTaxonomyId("geo", option.id), kind: "geo" as const,
+      label: option.label, aliases: [], source: "built_in" as const,
+      optionKind: option.kind, legacyId: option.id,
+    })),
+    ...INDUSTRIES.map((option) => ({
+      id: stableTaxonomyId("industry", option.id), kind: "industry" as const,
+      label: option.label,
+      aliases: option.id === "CRITICAL_INFRA"
+        ? ["Critical National Infrastructure", "CNI", "Essential Services", "Operational Technology", "OT / ICS"]
+        : [],
+      source: "built_in" as const,
+      legacyId: option.id,
+    })),
+    ...MONITORED_TECHNOLOGIES.map((option) => ({
+      id: stableTaxonomyId("technology", option.id), kind: "technology" as const,
+      label: option.label, aliases: [], source: "built_in" as const,
+      category: option.category, legacyId: option.id,
+    })),
+  ];
+}
+
+function customTaxonomyOptions(tid: string): InternalTaxonomyOption[] {
+  const rows = sqlite.prepare(`
+    SELECT id, kind, label, aliases
+    FROM client_taxonomy_options
+    WHERE tenant_id = ?
+    ORDER BY kind, label
+  `).all(tid) as Array<{ id: string; kind: ClientTaxonomyKind; label: string; aliases: string }>;
+  return rows.map((row) => ({
+    id: row.id,
+    kind: row.kind,
+    label: row.label,
+    aliases: p<string[]>(row.aliases, []),
+    source: "custom",
+  }));
+}
+
+function taxonomyOptionsForTenant(tid: string): InternalTaxonomyOption[] {
+  return [...builtInTaxonomyOptions(), ...customTaxonomyOptions(tid)];
+}
+
+function migrateLegacyScopeIds(values: string[], kind: ClientTaxonomyKind, options: InternalTaxonomyOption[]): string[] {
+  const allowed = new Set(options.filter((option) => option.kind === kind).map((option) => option.id));
+  const legacy = new Map(options.filter((option) => option.kind === kind && option.legacyId).map((option) => [option.legacyId!, option.id]));
+  return Array.from(new Set(values.map((value) => allowed.has(value) ? value : legacy.get(value)).filter((value): value is string => !!value)));
+}
+
+function ensureDefaultClientProfile(tid: string): void {
+  const existing = sqlite.prepare("SELECT id FROM client_profiles WHERE tenant_id = ? LIMIT 1").get(tid);
+  if (existing) return;
+  const tenant = sqlite.prepare("SELECT name FROM tenants WHERE id = ?").get(tid) as { name: string } | undefined;
+  if (!tenant) return;
+  const scope = sqlite.prepare("SELECT * FROM tenant_scopes WHERE tenant_id = ?").get(tid) as any;
+  const options = taxonomyOptionsForTenant(tid);
+  const ts = now();
+  sqlite.prepare(`
+    INSERT INTO client_profiles (
+      id, tenant_id, name, client_types, geo_ids, industry_ids,
+      technology_ids, mapping_terms, notification_emails, is_active, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+  `).run(
+    id(), tid, tenant.name,
+    j(p<string[]>(scope?.client_types, [])),
+    j(migrateLegacyScopeIds(p<string[]>(scope?.geos, []), "geo", options)),
+    j(migrateLegacyScopeIds(p<string[]>(scope?.industries, []), "industry", options)),
+    j(migrateLegacyScopeIds(p<string[]>(scope?.monitored_technologies, []), "technology", options)),
+    "[]",
+    j(p<string[]>(scope?.notification_emails, [])),
+    ts, ts,
+  );
+}
+
+function clientProfileRowToDto(row: any): ClientProfileDTO {
+  return {
+    id: row.id,
+    tenantId: row.tenant_id,
+    name: row.name,
+    clientTypes: p<string[]>(row.client_types, []),
+    geos: p<string[]>(row.geo_ids, []),
+    industries: p<string[]>(row.industry_ids, []),
+    monitoredTechnologies: p<string[]>(row.technology_ids, []),
+    mappingTerms: p<string[]>(row.mapping_terms, []),
+    notificationEmails: p<string[]>(row.notification_emails, []),
+    digestEnabled: Number(row.digest_enabled) === 1,
+    digestCadence: (row.digest_cadence || "weekly") as ClientProfileDTO["digestCadence"],
+    digestSubjectTemplate: row.digest_subject_template || DEFAULT_CLIENT_DIGEST_SUBJECT_TEMPLATE,
+    digestBodyTemplate: row.digest_body_template || DEFAULT_CLIENT_DIGEST_BODY_TEMPLATE,
+    emailLogoUrl: row.email_logo_url ?? null,
+    lastDigestAt: row.last_digest_at ?? null,
+    isActive: Number(row.is_active) === 1,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function clientDigestRowToDto(row: any): ClientDigestDTO {
+  return {
+    id: row.id,
+    clientId: row.client_id,
+    cadence: row.cadence,
+    periodStart: row.period_start,
+    periodEnd: row.period_end,
+    recipients: p<string[]>(row.recipients, []),
+    subject: row.subject,
+    bodyMd: row.body_md,
+    findingIds: p<string[]>(row.finding_ids, []),
+    status: row.status,
+    aiProviderLabel: row.ai_provider_label ?? null,
+    createdAt: row.created_at,
+    createdBy: row.created_by,
+    reviewedAt: row.reviewed_at ?? null,
+    reviewedBy: row.reviewed_by ?? null,
+  };
+}
+
+const CLIENT_DIGEST_DAYS: Record<ClientProfileDTO["digestCadence"], number> = {
+  daily: 1,
+  weekly: 7,
+  biweekly: 14,
+  monthly: 30,
+};
+
 const BATCH_ONE_WORKSPACE_PROFILE = {
   clientTypes: ["Threat Intelligence"],
   geos: ["Global"],
@@ -735,9 +990,18 @@ const BATCH_ONE_WORKSPACE_PROFILE = {
   monitoredTechnologies: ["osint", "threat-intelligence", "detection-engineering"],
 };
 const BATCH_ONE_AI_CONTEXT = {
-  industries: BATCH_ONE_WORKSPACE_PROFILE.industries,
-  geos: BATCH_ONE_WORKSPACE_PROFILE.geos,
-  monitoredTechnologies: BATCH_ONE_WORKSPACE_PROFILE.monitoredTechnologies,
+  clients: [{
+    id: stableTaxonomyId("industry", "batch-one-workspace-client"),
+    name: "Batch One Workspace",
+    mappingTerms: [],
+    geographies: [{ id: stableTaxonomyId("geo", "GLOBAL"), label: "Global", aliases: [] }],
+    industries: [{ id: stableTaxonomyId("industry", "SECURITY_OPERATIONS"), label: "Security operations", aliases: [] }],
+    technologies: [
+      { id: stableTaxonomyId("technology", "osint"), label: "OSINT", aliases: [] },
+      { id: stableTaxonomyId("technology", "threat-intelligence"), label: "Threat intelligence", aliases: [] },
+      { id: stableTaxonomyId("technology", "detection-engineering"), label: "Detection engineering", aliases: [] },
+    ],
+  }],
 };
 
 /** v2.30 — safe JSON parse helpers for the new analytics columns. Defensive
@@ -863,7 +1127,7 @@ function providerSupportsAiTask(provider: Pick<AiProvider, "provider"> | undefin
 function seedOsintSourcesIfEmpty() {
   const upsert = sqlite.prepare(`
     INSERT INTO osint_sources (id, category, name, url, language, region, reliability, enabled)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       category = excluded.category,
       name = excluded.name,
@@ -873,7 +1137,16 @@ function seedOsintSourcesIfEmpty() {
       reliability = excluded.reliability
   `);
   const tx = sqlite.transaction((rows: typeof OSINT_SOURCES) => {
-    for (const s of rows) upsert.run(s.id, s.category, s.name, s.url, s.language ?? "en", s.region ?? null, s.reliability ?? "B");
+    for (const s of rows) upsert.run(
+      s.id,
+      s.category,
+      s.name,
+      s.url,
+      s.language ?? "en",
+      s.region ?? null,
+      s.reliability ?? "B",
+      s.enabled === false ? 0 : 1,
+    );
     const keep = rows.map((s) => s.id);
     if (keep.length > 0) {
       const placeholders = keep.map(() => "?").join(",");
@@ -1117,9 +1390,10 @@ function migrateHuntQueriesToDetectionRules(): void {
     let severity = SEVERITY_FALLBACK;
     const techSet = new Set<string>(affectedTech);
     const actorSet = new Set<string>();
+    const clientSet = new Set<string>();
     for (const fid of findingIds) {
       const f = sqlite.prepare(
-        "SELECT severity, affected_tech, threat_actors FROM osint_findings WHERE tenant_id = ? AND id = ?"
+        "SELECT severity, affected_tech, threat_actors, client_tags FROM osint_findings WHERE tenant_id = ? AND id = ?"
       ).get(hq.tenant_id, fid) as any | undefined;
       if (!f) continue;
       const r = sevRank[String(f.severity || "").toLowerCase()] ?? -1;
@@ -1132,6 +1406,10 @@ function migrateHuntQueriesToDetectionRules(): void {
         const ta = JSON.parse(f.threat_actors || "[]");
         if (Array.isArray(ta)) ta.forEach((x) => typeof x === "string" && actorSet.add(x));
       } catch {}
+      try {
+        const ct = JSON.parse(f.client_tags || "[]");
+        if (Array.isArray(ct)) ct.forEach((x) => typeof x === "string" && clientSet.add(x));
+      } catch {}
     }
     // Severity must be one of the RuleSeverity values; collapse 'info' → 'low'.
     if (severity === "info") severity = "low";
@@ -1140,13 +1418,13 @@ function migrateHuntQueriesToDetectionRules(): void {
     try {
       sqlite.prepare(`INSERT INTO detection_rules (
         id, tenant_id, title, description, source_finding_ids, status, severity,
-        mitre_techniques, affected_tech, threat_actors, sigma_yaml, queries, notes,
+        mitre_techniques, affected_tech, threat_actors, client_ids, sigma_yaml, queries, notes,
         version, ai_provider_label, created_at, updated_at, created_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
         ruleId, hq.tenant_id, hq.title || "Migrated hunt query",
         hq.description ?? null,
         JSON.stringify(findingIds), "draft", severity,
-        "[]", JSON.stringify(Array.from(techSet)), JSON.stringify(Array.from(actorSet)),
+        "[]", JSON.stringify(Array.from(techSet)), JSON.stringify(Array.from(actorSet)), JSON.stringify(Array.from(clientSet)),
         sigmaYaml, JSON.stringify(queries),
         "Migrated from legacy hunt query (v2.30.2.1). Original hunt-query id: " + hq.id,
         1, hq.ai_provider_label ?? null,
@@ -1165,6 +1443,41 @@ function migrateHuntQueriesToDetectionRules(): void {
 
 try { migrateHuntQueriesToDetectionRules(); } catch (e) {
   console.warn("[migrate-hq->dr] migration failed", e);
+}
+
+function backfillDetectionRuleClientIds(): void {
+  const rules = sqlite.prepare(
+    "SELECT id, tenant_id, source_finding_ids, client_ids FROM detection_rules"
+  ).all() as Array<{ id: string; tenant_id: string; source_finding_ids: string; client_ids: string }>;
+  let updated = 0;
+  for (const rule of rules) {
+    const existing = p<string[]>(rule.client_ids, []);
+    if (existing.length > 0) continue;
+    const findingIds = p<string[]>(rule.source_finding_ids, []);
+    if (findingIds.length === 0) continue;
+    const allowed = new Set(
+      (sqlite.prepare("SELECT id FROM client_profiles WHERE tenant_id = ? AND is_active = 1").all(rule.tenant_id) as Array<{ id: string }>)
+        .map((profile) => profile.id),
+    );
+    const clientIds = new Set<string>();
+    for (const findingId of findingIds) {
+      const row = sqlite.prepare(
+        "SELECT client_tags FROM osint_findings WHERE tenant_id = ? AND id = ?"
+      ).get(rule.tenant_id, findingId) as { client_tags?: string } | undefined;
+      for (const clientId of p<string[]>(row?.client_tags, [])) {
+        if (allowed.has(clientId)) clientIds.add(clientId);
+      }
+    }
+    if (clientIds.size === 0) continue;
+    sqlite.prepare("UPDATE detection_rules SET client_ids = ? WHERE tenant_id = ? AND id = ?")
+      .run(j(Array.from(clientIds).slice(0, 32)), rule.tenant_id, rule.id);
+    updated += 1;
+  }
+  if (updated > 0) console.log(`[detection-rules] client scope backfilled=${updated}`);
+}
+
+try { backfillDetectionRuleClientIds(); } catch (e) {
+  console.warn("[detection-rules] client scope backfill failed", e);
 }
 
 // ---------- OSINT source enrichment helpers ----------
@@ -1265,6 +1578,31 @@ export const storage = {
       db.update(users).set({ password: hashPassword(password) }).where(eq(users.id, u.id)).run();
     }
     clearAuthFailures(u.id);
+    db.update(users).set({ lastLoginAt: now() } as any).where(eq(users.id, u.id)).run();
+    const accessMode = accessModeForRole(u.role);
+    return { ...u, accessToken: issueSession(u.id, accessMode), accessMode };
+  },
+  createTestSession(): (User & { accessToken: string; accessMode: "credentialed" | "guest" }) | undefined {
+    const u = sqlite.prepare(`
+      SELECT id, tenant_id AS tenantId, email, password, role,
+             COALESCE(account_type, 'platform') AS accountType,
+             display_name AS displayName,
+             COALESCE(status, 'active') AS status,
+             COALESCE(password_must_change, 0) AS passwordMustChange,
+             COALESCE(mfa_enabled, 0) AS mfaEnabled,
+             mfa_secret_enc AS mfaSecretEnc,
+             mfa_verified_at AS mfaVerifiedAt,
+             COALESCE(failed_login_count, 0) AS failedLoginCount,
+             COALESCE(failed_mfa_count, 0) AS failedMfaCount,
+             account_locked_until AS accountLockedUntil,
+             created_at AS createdAt,
+             last_login_at AS lastLoginAt
+      FROM users
+      WHERE COALESCE(status, 'active') = 'active'
+      ORDER BY CASE role WHEN 'admin' THEN 0 WHEN 'threat_intel_expert' THEN 1 ELSE 2 END, created_at ASC
+      LIMIT 1
+    `).get() as User | undefined;
+    if (!u) return undefined;
     db.update(users).set({ lastLoginAt: now() } as any).where(eq(users.id, u.id)).run();
     const accessMode = accessModeForRole(u.role);
     return { ...u, accessToken: issueSession(u.id, accessMode), accessMode };
@@ -1498,6 +1836,372 @@ export const storage = {
   getTenant(tid: string): Tenant | undefined {
     return db.select().from(tenants).where(eq(tenants.id, tid)).get();
   },
+  setTenantOperatingMode(tid: string, operatingMode: "mss" | "individual", actor: string): Tenant | undefined {
+    sqlite.prepare("UPDATE tenants SET operating_mode = ? WHERE id = ?").run(operatingMode, tid);
+    storage.appendAudit(tid, actor, "workspace.operating_mode.update", tid, { operatingMode });
+    return storage.getTenant(tid);
+  },
+  listClientTaxonomyOptions(tid: string): ClientTaxonomyOptionDTO[] {
+    return taxonomyOptionsForTenant(tid).map(({ legacyId: _legacyId, ...option }) => option);
+  },
+  createClientTaxonomyOption(tid: string, opts: {
+    kind: ClientTaxonomyKind;
+    label: string;
+    aliases: string[];
+    actor: string;
+  }): ClientTaxonomyOptionDTO {
+    const label = opts.label.normalize("NFKC").trim();
+    const fingerprint = taxonomyFingerprint(opts.kind, label);
+    const duplicate = sqlite.prepare(`
+      SELECT id FROM client_taxonomy_options
+      WHERE tenant_id = ? AND kind = ? AND fingerprint = ?
+    `).get(tid, opts.kind, fingerprint) as { id: string } | undefined;
+    if (duplicate) {
+      const existing = taxonomyOptionsForTenant(tid).find((option) => option.id === duplicate.id);
+      if (existing) return existing;
+    }
+    const builtInDuplicate = builtInTaxonomyOptions().find((option) => taxonomyFingerprint(opts.kind, option.label) === fingerprint);
+    if (builtInDuplicate) return builtInDuplicate;
+    const optionId = id();
+    const aliases = Array.from(new Set(opts.aliases.map((alias) => alias.normalize("NFKC").trim()).filter(Boolean))).slice(0, 20);
+    sqlite.prepare(`
+      INSERT INTO client_taxonomy_options
+        (id, tenant_id, kind, label, aliases, fingerprint, created_by, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(optionId, tid, opts.kind, label, j(aliases), fingerprint, opts.actor, now());
+    storage.appendAudit(tid, opts.actor, "client_taxonomy.create", optionId, { kind: opts.kind, label });
+    return { id: optionId, kind: opts.kind, label, aliases, source: "custom" };
+  },
+  listClientProfiles(tid: string, opts?: { includeArchived?: boolean }): ClientProfileDTO[] {
+    ensureDefaultClientProfile(tid);
+    const rows = sqlite.prepare(`
+      SELECT * FROM client_profiles
+      WHERE tenant_id = ? ${opts?.includeArchived ? "" : "AND is_active = 1"}
+      ORDER BY is_active DESC, name COLLATE NOCASE, created_at
+    `).all(tid) as any[];
+    return rows.map(clientProfileRowToDto);
+  },
+  getClientProfile(tid: string, clientId?: string): ClientProfileDTO | undefined {
+    ensureDefaultClientProfile(tid);
+    const row = clientId
+      ? sqlite.prepare("SELECT * FROM client_profiles WHERE tenant_id = ? AND id = ?").get(tid, clientId)
+      : sqlite.prepare("SELECT * FROM client_profiles WHERE tenant_id = ? AND is_active = 1 ORDER BY created_at LIMIT 1").get(tid);
+    return row ? clientProfileRowToDto(row) : undefined;
+  },
+  createClientProfile(tid: string, input: {
+    name: string;
+    clientTypes: string[];
+    geos: string[];
+    industries: string[];
+    monitoredTechnologies: string[];
+    mappingTerms: string[];
+    notificationEmails: string[];
+    digestEnabled: boolean;
+    digestCadence: ClientProfileDTO["digestCadence"];
+    digestSubjectTemplate: string;
+    digestBodyTemplate: string;
+    actor: string;
+  }): ClientProfileDTO {
+    const catalog = taxonomyOptionsForTenant(tid);
+    const allowedByKind = (kind: ClientTaxonomyKind) => new Set(catalog.filter((option) => option.kind === kind).map((option) => option.id));
+    const validateIds = (values: string[], kind: ClientTaxonomyKind) => {
+      const allowed = allowedByKind(kind);
+      const unique = Array.from(new Set(values));
+      if (unique.some((value) => !allowed.has(value))) throw new Error(`unknown ${kind} taxonomy option`);
+      return unique;
+    };
+    const clientId = id();
+    const ts = now();
+    sqlite.prepare(`
+      INSERT INTO client_profiles (
+        id, tenant_id, name, client_types, geo_ids, industry_ids,
+        technology_ids, mapping_terms, notification_emails, digest_enabled,
+        digest_cadence, digest_subject_template, digest_body_template,
+        is_active, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+    `).run(
+      clientId, tid, input.name.trim(), j(Array.from(new Set(input.clientTypes))),
+      j(validateIds(input.geos, "geo")), j(validateIds(input.industries, "industry")),
+      j(validateIds(input.monitoredTechnologies, "technology")),
+      j(Array.from(new Set(input.mappingTerms.map((term) => term.normalize("NFKC").trim()).filter(Boolean))).slice(0, 120)),
+      j(Array.from(new Set(input.notificationEmails.map((email) => email.toLowerCase())))),
+      input.digestEnabled ? 1 : 0, input.digestCadence,
+      input.digestSubjectTemplate, input.digestBodyTemplate, ts, ts,
+    );
+    storage.appendAudit(tid, input.actor, "client_profile.create", clientId, { name: input.name.trim() });
+    return storage.getClientProfile(tid, clientId)!;
+  },
+  updateClientProfile(tid: string, clientId: string, patch: {
+    name?: string;
+    clientTypes?: string[];
+    geos?: string[];
+    industries?: string[];
+    monitoredTechnologies?: string[];
+    mappingTerms?: string[];
+    notificationEmails?: string[];
+    digestEnabled?: boolean;
+    digestCadence?: ClientProfileDTO["digestCadence"];
+    digestSubjectTemplate?: string;
+    digestBodyTemplate?: string;
+    isActive?: boolean;
+    actor: string;
+  }): ClientProfileDTO | undefined {
+    const existing = storage.getClientProfile(tid, clientId);
+    if (!existing) return undefined;
+    const catalog = taxonomyOptionsForTenant(tid);
+    const validateIds = (values: string[], kind: ClientTaxonomyKind) => {
+      const allowed = new Set(catalog.filter((option) => option.kind === kind).map((option) => option.id));
+      const unique = Array.from(new Set(values));
+      if (unique.some((value) => !allowed.has(value))) throw new Error(`unknown ${kind} taxonomy option`);
+      return unique;
+    };
+    const next = {
+      name: patch.name?.trim() || existing.name,
+      clientTypes: patch.clientTypes ?? existing.clientTypes,
+      geos: patch.geos ? validateIds(patch.geos, "geo") : existing.geos,
+      industries: patch.industries ? validateIds(patch.industries, "industry") : existing.industries,
+      monitoredTechnologies: patch.monitoredTechnologies ? validateIds(patch.monitoredTechnologies, "technology") : existing.monitoredTechnologies,
+      mappingTerms: patch.mappingTerms
+        ? Array.from(new Set(patch.mappingTerms.map((term) => term.normalize("NFKC").trim()).filter(Boolean))).slice(0, 120)
+        : existing.mappingTerms,
+      notificationEmails: patch.notificationEmails ?? existing.notificationEmails,
+      digestEnabled: patch.digestEnabled ?? existing.digestEnabled,
+      digestCadence: patch.digestCadence ?? existing.digestCadence,
+      digestSubjectTemplate: patch.digestSubjectTemplate ?? existing.digestSubjectTemplate,
+      digestBodyTemplate: patch.digestBodyTemplate ?? existing.digestBodyTemplate,
+      isActive: patch.isActive ?? existing.isActive,
+    };
+    sqlite.prepare(`
+      UPDATE client_profiles SET
+        name = ?, client_types = ?, geo_ids = ?, industry_ids = ?, technology_ids = ?,
+        mapping_terms = ?, notification_emails = ?, digest_enabled = ?, digest_cadence = ?,
+        digest_subject_template = ?, digest_body_template = ?, is_active = ?, updated_at = ?
+      WHERE tenant_id = ? AND id = ?
+    `).run(
+      next.name, j(Array.from(new Set(next.clientTypes))), j(next.geos), j(next.industries),
+      j(next.monitoredTechnologies), j(next.mappingTerms),
+      j(Array.from(new Set(next.notificationEmails.map((email) => email.toLowerCase())))),
+      next.digestEnabled ? 1 : 0, next.digestCadence,
+      next.digestSubjectTemplate, next.digestBodyTemplate,
+      next.isActive ? 1 : 0, now(), tid, clientId,
+    );
+    storage.appendAudit(tid, patch.actor, "client_profile.update", clientId, { fields: Object.keys(patch).filter((key) => key !== "actor") });
+    return storage.getClientProfile(tid, clientId);
+  },
+  setClientEmailLogo(tid: string, clientId: string, logoUrl: string | null, actor: string): ClientProfileDTO | undefined {
+    const existing = storage.getClientProfile(tid, clientId);
+    if (!existing) return undefined;
+    const updatedAt = now();
+    sqlite.prepare(`
+      UPDATE client_profiles SET email_logo_url = ?, updated_at = ?
+      WHERE tenant_id = ? AND id = ?
+    `).run(logoUrl, updatedAt, tid, clientId);
+    storage.appendAudit(tid, actor, logoUrl ? "client_email_logo.upload" : "client_email_logo.remove", clientId, {});
+    return storage.getClientProfile(tid, clientId);
+  },
+  getClientAnalysisScope(tid: string): ClientAnalysisScopeDTO {
+    const options = new Map(storage.listClientTaxonomyOptions(tid).map((option) => [option.id, option]));
+    return {
+      clients: storage.listClientProfiles(tid).map((profile) => ({
+        id: profile.id,
+        name: profile.name,
+        mappingTerms: profile.mappingTerms,
+        geographies: profile.geos.map((optionId) => options.get(optionId)).filter(Boolean) as ClientTaxonomyOptionDTO[],
+        industries: profile.industries.map((optionId) => options.get(optionId)).filter(Boolean) as ClientTaxonomyOptionDTO[],
+        technologies: profile.monitoredTechnologies.map((optionId) => options.get(optionId)).filter(Boolean) as ClientTaxonomyOptionDTO[],
+      })),
+    };
+  },
+
+  listClientDigests(tid: string, clientId: string): ClientDigestDTO[] {
+    return (sqlite.prepare(`
+      SELECT * FROM client_digests
+      WHERE tenant_id = ? AND client_id = ?
+      ORDER BY created_at DESC LIMIT 100
+    `).all(tid, clientId) as any[]).map(clientDigestRowToDto);
+  },
+
+  listDueClientDigestProfiles(tid: string): ClientProfileDTO[] {
+    const nowMs = Date.now();
+    return (storage.listClientProfiles(tid) as ClientProfileDTO[]).filter((client: ClientProfileDTO) => {
+      if (!client.digestEnabled || client.notificationEmails.length === 0) return false;
+      if (!client.lastDigestAt) return true;
+      const lastMs = Date.parse(client.lastDigestAt);
+      return Number.isNaN(lastMs) || lastMs + CLIENT_DIGEST_DAYS[client.digestCadence] * 86400_000 <= nowMs;
+    });
+  },
+
+  async generateClientDigest(tid: string, clientId: string, opts: {
+    cadence?: ClientProfileDTO["digestCadence"];
+    findingIds?: string[];
+    assessmentSelection?: {
+      focusedFindingIds: string[];
+      generalFindingIds: string[];
+      sourceJobId: string;
+    };
+    actor: string;
+  }): Promise<ClientDigestDTO> {
+    const client = storage.getClientProfile(tid, clientId) as ClientProfileDTO | undefined;
+    if (!client || !client.isActive) throw new Error("active client profile not found");
+    if (!opts.assessmentSelection && client.notificationEmails.length === 0) {
+      throw new Error("add at least one notification email before generating a client digest");
+    }
+    const cadence: ClientProfileDTO["digestCadence"] = opts.cadence ?? client.digestCadence;
+    const periodEnd = now();
+    const periodStart = new Date(Date.parse(periodEnd) - CLIENT_DIGEST_DAYS[cadence] * 86400_000).toISOString();
+    const existing = sqlite.prepare(`
+      SELECT * FROM client_digests
+      WHERE tenant_id = ? AND client_id = ? AND cadence = ? AND period_start = ? AND period_end = ?
+    `).get(tid, clientId, cadence, periodStart, periodEnd) as any;
+    if (existing) return clientDigestRowToDto(existing);
+
+    const assessmentIds = opts.assessmentSelection
+      ? Array.from(new Set([
+        ...opts.assessmentSelection.focusedFindingIds,
+        ...opts.assessmentSelection.generalFindingIds,
+      ])).slice(0, 60)
+      : [];
+    let rows = assessmentIds.length > 0
+      ? sqlite.prepare(`
+        SELECT f.*, s.name AS source_name
+        FROM osint_findings f
+        LEFT JOIN osint_sources s ON s.id = f.source_id
+        WHERE f.tenant_id = ? AND f.id IN (${assessmentIds.map(() => "?").join(",")})
+      `).all(tid, ...assessmentIds) as any[]
+      : sqlite.prepare(`
+      SELECT f.*, s.name AS source_name
+      FROM osint_findings f
+      LEFT JOIN osint_sources s ON s.id = f.source_id
+      WHERE f.tenant_id = ?
+        AND f.published_at >= ? AND f.published_at <= ?
+        AND f.status IN ('triaged', 'assessed', 'escalated')
+        AND EXISTS (SELECT 1 FROM json_each(f.client_tags) WHERE value = ?)
+      ORDER BY
+        CASE f.status WHEN 'escalated' THEN 0 WHEN 'assessed' THEN 1 ELSE 2 END,
+        CASE f.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+        f.published_at DESC
+      LIMIT 60
+    `).all(tid, periodStart, periodEnd, clientId) as any[];
+    if (!opts.assessmentSelection && opts.findingIds?.length) {
+      const requested = new Set(opts.findingIds);
+      rows = rows.filter((row) => requested.has(row.id));
+    }
+    if (assessmentIds.length > 0) {
+      const order = new Map(assessmentIds.map((findingId, index) => [findingId, index]));
+      rows.sort((a, b) => (order.get(a.id) ?? 999) - (order.get(b.id) ?? 999));
+    }
+    if (rows.length === 0) throw new Error(`no selected intelligence is available for the ${cadence} draft`);
+
+    const scope = (storage.getClientAnalysisScope(tid).clients as Array<{
+      id: string;
+      industries: ClientTaxonomyOptionDTO[];
+      geographies: ClientTaxonomyOptionDTO[];
+      technologies: ClientTaxonomyOptionDTO[];
+    }>).find((item) => item.id === clientId);
+    const provider = storage.resolveAiProvider(tid, "client_digest");
+    if (!provider) throw new Error("no live AI provider is configured for client digest generation");
+    const countIocs = (raw: string) => {
+      try {
+        const bag = JSON.parse(raw || "{}");
+        return Object.values(bag).reduce((total: number, values: any) => total + (Array.isArray(values) ? values.length : 0), 0);
+      } catch { return 0; }
+    };
+    const result = dispatchAi({
+      task: "client_digest",
+      input: {
+        client: {
+          name: client.name,
+          cadence,
+          mappingTerms: client.mappingTerms,
+          industries: scope?.industries.map((item) => item.label) ?? [],
+          geographies: scope?.geographies.map((item) => item.label) ?? [],
+          technologies: scope?.technologies.map((item) => item.label) ?? [],
+        },
+        periodStart,
+        periodEnd,
+        template: {
+          subjectTemplate: client.digestSubjectTemplate,
+          bodyTemplate: client.digestBodyTemplate,
+          supportedPlaceholders: CLIENT_DIGEST_TEMPLATE_TOKENS,
+        },
+        findings: rows.map((row) => ({
+          id: row.id,
+          selectionClass: opts.assessmentSelection?.generalFindingIds.includes(row.id)
+            ? "general_watch" as const
+            : "client_focused" as const,
+          title: row.title,
+          source: row.source_name || "Unknown source",
+          url: row.url ?? null,
+          publishedAt: row.published_at,
+          severity: row.severity,
+          status: row.status,
+          aiSummary: row.ai_summary ?? null,
+          analystAssessment: row.analyst_assessment ?? null,
+          analystDisposition: row.analyst_disposition ?? null,
+          analystImpact: row.analyst_impact ?? null,
+          analystNextAction: row.analyst_next_action ?? null,
+          cveIds: p<string[]>(row.cve_ids, []),
+          threatActors: p<string[]>(row.threat_actors, []),
+          affectedTech: p<string[]>(row.affected_tech, []),
+          iocCount: countIocs(row.iocs),
+        })),
+      },
+      provider,
+    });
+    if (result.task !== "client_digest") throw new Error("unexpected AI result");
+    const digestId = id();
+    const createdAt = now();
+    sqlite.prepare(`INSERT INTO client_digests (
+      id, tenant_id, client_id, cadence, period_start, period_end, recipients,
+      subject, body_md, finding_ids, status, ai_provider_label, created_at, created_by
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?)`).run(
+      digestId, tid, clientId, cadence, periodStart, periodEnd, j(client.notificationEmails),
+      result.output.subject, result.output.bodyMd, j(result.output.includedFindingIds),
+      provider.label, createdAt, opts.actor,
+    );
+    if (!opts.assessmentSelection) {
+      sqlite.prepare("UPDATE client_profiles SET last_digest_at = ?, updated_at = ? WHERE tenant_id = ? AND id = ?")
+        .run(createdAt, createdAt, tid, clientId);
+    }
+    storage.appendAudit(tid, opts.actor, "client_digest.generate", digestId, {
+      clientId,
+      cadence,
+      candidates: rows.length,
+      selected: result.output.includedFindingIds.length,
+      source: opts.assessmentSelection ? "client_impact_assessment" : "manual_or_scheduled",
+      sourceJobId: opts.assessmentSelection?.sourceJobId ?? null,
+      generalWatchCandidates: opts.assessmentSelection?.generalFindingIds.length ?? 0,
+    });
+    return storage.listClientDigests(tid, clientId)[0];
+  },
+
+  updateClientDigest(tid: string, clientId: string, digestId: string, patch: {
+    subject?: string;
+    bodyMd?: string;
+    status?: ClientDigestDTO["status"];
+    actor: string;
+  }): ClientDigestDTO | undefined {
+    const existing = sqlite.prepare(
+      "SELECT * FROM client_digests WHERE tenant_id = ? AND client_id = ? AND id = ?"
+    ).get(tid, clientId, digestId) as any;
+    if (!existing) return undefined;
+    const contentChanged = (patch.subject !== undefined && patch.subject !== existing.subject)
+      || (patch.bodyMd !== undefined && patch.bodyMd !== existing.body_md);
+    // Any content change invalidates an earlier approval. Delivery can only
+    // promote an unchanged, approved draft to sent through the SMTP route.
+    const status = contentChanged ? "draft" : (patch.status ?? existing.status);
+    sqlite.prepare(`UPDATE client_digests SET
+      subject = ?, body_md = ?, status = ?,
+      reviewed_at = CASE WHEN ? IN ('reviewed','approved','sent') THEN ? ELSE reviewed_at END,
+      reviewed_by = CASE WHEN ? IN ('reviewed','approved','sent') THEN ? ELSE reviewed_by END
+      WHERE tenant_id = ? AND client_id = ? AND id = ?`).run(
+      patch.subject ?? existing.subject, patch.bodyMd ?? existing.body_md, status,
+      status, now(), status, patch.actor, tid, clientId, digestId,
+    );
+    storage.appendAudit(tid, patch.actor, "client_digest.update", digestId, { clientId, fields: Object.keys(patch).filter((key) => key !== "actor") });
+    const row = sqlite.prepare("SELECT * FROM client_digests WHERE id = ?").get(digestId) as any;
+    return row ? clientDigestRowToDto(row) : undefined;
+  },
 
   // ---------- AI providers ----------
   listAiProviders(tid: string): AiProviderSummary[] {
@@ -1595,6 +2299,7 @@ export const storage = {
     const m: Record<string, string> = {};
     for (const r of rows) m[r.task] = r.providerId;
     if (!m.osint_chat && m.osint_overview) m.osint_chat = m.osint_overview;
+    if (!m.client_digest) m.client_digest = m.osint_overview || m.osint_analysis;
     return m as Record<AiTask, string>;
   },
   setAiAssignments(tid: string, assignments: Record<string, string>) {
@@ -2418,7 +3123,13 @@ export const storage = {
     if (mode !== "mock") {
       try {
         const { fetchRealOsintItems } = await import("./osintFetcher");
-        realResult = await fetchRealOsintItems({ techs, maxItems: max });
+        realResult = await fetchRealOsintItems({
+          techs,
+          maxItems: max,
+          xBearerToken: getXBearerTokenForIngest(tid),
+          kelaConfig: getKelaIngestConfig(tid),
+          communityConfigs: getCommunityIngestConfigs(tid),
+        });
       } catch (e: any) {
         realResult = { items: [], feedsTried: 0, feedsOk: 0, errors: [String(e?.message || e)] };
       }
@@ -2646,7 +3357,18 @@ export const storage = {
     const sinceIso = new Date(Date.now() - days * 86400_000).toISOString();
 
     const { runBroadIngest } = await import("./osintFetcher");
-    const result = await runBroadIngest({ sinceIso, maxPerSource, maxTotal, onProgress: opts?.onProgress });
+    const integrationWorkspaceId = opts?.workspaceId
+      || (sqlite.prepare("SELECT id FROM tenants WHERE slug = 'batchone-workspace' LIMIT 1").get() as { id?: string } | undefined)?.id;
+    const result = await runBroadIngest({
+      sinceIso,
+      maxPerSource,
+      maxTotal,
+      enabledSourceIds: storage.listOsintSources().filter((source: any) => !!source.enabled).map((source: any) => source.id),
+      onProgress: opts?.onProgress,
+      xBearerToken: integrationWorkspaceId ? getXBearerTokenForIngest(integrationWorkspaceId) : null,
+      kelaConfig: integrationWorkspaceId ? getKelaIngestConfig(integrationWorkspaceId) : null,
+      communityConfigs: integrationWorkspaceId ? getCommunityIngestConfigs(integrationWorkspaceId) : [],
+    });
 
     const workspaceRows = opts?.workspaceId
       ? sqlite.prepare("SELECT id FROM tenants WHERE id = ? LIMIT 1").all(opts.workspaceId) as Array<{ id: string }>
@@ -2679,12 +3401,13 @@ export const storage = {
     // same advisory from different RSS aggregators.
     let inserted = 0;
     const insertStmt = sqlite.prepare(`INSERT OR IGNORE INTO osint_findings (
-      id, tenant_id, source_id, title, url, published_at, severity,
+      id, tenant_id, source_id, title, url, published_at, published_at_inferred, severity,
+      publisher_severity, technical_severity,
       cve_ids, affected_tech, threat_actors, iocs, content_hash, summary, raw_snippet,
       source_fetched_at,
       ai_summary, ai_relevance_score, ai_recommendation, ai_analyzed_at, ai_provider_label,
       draft_email, draft_email_at, status, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'new', ?)`);
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'new', ?)`);
 
     // For each parsed item: resolve canonical source row, then insert one row per tenant.
     const existingKeyRows = sqlite.prepare("SELECT id, tenant_id || '::' || source_id || '::' || substr(url, 1, 200) AS k FROM osint_findings").all() as Array<{ id: string; k: string }>;
@@ -2745,7 +3468,8 @@ export const storage = {
           existingKeyMap.set(urlKey, fid);
           if (hashKey) existingHashMap.set(hashKey, fid);
           insertStmt.run(
-            fid, tid, src!.id, it.title.slice(0, 280), it.url, it.publishedAt, it.severity,
+            fid, tid, src!.id, it.title.slice(0, 280), it.url, it.publishedAt, it.publishedAtInferred ? 1 : 0, it.severity,
+            it.publisherSeverity ?? it.severity, it.technicalSeverity ?? it.severity,
             j(cveIds), j(it.affectedTech), j(it.threatActors), iocsJson, contentHash || null,
             it.summary, it.rawSnippet, fetchedAt, fetchedAt,
           );
@@ -2772,12 +3496,16 @@ export const storage = {
     };
   },
 
-  listOsintFindings(tid: string, opts?: { severity?: string; status?: string; tech?: string; sourceId?: string; category?: string }): OsintFindingDTO[] {
+  listOsintFindings(tid: string, opts?: { severity?: string; status?: string; tech?: string; sourceId?: string; category?: string; publishedAfter?: string }): OsintFindingDTO[] {
     const where: any[] = ["tenant_id = ?"];
     const params: any[] = [tid];
     if (opts?.severity) { where.push("severity = ?"); params.push(opts.severity); }
     if (opts?.status)   { where.push("status = ?"); params.push(opts.status); }
     if (opts?.sourceId) { where.push("source_id = ?"); params.push(opts.sourceId); }
+    if (opts?.publishedAfter) {
+      where.push("published_at_inferred = 0 AND datetime(published_at) >= datetime(?)");
+      params.push(opts.publishedAfter);
+    }
     const sql = `SELECT * FROM osint_findings WHERE ${where.join(" AND ")} ORDER BY created_at DESC, published_at DESC LIMIT 1000`;
     const rows = sqlite.prepare(sql).all(...params) as any[];
     const sourceMap = new Map(storage.listOsintSources().map((s) => [s.id, s]));
@@ -2799,7 +3527,11 @@ export const storage = {
         id: r.id, tenantId: r.tenant_id, sourceId: r.source_id,
         sourceName: src?.name ?? "unknown", sourceCategory: src?.category ?? "unknown",
         sourceFetchedAt: r.source_fetched_at ?? null,
-        title: r.title, url: r.url, publishedAt: r.published_at, severity: r.severity,
+        title: r.title, url: r.url, publishedAt: r.published_at, publishedAtInferred: !!r.published_at_inferred, severity: r.severity,
+        publisherSeverity: r.publisher_severity ?? null, technicalSeverity: r.technical_severity ?? r.severity,
+        clientImpactSeverity: r.client_impact_severity ?? null, analystFinalSeverity: r.analyst_final_severity ?? null,
+        analystSeverityRationale: r.analyst_severity_rationale ?? null, analystSeverityAt: r.analyst_severity_at ?? null,
+        analystSeverityBy: r.analyst_severity_by ?? null,
         cveIds: JSON.parse(r.cve_ids || "[]"),
         affectedTech: techArr,
         threatActors: JSON.parse(r.threat_actors || "[]"),
@@ -2809,6 +3541,16 @@ export const storage = {
         aiAnalyzedAt: r.ai_analyzed_at, aiProviderLabel: r.ai_provider_label,
         draftEmail: r.draft_email, draftEmailAt: r.draft_email_at,
         status: r.status, createdAt: r.created_at,
+        analystAssessment: r.analyst_assessment ?? null,
+        analystDisposition: r.analyst_disposition ?? null,
+        analystConfidence: r.analyst_confidence ?? null,
+        analystImpact: r.analyst_impact ?? null,
+        analystNextAction: r.analyst_next_action ?? null,
+        analystAssessedAt: r.analyst_assessed_at ?? null,
+        analystAssessedBy: r.analyst_assessed_by ?? null,
+        clientTags: parseJsonArray<string>(r.client_tags),
+        aiClientMatches: parseJsonArray<any>(r.ai_client_matches) ?? [],
+        clientMatchDecisions: (() => { try { const value = JSON.parse(r.client_match_decisions || "{}"); return value && typeof value === "object" && !Array.isArray(value) ? value : {}; } catch { return {}; } })(),
         analystTags: (() => { try { const v = JSON.parse(r.analyst_tags || "[]"); return Array.isArray(v) ? v : []; } catch { return []; } })(),
         analystEditedAt: r.analyst_edited_at,
         analystEditedBy: r.analyst_edited_by,
@@ -2832,7 +3574,11 @@ export const storage = {
       id: r.id, tenantId: r.tenant_id, sourceId: r.source_id,
       sourceName: src?.name ?? "unknown", sourceCategory: src?.category ?? "unknown",
       sourceFetchedAt: r.source_fetched_at ?? null,
-      title: r.title, url: r.url, publishedAt: r.published_at, severity: r.severity,
+      title: r.title, url: r.url, publishedAt: r.published_at, publishedAtInferred: !!r.published_at_inferred, severity: r.severity,
+      publisherSeverity: r.publisher_severity ?? null, technicalSeverity: r.technical_severity ?? r.severity,
+      clientImpactSeverity: r.client_impact_severity ?? null, analystFinalSeverity: r.analyst_final_severity ?? null,
+      analystSeverityRationale: r.analyst_severity_rationale ?? null, analystSeverityAt: r.analyst_severity_at ?? null,
+      analystSeverityBy: r.analyst_severity_by ?? null,
       cveIds: JSON.parse(r.cve_ids || "[]"),
       affectedTech: JSON.parse(r.affected_tech || "[]"),
       threatActors: JSON.parse(r.threat_actors || "[]"),
@@ -2843,6 +3589,16 @@ export const storage = {
       draftEmail: r.draft_email, draftEmailAt: r.draft_email_at,
       status: r.status, createdAt: r.created_at,
       rawSnippet: r.raw_snippet,
+      analystAssessment: r.analyst_assessment ?? null,
+      analystDisposition: r.analyst_disposition ?? null,
+      analystConfidence: r.analyst_confidence ?? null,
+      analystImpact: r.analyst_impact ?? null,
+      analystNextAction: r.analyst_next_action ?? null,
+      analystAssessedAt: r.analyst_assessed_at ?? null,
+      analystAssessedBy: r.analyst_assessed_by ?? null,
+      clientTags: parseJsonArray<string>(r.client_tags),
+      aiClientMatches: parseJsonArray<any>(r.ai_client_matches) ?? [],
+      clientMatchDecisions: (() => { try { const value = JSON.parse(r.client_match_decisions || "{}"); return value && typeof value === "object" && !Array.isArray(value) ? value : {}; } catch { return {}; } })(),
       analystTags: (() => { try { const v = JSON.parse(r.analyst_tags || "[]"); return Array.isArray(v) ? v : []; } catch { return []; } })(),
       analystEditedAt: r.analyst_edited_at,
       analystEditedBy: r.analyst_edited_by,
@@ -2868,7 +3624,11 @@ export const storage = {
       id: r.id, tenantId: r.tenant_id, sourceId: r.source_id,
       sourceName: src?.name ?? "unknown", sourceCategory: src?.category ?? "unknown",
       sourceFetchedAt: r.source_fetched_at ?? null,
-      title: r.title, url: r.url, publishedAt: r.published_at, severity: r.severity,
+      title: r.title, url: r.url, publishedAt: r.published_at, publishedAtInferred: !!r.published_at_inferred, severity: r.severity,
+      publisherSeverity: r.publisher_severity ?? null, technicalSeverity: r.technical_severity ?? r.severity,
+      clientImpactSeverity: r.client_impact_severity ?? null, analystFinalSeverity: r.analyst_final_severity ?? null,
+      analystSeverityRationale: r.analyst_severity_rationale ?? null, analystSeverityAt: r.analyst_severity_at ?? null,
+      analystSeverityBy: r.analyst_severity_by ?? null,
       cveIds: JSON.parse(r.cve_ids || "[]"),
       affectedTech: JSON.parse(r.affected_tech || "[]"),
       threatActors: JSON.parse(r.threat_actors || "[]"),
@@ -2896,10 +3656,20 @@ export const storage = {
     tid: string,
     fid: string,
     patch: {
+      severity?: string;
+      analystFinalSeverity?: string | null;
+      analystSeverityRationale?: string | null;
       status?: string;
       cveIds?: string[];
       iocs?: Record<string, string[]>;
       analystTags?: string[];
+      analystAssessment?: string | null;
+      analystDisposition?: string | null;
+      analystConfidence?: string | null;
+      analystImpact?: string | null;
+      analystNextAction?: string | null;
+      clientTags?: string[];
+      clientMatchDecisions?: Record<string, "ai_assigned" | "approved" | "dismissed">;
       affectedTech?: string[];
       threatActors?: string[];
     },
@@ -2907,9 +3677,34 @@ export const storage = {
   ): OsintFindingDTO | undefined {
     const existing = storage.getOsintFinding(tid, fid);
     if (!existing) return undefined;
+    if (existing.status === "escalated") {
+      throw new Error("Escalated intelligence is immutable until an authorised reopen workflow is completed.");
+    }
     const allowedStatus = new Set(["new", "triaged", "assessed", "dismissed", "escalated"]);
     const sets: string[] = [];
     const params: any[] = [];
+    const allowedSeverity = new Set(["info", "low", "medium", "high", "critical"]);
+    if (typeof patch.severity === "string" && allowedSeverity.has(patch.severity)) {
+      sets.push("technical_severity = COALESCE(technical_severity, ?)"); params.push(existing.technicalSeverity ?? existing.severity);
+      sets.push("severity = ?"); params.push(patch.severity);
+      sets.push("analyst_final_severity = ?"); params.push(patch.severity);
+      sets.push("analyst_severity_at = ?"); params.push(now());
+      sets.push("analyst_severity_by = ?"); params.push(editedBy);
+    }
+    if (patch.analystFinalSeverity !== undefined) {
+      const finalSeverity = patch.analystFinalSeverity == null ? null : String(patch.analystFinalSeverity);
+      if (finalSeverity === null || allowedSeverity.has(finalSeverity)) {
+        sets.push("technical_severity = COALESCE(technical_severity, ?)"); params.push(existing.technicalSeverity ?? existing.severity);
+        sets.push("analyst_final_severity = ?"); params.push(finalSeverity);
+        sets.push("severity = COALESCE(?, technical_severity, publisher_severity, severity)"); params.push(finalSeverity);
+        sets.push("analyst_severity_at = ?"); params.push(finalSeverity ? now() : null);
+        sets.push("analyst_severity_by = ?"); params.push(finalSeverity ? editedBy : null);
+      }
+    }
+    if (patch.analystSeverityRationale !== undefined) {
+      const rationale = patch.analystSeverityRationale == null ? null : String(patch.analystSeverityRationale).trim().slice(0, 2000);
+      sets.push("analyst_severity_rationale = ?"); params.push(rationale || null);
+    }
     if (typeof patch.status === "string" && allowedStatus.has(patch.status)) {
       sets.push("status = ?"); params.push(patch.status);
     }
@@ -2930,6 +3725,57 @@ export const storage = {
       const cleaned = Array.from(new Set(patch.analystTags.map((s) => String(s).trim()).filter(Boolean))).slice(0, 32);
       sets.push("analyst_tags = ?"); params.push(JSON.stringify(cleaned));
     }
+    if (patch.analystAssessment !== undefined) {
+      const assessment = patch.analystAssessment == null ? null : String(patch.analystAssessment).trim().slice(0, 12000);
+      sets.push("analyst_assessment = ?"); params.push(assessment || null);
+    }
+    const assessmentEnums = [
+      ["analystDisposition", "analyst_disposition", new Set(["action_required", "monitor", "informational", "false_positive"])],
+      ["analystConfidence", "analyst_confidence", new Set(["low", "medium", "high"])],
+      ["analystImpact", "analyst_impact", new Set(["none", "low", "medium", "high", "critical"])],
+    ] as const;
+    for (const [patchKey, column, allowed] of assessmentEnums) {
+      const value = patch[patchKey];
+      if (value === undefined) continue;
+      const cleaned = value == null ? null : String(value).trim();
+      if (cleaned && !allowed.has(cleaned)) continue;
+      sets.push(`${column} = ?`); params.push(cleaned || null);
+    }
+    if (patch.analystNextAction !== undefined) {
+      const nextAction = patch.analystNextAction == null ? null : String(patch.analystNextAction).trim().slice(0, 2000);
+      sets.push("analyst_next_action = ?"); params.push(nextAction || null);
+    }
+    const assessmentTouched = patch.analystAssessment !== undefined
+      || patch.analystDisposition !== undefined
+      || patch.analystConfidence !== undefined
+      || patch.analystImpact !== undefined
+      || patch.analystNextAction !== undefined;
+    if (assessmentTouched) {
+      const hasAssessment = Boolean(
+        patch.analystAssessment?.trim()
+        || patch.analystDisposition
+        || patch.analystConfidence
+        || patch.analystImpact
+        || patch.analystNextAction?.trim(),
+      );
+      sets.push("analyst_assessed_at = ?"); params.push(hasAssessment ? now() : null);
+      sets.push("analyst_assessed_by = ?"); params.push(hasAssessment ? editedBy : null);
+      if (hasAssessment && patch.status === undefined) {
+        sets.push("status = ?"); params.push("assessed");
+      }
+    }
+    if (Array.isArray(patch.clientTags)) {
+      const cleaned = Array.from(new Set(patch.clientTags.map((s) => String(s).trim()).filter(Boolean))).slice(0, 32);
+      sets.push("client_tags = ?"); params.push(JSON.stringify(cleaned));
+    }
+    if (patch.clientMatchDecisions && typeof patch.clientMatchDecisions === "object") {
+      const validClientIds = new Set(storage.listClientProfiles(tid, { includeArchived: true }).map((profile) => profile.id));
+      const cleaned: Record<string, "ai_assigned" | "approved" | "dismissed"> = {};
+      for (const [clientId, decision] of Object.entries(patch.clientMatchDecisions)) {
+        if (validClientIds.has(clientId) && (decision === "ai_assigned" || decision === "approved" || decision === "dismissed")) cleaned[clientId] = decision;
+      }
+      sets.push("client_match_decisions = ?"); params.push(JSON.stringify(cleaned));
+    }
     if (Array.isArray(patch.affectedTech)) {
       const cleaned = Array.from(new Set(patch.affectedTech.map((s) => String(s).trim()).filter(Boolean)));
       sets.push("affected_tech = ?"); params.push(JSON.stringify(cleaned));
@@ -2937,6 +3783,17 @@ export const storage = {
     if (Array.isArray(patch.threatActors)) {
       const cleaned = Array.from(new Set(patch.threatActors.map((s) => String(s).trim()).filter(Boolean)));
       sets.push("threat_actors = ?"); params.push(JSON.stringify(cleaned));
+    }
+    const triageContentTouched = patch.severity !== undefined
+      || Array.isArray(patch.cveIds)
+      || Boolean(patch.iocs)
+      || Array.isArray(patch.analystTags)
+      || Array.isArray(patch.clientTags)
+      || Boolean(patch.clientMatchDecisions)
+      || Array.isArray(patch.affectedTech)
+      || Array.isArray(patch.threatActors);
+    if (existing.status === "new" && patch.status === undefined && !assessmentTouched && triageContentTouched) {
+      sets.push("status = ?"); params.push("triaged");
     }
     if (sets.length === 0) return existing;
     sets.push("analyst_edited_at = ?"); params.push(now());
@@ -2953,7 +3810,7 @@ export const storage = {
     return storage.getOsintFinding(tid, fid);
   },
 
-  async runOsintAnalysis(tid: string, opts: { ids?: string[]; onlyUnanalyzed?: boolean }): Promise<{ count: number; provider: string | null }> {
+  async runOsintAnalysis(tid: string, opts: { ids?: string[]; onlyUnanalyzed?: boolean; jobId?: string }): Promise<{ count: number; provider: string | null }> {
     const provider = storage.resolveAiProvider(tid, "osint_analysis");
     if (!provider) return { count: 0, provider: null };
     let target: OsintFindingDTO[];
@@ -2963,6 +3820,9 @@ export const storage = {
       target = storage.listOsintFindings(tid);
       if (opts.onlyUnanalyzed) target = target.filter((f) => !f.aiAnalyzedAt);
     }
+    // Escalated intelligence is an integrity-locked record. Batch and direct
+    // AI analysis must respect the same lock enforced by the analyst UI/API.
+    target = target.filter((f) => f.status !== "escalated");
     // v2.13: pre-fetch the source articles in parallel so the AI can read the
     // full intel, not just the feed teaser. Failures degrade gracefully — the
     // analyser still gets the title/summary/CVEs even if the URL is unreachable.
@@ -2971,8 +3831,15 @@ export const storage = {
     fetched.forEach((r, i) => contentByIdx.set(i, r.content));
 
     let updated = 0;
+    let autoTagged = 0;
+    let autoUntagged = 0;
     let lastError: Error | null = null;
     target.forEach((f, idx) => {
+      if (opts.jobId) {
+        const job = storage.getAiJob(tid, opts.jobId);
+        if (!job || job.status === "cancelled") return;
+        storage.setAiJobHeartbeat(opts.jobId);
+      }
       const sourceContent = contentByIdx.get(idx) ?? null;
       let r: ReturnType<typeof dispatchAi>;
       try {
@@ -2989,7 +3856,7 @@ export const storage = {
               url: f.url,
               sourceContent,
             },
-            clientProfile: BATCH_ONE_AI_CONTEXT,
+            clientProfile: storage.getClientAnalysisScope(tid) ?? BATCH_ONE_AI_CONTEXT,
           },
           provider,
         });
@@ -2998,6 +3865,7 @@ export const storage = {
         // The route handler reports lastError if updated==0.
         lastError = e instanceof Error ? e : new Error(String(e));
         console.warn(`[osint.analyze] finding ${f.id} failed: ${lastError.message}`);
+        if (opts.jobId) storage.setAiJobProgress(opts.jobId, ((idx + 1) / Math.max(1, target.length)) * 100);
         return;
       }
       if (r.task !== "osint_analysis") return;
@@ -3014,10 +3882,13 @@ export const storage = {
       // This fixes "AI re-analysis shows no change" on edited findings whose
       // IoCs were extracted by pre-v2.28 code paths that did not have the
       // global blocklist.
-      const row = sqlite.prepare("SELECT iocs, analyst_tags, analyst_edited_at FROM osint_findings WHERE id = ? AND tenant_id = ?").get(f.id, tid) as any;
+      const row = sqlite.prepare("SELECT iocs, analyst_tags, client_tags, client_match_decisions, analyst_edited_at FROM osint_findings WHERE id = ? AND tenant_id = ?").get(f.id, tid) as any;
       const analystOverrideActive = !!(row && row.analyst_edited_at);
       let mergedIocsJson: string | null = null;
       let mergedTagsJson: string | null = null;
+      let aiClientMatchesJson: string | null = null;
+      let autoClientTagsJson: string | null = null;
+      let clientMatchDecisionsJson: string | null = null;
 
       // ---- IoCs ----
       // Always rebuild the IoC bag through the publisher-blocklist filter.
@@ -3063,25 +3934,55 @@ export const storage = {
       }
 
       // ---- Analyst tags ----
-      // Only merged when analyst override is NOT active (preserves the
-      // analyst's curated tag set the same way as before).
+      // Only merged when analyst override is NOT active, preserving the
+      // analyst's curated taxonomy.
       if (!analystOverrideActive && Array.isArray(r.output.analystTags) && r.output.analystTags.length > 0) {
         let existingTags: string[] = [];
         try { const v = JSON.parse(row?.analyst_tags || "[]"); if (Array.isArray(v)) existingTags = v; } catch { /* ignore */ }
-        const seen = new Set<string>();
-        const merged: string[] = [];
-        for (const v of existingTags) {
-          const s = String(v).trim(); if (!s) continue;
-          const lk = s.toLowerCase(); if (seen.has(lk)) continue;
-          seen.add(lk); merged.push(s);
-        }
-        for (const v of r.output.analystTags) {
-          const s = String(v).trim(); if (!s) continue;
-          const lk = s.toLowerCase(); if (seen.has(lk)) continue;
-          seen.add(lk); merged.push(s);
-          if (merged.length >= 32) break;
-        }
+        const merged = Array.from(new Set([...existingTags, ...(r.output.analystTags ?? [])])).slice(0, 32);
         mergedTagsJson = JSON.stringify(merged);
+      }
+
+      // ---- Client relevance ----
+      // High-confidence semantic matches become provisional AI-assigned tags.
+      // Analyst approvals and dismissals always win and survive re-analysis.
+      if (Array.isArray(r.output.clientMatches)) {
+        aiClientMatchesJson = JSON.stringify(r.output.clientMatches);
+        const validClientIds = new Set(storage.listClientProfiles(tid).map((profile) => profile.id));
+        const existingClientTags = new Set(parseJsonArray<string>(row?.client_tags));
+        const existingDecisions = (() => {
+          try {
+            const value = JSON.parse(row?.client_match_decisions || "{}");
+            return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+          } catch { return {}; }
+        })() as Record<string, "ai_assigned" | "approved" | "dismissed">;
+        const nextDecisions = { ...existingDecisions };
+        let tagsChanged = false;
+        const highConfidenceClientIds = new Set(r.output.clientMatches
+          .filter((match) => validClientIds.has(String(match?.clientId || "")) && (Number(match?.relevanceScore) || 0) >= 0.7)
+          .map((match) => String(match.clientId)));
+        for (const [clientId, decision] of Object.entries(existingDecisions)) {
+          if (decision !== "ai_assigned" || highConfidenceClientIds.has(clientId)) continue;
+          if (existingClientTags.delete(clientId)) {
+            tagsChanged = true;
+            autoUntagged += 1;
+          }
+          delete nextDecisions[clientId];
+        }
+        for (const match of r.output.clientMatches) {
+          const clientId = String(match?.clientId || "");
+          const relevanceScore = Number(match?.relevanceScore) || 0;
+          if (!validClientIds.has(clientId) || relevanceScore < 0.7 || existingDecisions[clientId] === "dismissed") continue;
+          const wasAlreadyTagged = existingClientTags.has(clientId);
+          if (!wasAlreadyTagged) {
+            existingClientTags.add(clientId);
+            tagsChanged = true;
+            autoTagged += 1;
+          }
+          if (!existingDecisions[clientId]) nextDecisions[clientId] = wasAlreadyTagged ? "approved" : "ai_assigned";
+        }
+        if (tagsChanged) autoClientTagsJson = JSON.stringify(Array.from(existingClientTags).slice(0, 32));
+        clientMatchDecisionsJson = JSON.stringify(nextDecisions);
       }
 
       // v2.26 — dispatcher is now LIVE-ONLY. If the AI call had failed,
@@ -3094,6 +3995,15 @@ export const storage = {
       const params: any[] = [r.output.summary, r.output.relevanceScore, r.output.recommendation, now(), labelToStore];
       if (mergedIocsJson !== null) { sets.push("iocs = ?"); params.push(mergedIocsJson); }
       if (mergedTagsJson !== null) { sets.push("analyst_tags = ?"); params.push(mergedTagsJson); }
+      if (aiClientMatchesJson !== null) {
+        sets.push("ai_client_matches = ?"); params.push(aiClientMatchesJson);
+      }
+      if (autoClientTagsJson !== null) {
+        sets.push("client_tags = ?"); params.push(autoClientTagsJson);
+      }
+      if (clientMatchDecisionsJson !== null) {
+        sets.push("client_match_decisions = ?"); params.push(clientMatchDecisionsJson);
+      }
       // v2.29 — persist AI categorisation. Always write (overwrites a stale label).
       {
         const cat = (r.output as any).intelCategory;
@@ -3153,8 +4063,9 @@ export const storage = {
       // Safe + idempotent + swallow errors so AI batch never aborts on this.
       try { ensureClusterIdPersisted(sqlite, f.id); } catch (e) { console.warn(`[cluster] analyze assign failed for ${f.id}`, e); }
       updated += 1;
+      if (opts.jobId) storage.setAiJobProgress(opts.jobId, ((idx + 1) / Math.max(1, target.length)) * 100);
     });
-    storage.appendAudit(tid, "system", "osint.analyze", null, { count: updated, provider: provider.label });
+    storage.appendAudit(tid, "system", "osint.analyze", null, { count: updated, autoTagged, autoUntagged, provider: provider.label });
     // v2.26 — if every single finding in the batch failed live, surface the
     // last error to the caller so the UI shows what went wrong instead of a
     // silent "0 updated". A partial-batch success still returns 200 with
@@ -3438,20 +4349,67 @@ export const storage = {
       throw new Error(`AI provider did not return hunt queries for: ${missingLanguages.join(", ")}`);
     }
     const hid = id();
+    const detectionRuleId = `migrated:${hid}`;
     const title = opts.title ?? (aiTitle || `Hunt — ${affectedTech.slice(0, 2).join(", ") || "OSINT findings"} (${findings.length} signal${findings.length === 1 ? "" : "s"})`);
     const description = findings.map((f) => `• ${f.title}`).join("\n");
-    sqlite.prepare(`INSERT INTO hunt_queries (
-      id, tenant_id, title, description, source_finding_ids, affected_tech, queries,
-      ai_provider_label, created_at, created_by
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-      hid, tid, title, description, j(opts.findingIds), j(affectedTech), JSON.stringify(queries),
-      provider?.label ?? null, now(), opts.createdBy
-    );
+    const severityRank: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
+    let severity: RuleSeverity = "low";
+    for (const finding of findings) {
+      const candidate = finding.severity === "info" ? "low" : finding.severity;
+      if ((severityRank[candidate] ?? -1) > severityRank[severity]) severity = candidate as RuleSeverity;
+    }
+    const threatActors = Array.from(new Set(findings.flatMap((finding) => finding.threatActors)));
+    const allowedClientIds = new Set(storage.listClientProfiles(tid).map((profile) => profile.id));
+    const clientIds = Array.from(new Set(findings.flatMap((finding) => finding.clientTags ?? [])))
+      .filter((clientId) => allowedClientIds.has(clientId))
+      .slice(0, 32);
+    const mitreById = new Map<string, { id: string; name?: string; tactic?: string }>();
+    for (const technique of findings.flatMap((finding) => finding.attackTechniques ?? [])) {
+      if (technique?.id && !mitreById.has(technique.id)) mitreById.set(technique.id, technique);
+    }
+    let sigmaYaml: string | null = null;
+    const compiledQueries: Record<string, string> = {};
+    for (const [language, value] of Object.entries(queries)) {
+      const flat = Array.isArray(value)
+        ? value.filter((item) => typeof item === "string" && item.trim()).join("\n\n")
+        : String(value ?? "").trim();
+      if (!flat) continue;
+      if (language === "sigma") sigmaYaml = flat;
+      else compiledQueries[language] = flat;
+    }
+    const createdAt = now();
+    sqlite.transaction(() => {
+      sqlite.prepare(`INSERT INTO hunt_queries (
+        id, tenant_id, title, description, source_finding_ids, affected_tech, queries,
+        ai_provider_label, created_at, created_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+        hid, tid, title, description, j(opts.findingIds), j(affectedTech), JSON.stringify(queries),
+        provider?.label ?? null, createdAt, opts.createdBy
+      );
+      sqlite.prepare(`INSERT INTO detection_rules (
+        id, tenant_id, title, description, source_finding_ids, status, severity,
+        mitre_techniques, affected_tech, threat_actors, client_ids, sigma_yaml, queries, notes,
+        version, ai_provider_label, created_at, updated_at, created_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+        detectionRuleId, tid, title, description || null, j(opts.findingIds), "draft", severity,
+        JSON.stringify(Array.from(mitreById.values())), j(affectedTech), j(threatActors), j(clientIds),
+        sigmaYaml, JSON.stringify(compiledQueries),
+        `Generated from Intel Inbox hunt workflow. Hunt-query id: ${hid}`,
+        1, provider?.label ?? null, createdAt, createdAt, opts.createdBy,
+      );
+    })();
     storage.appendAudit(tid, opts.createdBy, "hunt.generate", hid, { languages: opts.languages, findings: opts.findingIds.length });
+    storage.appendAudit(tid, opts.createdBy, "detection_rule.create", detectionRuleId, {
+      source: "intel_hunt_workflow",
+      huntQueryId: hid,
+      findings: opts.findingIds.length,
+      languages: opts.languages.length,
+    });
     return {
       id: hid, tenantId: tid, title, description,
       sourceFindingIds: opts.findingIds, affectedTech, queries,
-      aiProviderLabel: provider?.label ?? null, createdAt: now(), createdBy: opts.createdBy,
+      aiProviderLabel: provider?.label ?? null, createdAt, createdBy: opts.createdBy,
+      detectionRuleId,
     };
   },
 
@@ -3472,7 +4430,13 @@ export const storage = {
     const deps = sqlite.prepare(
       "SELECT * FROM rule_deployments WHERE tenant_id = ? AND rule_id = ? ORDER BY siem_id"
     ).all(r.tenant_id, r.id) as any[];
+    const validations = sqlite.prepare(
+      `SELECT * FROM rule_validations
+       WHERE tenant_id = ? AND rule_id = ?
+       ORDER BY updated_at DESC`
+    ).all(r.tenant_id, r.id) as any[];
     const siemLabel = (sid: string) => SIEM_TARGETS.find((s) => s.id === sid)?.label ?? sid;
+    const version = r.version ?? 1;
     return {
       id: r.id, tenantId: r.tenant_id, title: r.title,
       description: r.description ?? null,
@@ -3482,10 +4446,11 @@ export const storage = {
       mitreTechniques: JSON.parse(r.mitre_techniques || "[]"),
       affectedTech: JSON.parse(r.affected_tech || "[]"),
       threatActors: JSON.parse(r.threat_actors || "[]"),
+      clientIds: JSON.parse(r.client_ids || "[]"),
       sigmaYaml: r.sigma_yaml ?? null,
       queries: JSON.parse(r.queries || "{}"),
       notes: r.notes ?? null,
-      version: r.version ?? 1,
+      version,
       aiProviderLabel: r.ai_provider_label ?? null,
       createdAt: r.created_at, updatedAt: r.updated_at, createdBy: r.created_by,
       deployments: deps.map((d) => ({
@@ -3496,8 +4461,118 @@ export const storage = {
         ruleVersion: d.rule_version ?? 1,
         deployedAt: d.deployed_at ?? null, deployedBy: d.deployed_by ?? null,
         updatedAt: d.updated_at,
+        isStale: (d.rule_version ?? 1) < version,
       })),
+      validations: validations.map((v) => {
+        const syntaxStatus = (v.syntax_status || "not_checked") as RuleSyntaxStatus;
+        const testStatus = (v.test_status || "not_tested") as RuleTestStatus;
+        const isCurrentVersion = (v.rule_version ?? 1) === version;
+        return {
+          id: v.id,
+          ruleId: v.rule_id,
+          clientId: v.client_id,
+          siemId: v.siem_id as SiemTargetId,
+          siemLabel: siemLabel(v.siem_id),
+          ruleVersion: v.rule_version ?? 1,
+          telemetrySources: JSON.parse(v.telemetry_sources || "[]"),
+          syntaxStatus,
+          testStatus,
+          testMethod: v.test_method ?? null,
+          expectedResult: v.expected_result ?? null,
+          observedResult: v.observed_result ?? null,
+          falsePositiveRisk: (v.false_positive_risk || "unknown") as RuleFalsePositiveRisk,
+          externalReference: v.external_reference ?? null,
+          notes: v.notes ?? null,
+          testedAt: v.tested_at ?? null,
+          testedBy: v.tested_by ?? null,
+          createdAt: v.created_at,
+          updatedAt: v.updated_at,
+          isCurrentVersion,
+          passed: isCurrentVersion && syntaxStatus === "passed" && testStatus === "passed",
+        } satisfies RuleValidationDTO;
+      }),
     };
+  },
+
+  getDetectionRuleReadiness(tid: string, rid: string): {
+    ready: boolean;
+    missingClientIds: string[];
+  } {
+    const rule = storage.getDetectionRule(tid, rid);
+    if (!rule) return { ready: false, missingClientIds: [] };
+    const passedClients = new Set(
+      rule.validations.filter((validation) => validation.passed).map((validation) => validation.clientId),
+    );
+    if (storage.getTenant(tid)?.operatingMode === "individual") {
+      return { ready: passedClients.has("__workspace__"), missingClientIds: passedClients.has("__workspace__") ? [] : ["__workspace__"] };
+    }
+    const missingClientIds = rule.clientIds.filter((clientId) => !passedClients.has(clientId));
+    return { ready: rule.clientIds.length > 0 && missingClientIds.length === 0, missingClientIds };
+  },
+
+  upsertDetectionRuleValidation(tid: string, rid: string, input: {
+    clientId: string;
+    siemId: SiemTargetId;
+    telemetrySources: string[];
+    syntaxStatus: RuleSyntaxStatus;
+    testStatus: RuleTestStatus;
+    testMethod?: string | null;
+    expectedResult?: string | null;
+    observedResult?: string | null;
+    falsePositiveRisk: RuleFalsePositiveRisk;
+    externalReference?: string | null;
+    notes?: string | null;
+    actor: string;
+  }): DetectionRuleDTO | undefined {
+    const rule = storage.getDetectionRule(tid, rid);
+    if (!rule) return undefined;
+    const individualMode = storage.getTenant(tid)?.operatingMode === "individual";
+    if (individualMode ? input.clientId !== "__workspace__" : !rule.clientIds.includes(input.clientId)) {
+      throw new Error(individualMode ? "individual-mode validation must use workspace scope" : "validation client must be assigned to this rule");
+    }
+    const hasTarget = input.siemId === "sigma" ? !!rule.sigmaYaml : !!rule.queries[input.siemId];
+    if (!hasTarget) throw new Error("validation target has no rule content");
+    const recordingPass = input.syntaxStatus === "passed" && input.testStatus === "passed";
+    if (recordingPass && (!input.testMethod?.trim() || !input.expectedResult?.trim() || !input.observedResult?.trim())) {
+      throw new Error("passing validation requires test method, expected result, and observed result");
+    }
+    const ts = now();
+    const passed = recordingPass;
+    const existing = sqlite.prepare(
+      `SELECT id FROM rule_validations
+       WHERE tenant_id = ? AND rule_id = ? AND client_id = ? AND siem_id = ? AND rule_version = ?`
+    ).get(tid, rid, input.clientId, input.siemId, rule.version) as any;
+    const values = [
+      j(Array.from(new Set(input.telemetrySources.map((value) => value.trim()).filter(Boolean)))),
+      input.syntaxStatus, input.testStatus, input.testMethod ?? null,
+      input.expectedResult ?? null, input.observedResult ?? null,
+      input.falsePositiveRisk, input.externalReference ?? null, input.notes ?? null,
+      passed ? ts : null, passed ? input.actor : null, ts,
+    ];
+    if (existing) {
+      sqlite.prepare(`UPDATE rule_validations SET
+        telemetry_sources = ?, syntax_status = ?, test_status = ?, test_method = ?,
+        expected_result = ?, observed_result = ?, false_positive_risk = ?,
+        external_reference = ?, notes = ?, tested_at = ?, tested_by = ?, updated_at = ?
+        WHERE id = ?`).run(...values, existing.id);
+    } else {
+      sqlite.prepare(`INSERT INTO rule_validations (
+        id, tenant_id, rule_id, client_id, siem_id, rule_version,
+        telemetry_sources, syntax_status, test_status, test_method,
+        expected_result, observed_result, false_positive_risk,
+        external_reference, notes, tested_at, tested_by, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+        id(), tid, rid, input.clientId, input.siemId, rule.version,
+        ...values.slice(0, 11), ts, ts,
+      );
+    }
+    storage.appendAudit(tid, input.actor, "detection_rule.validate", rid, {
+      clientId: input.clientId,
+      siemId: input.siemId,
+      ruleVersion: rule.version,
+      passed,
+    });
+    return storage.getDetectionRule(tid, rid);
   },
 
   listDetectionRules(tid: string, filter?: { status?: RuleStatus }): DetectionRuleDTO[] {
@@ -3527,6 +4602,7 @@ export const storage = {
     severity?: RuleSeverity;
     affectedTech?: string[];
     threatActors?: string[];
+    clientIds?: string[];
     generate: boolean;
     createdBy: string;
   }): Promise<DetectionRuleDTO> {
@@ -3545,6 +4621,11 @@ export const storage = {
       ...(opts.threatActors ?? []),
       ...findings.flatMap((f) => f.threatActors),
     ]));
+    const allowedClientIds = new Set(storage.listClientProfiles(tid).map((profile) => profile.id));
+    const clientIds = Array.from(new Set([
+      ...(opts.clientIds ?? []),
+      ...findings.flatMap((finding) => finding.clientTags ?? []),
+    ])).filter((clientId) => allowedClientIds.has(clientId)).slice(0, 32);
 
     let title = opts.title ?? "";
     let description = opts.description ?? "";
@@ -3604,12 +4685,12 @@ export const storage = {
     const ts = now();
     sqlite.prepare(`INSERT INTO detection_rules (
       id, tenant_id, title, description, source_finding_ids, status, severity,
-      mitre_techniques, affected_tech, threat_actors, sigma_yaml, queries, notes,
+      mitre_techniques, affected_tech, threat_actors, client_ids, sigma_yaml, queries, notes,
       version, ai_provider_label, created_at, updated_at, created_by
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       rid, tid, title, description || null,
       j(findingIds), "draft", severity,
-      JSON.stringify(mitreTechniques), j(affectedTech), j(threatActors),
+      JSON.stringify(mitreTechniques), j(affectedTech), j(threatActors), j(clientIds),
       sigmaYaml, JSON.stringify(queries), notes,
       1, providerLabel, ts, ts, opts.createdBy,
     );
@@ -3630,6 +4711,7 @@ export const storage = {
     notes?: string | null;
     affectedTech?: string[];
     threatActors?: string[];
+    clientIds?: string[];
     mitreTechniques?: Array<{ id: string; name?: string; tactic?: string }>;
     actor: string;
   }): DetectionRuleDTO | undefined {
@@ -3647,9 +4729,27 @@ export const storage = {
     if (patch.notes !== undefined) push("notes", patch.notes);
     if (patch.affectedTech !== undefined) push("affected_tech", j(patch.affectedTech));
     if (patch.threatActors !== undefined) push("threat_actors", j(patch.threatActors));
+    if (patch.clientIds !== undefined) {
+      const allowed = new Set(storage.listClientProfiles(tid).map((profile) => profile.id));
+      const clientIds = Array.from(new Set(patch.clientIds)).filter((clientId) => allowed.has(clientId)).slice(0, 32);
+      push("client_ids", j(clientIds));
+    }
     if (patch.mitreTechniques !== undefined) push("mitre_techniques", JSON.stringify(patch.mitreTechniques));
     if (updates.length === 0) return storage.getDetectionRule(tid, rid);
-    push("version", (existing.version ?? 1) + 1);
+    const versionedFields = [
+      "title", "description", "severity", "sigmaYaml", "queries",
+      "affectedTech", "threatActors", "mitreTechniques",
+    ];
+    const changesDetectionContent = versionedFields.some((field) => (patch as any)[field] !== undefined);
+    if (changesDetectionContent) {
+      push("version", (existing.version ?? 1) + 1);
+      const effectiveStatus = patch.status ?? existing.status;
+      if (effectiveStatus === "validated" || effectiveStatus === "approved") {
+        const statusIndex = updates.indexOf("status = ?");
+        if (statusIndex >= 0) args[statusIndex] = "reviewed";
+        else push("status", "reviewed");
+      }
+    }
     push("updated_at", now());
     args.push(tid, rid);
     sqlite.prepare(`UPDATE detection_rules SET ${updates.join(", ")} WHERE tenant_id = ? AND id = ?`).run(...args);
@@ -3661,6 +4761,7 @@ export const storage = {
     const r = sqlite.prepare("SELECT id FROM detection_rules WHERE tenant_id = ? AND id = ?").get(tid, rid);
     if (!r) return false;
     sqlite.prepare("DELETE FROM rule_deployments WHERE tenant_id = ? AND rule_id = ?").run(tid, rid);
+    sqlite.prepare("DELETE FROM rule_validations WHERE tenant_id = ? AND rule_id = ?").run(tid, rid);
     sqlite.prepare("DELETE FROM detection_rules WHERE tenant_id = ? AND id = ?").run(tid, rid);
     storage.appendAudit(tid, actor, "detection_rule.delete", rid, {});
     return true;
@@ -3678,11 +4779,30 @@ export const storage = {
   }): { deployment: RuleDeploymentDTO; rule: DetectionRuleDTO } | { error: string } {
     const rule = storage.getDetectionRule(tid, rid);
     if (!rule) return { error: "rule not found" };
+    const individualMode = storage.getTenant(tid)?.operatingMode === "individual";
+    if (!individualMode && rule.clientIds.length === 0) {
+      return { error: "assign at least one client before recording deployment" };
+    }
+    if (rule.status !== "approved") {
+      return { error: "approve the current rule version before recording deployment" };
+    }
     const target = SIEM_TARGETS.find((s) => s.id === opts.siemId);
     if (!target) return { error: `unknown SIEM target: ${opts.siemId}` };
     const query = rule.queries[opts.siemId];
     if (opts.mode === "push" && !query && opts.siemId !== "sigma") {
       return { error: `no query compiled for ${target.label} — generate or author one before pushing` };
+    }
+    const validatedClients = new Set(
+      rule.validations
+        .filter((validation) => validation.passed && validation.siemId === opts.siemId)
+        .map((validation) => validation.clientId),
+    );
+    const requiredScopes = individualMode ? ["__workspace__"] : rule.clientIds;
+    const missingClients = requiredScopes.filter((clientId) => !validatedClients.has(clientId));
+    if (missingClients.length > 0) {
+      return { error: individualMode
+        ? `current-version ${target.label} workspace validation is required before deployment`
+        : `current-version ${target.label} validation is required for every assigned client before deployment` };
     }
 
     let finalStatus: DeploymentStatus;
@@ -4891,6 +6011,10 @@ export const storage = {
   setAiJobProgress(id: string, pct: number): void {
     sqlite.prepare("UPDATE ai_jobs SET progress_pct = ? WHERE id = ? AND status != 'cancelled'").run(Math.max(0, Math.min(100, Math.round(pct))), id);
   },
+  setAiJobProgressDetail(id: string, pct: number, detail: Record<string, unknown>): void {
+    sqlite.prepare("UPDATE ai_jobs SET progress_pct = ?, result_json = ?, heartbeat_at = ? WHERE id = ? AND status != 'cancelled'")
+      .run(Math.max(0, Math.min(99, Math.round(pct))), JSON.stringify({ progressDetail: detail }), new Date().toISOString(), id);
+  },
   updateAiJobProgress(id: string, pct: number): void {
     sqlite.prepare("UPDATE ai_jobs SET progress_pct = ? WHERE id = ? AND status != 'cancelled'").run(Math.max(0, Math.min(100, Math.round(pct))), id);
   },
@@ -4966,6 +6090,11 @@ export const storage = {
       targetUrl: r.target_url || null,
       heartbeatAt: r.heartbeat_at || null,
     };
+  },
+  getLatestAiJobByKind(tenantId: string, kind: string): any | undefined {
+    const row = sqlite.prepare("SELECT id FROM ai_jobs WHERE tenant_id = ? AND kind = ? ORDER BY created_at DESC LIMIT 1")
+      .get(tenantId, kind) as { id: string } | undefined;
+    return row ? storage.getAiJob(tenantId, row.id, { includeResult: true }) : undefined;
   },
   /** v2.30.5 — list AI jobs for the notification tray. Returns all currently
    *  running/queued jobs plus the last N completed/failed jobs in the lookback

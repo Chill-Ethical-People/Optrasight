@@ -36,7 +36,7 @@ function ensureDir() {
 export class PortraitGeneratorUnavailableError extends Error {
   name = "PortraitGeneratorUnavailableError";
   tool = "asi-generate-image";
-  installHint = "Install or expose the asi-generate-image command on PATH, or upload/import generated portrait PNGs manually.";
+  installHint = "Install or expose the asi-generate-image command on PATH, or provision a curated portrait asset through the release process.";
   constructor(message = "AI portrait generator is unavailable: asi-generate-image is not installed or not on PATH.") {
     super(message);
   }

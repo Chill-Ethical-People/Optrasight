@@ -129,7 +129,10 @@ function queryKeysForKind(kind: string): unknown[][] {
     case "osint_analysis":
       return [["/api/v1/osint/findings"], ["/api/v1/osint/sources/scorecard"], ["/api/v1/osint/sources/quadrant"], ["/api/v1/osint/sources/overlap"], ["/api/v1/osint/sources/heatmaps"], ["/api/v1/operations/audit"]];
     case "hunt_query_generation":
-      return [["/api/v1/osint/hunt-queries"], ["/api/v1/operations/audit"]];
+    case "detection_rule_generation":
+      return [["/api/v1/detection-rules"], ["/api/v1/operations/audit"]];
+    case "client_digest_generation":
+      return [["/api/v1/client-profiles"], ["/api/v1/client-briefs"], ["/api/v1/operations/audit"]];
     case "osint_run":
       return [["/api/v1/osint/findings"], ["/api/v1/osint/sources/health"], ["/api/v1/operations/audit"]];
     default:

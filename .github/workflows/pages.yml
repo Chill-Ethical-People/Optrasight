@@ -1,0 +1,71 @@
+name: GitHub Pages Demo
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "site/**"
+      - "client/src/**"
+      - "client/public/brand/**"
+      - "client/public/screenshots/**"
+      - "client/public/promo/**"
+      - "data/public/portraits/curated-source/**"
+      - "package.json"
+      - "package-lock.json"
+      - "vite.config.ts"
+      - ".github/workflows/pages.yml"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy static demo
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v6
+        with:
+          enablement: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build real platform client in static-demo mode
+        run: |
+          set -euo pipefail
+          VITE_OPTRASIGHT_STATIC_DEMO=1 npx vite build
+
+          cp site/robots.txt site/sitemap.xml site/googlebf868cd0adf16fcc.html dist/public/
+          mkdir -p dist/public/data/public/portraits
+          cp -R data/public/portraits/curated-source dist/public/data/public/portraits/
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist/public
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

@@ -65,7 +65,7 @@ const SOURCE_LABEL: Record<string, string> = {
   ai_job: "AI job",
   scan: "Scanner",
   osint_reanalyze: "OSINT reanalysis",
-  global_ingest: "Global ingest",
+  global_ingest: "Source ingestion",
 };
 
 const KIND_LABEL: Record<string, string> = {
@@ -74,10 +74,11 @@ const KIND_LABEL: Record<string, string> = {
   chat_deep_dive: "CIRT deep-dive",
   finding_ai_triage: "Finding AI triage",
   osint_analysis: "OSINT AI analysis",
-  hunt_query_generation: "Hunt query generation",
+  hunt_query_generation: "Detection rule generation",
   detection_rule_generation: "Detection rule generation",
+  client_digest_generation: "Client email draft",
   osint_reanalyze: "OSINT bulk reanalysis",
-  osint_global_ingest: "Global OSINT ingest",
+  osint_global_ingest: "Refresh all sources",
 };
 
 export function isOperationJobActive(status: string): boolean {
@@ -287,8 +288,8 @@ function JobRow({
           </div>
           <div className="min-w-0">
             <div className="font-medium text-sm truncate" title={job.label}>{jobTitle(job)}</div>
-            <div className="text-xs text-muted-foreground truncate max-w-[360px]" title={job.label}>
-              {job.label || job.target || job.id}
+            <div className="text-xs text-muted-foreground truncate max-w-[360px]" title={job.target || job.label}>
+              {job.target || job.label || job.id}
             </div>
           </div>
         </div>

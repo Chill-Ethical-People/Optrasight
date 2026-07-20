@@ -59,6 +59,34 @@ async function buildAll() {
     logLevel: "info",
   });
 
+  await esbuild({
+    entryPoints: ["server/osintAnalysisWorker.ts"],
+    platform: "node",
+    bundle: true,
+    format: "cjs",
+    outfile: "dist/osintAnalysisWorker.cjs",
+    define: {
+      "process.env.NODE_ENV": '"production"',
+    },
+    minify: true,
+    external: externals,
+    logLevel: "info",
+  });
+
+  await esbuild({
+    entryPoints: ["server/chatTriageWorker.ts"],
+    platform: "node",
+    bundle: true,
+    format: "cjs",
+    outfile: "dist/chatTriageWorker.cjs",
+    define: {
+      "process.env.NODE_ENV": '"production"',
+    },
+    minify: true,
+    external: externals,
+    logLevel: "info",
+  });
+
   // v2.12: copy queryGrammars/*.md into dist so the hunt-query system prompt
   // can read the platform-specific grammar references at runtime.
   if (existsSync("server/queryGrammars")) {

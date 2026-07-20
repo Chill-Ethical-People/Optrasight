@@ -115,6 +115,10 @@ app.use((req, res, next) => {
 });
 
 app.use("/api/v1/auth/login", rateLimit({ keyPrefix: "login", windowMs: 60_000, max: 10 }));
+app.use(
+  "/api/v1/client-profiles/:cid/email-logo",
+  rateLimit({ keyPrefix: "client-logo-upload", windowMs: 15 * 60_000, max: 12 }),
+);
 
 app.use((req, res, next) => {
   const start = Date.now();

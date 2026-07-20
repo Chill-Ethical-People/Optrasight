@@ -1,11 +1,12 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { apiRequest, queryClient, setAuthToken, setOnUnauthorized, setActiveTenantId } from "./queryClient";
+import { STATIC_DEMO_MODE, STATIC_DEMO_USER } from "./staticDemoApi";
 
 export interface AuthUser {
   id: string;
   email: string;
   role: string;
-  tenant: { id: string; name: string; slug: string; plan: string };
+  tenant: { id: string; name: string; slug: string; plan: string; operatingMode: "mss" | "individual" | null };
   passwordMustChange?: boolean;
   mfaEnabled?: boolean;
   mfaVerifiedAt?: string | null;
@@ -26,6 +27,7 @@ interface AuthCtx {
 
 const Ctx = createContext<AuthCtx | null>(null);
 const HISTORY_AUTH_KEY = "__optrasightAuth";
+const TEST_AUTH_BYPASS = import.meta.env.VITE_OPTRASIGHT_TEST_AUTH_BYPASS === "1";
 let historyAuthPatchInstalled = false;
 
 type HistoryAuthState = {
@@ -42,9 +44,7 @@ function readHistoryAuthToken(): string | null {
 
 function writeHistoryAuthToken(token: string | null): void {
   if (typeof window === "undefined") return;
-  const current = (window.history.state && typeof window.history.state === "object")
-    ? { ...window.history.state }
-    : {};
+  const current = window.history.state && typeof window.history.state === "object" ? { ...window.history.state } : {};
   if (token) {
     (current as HistoryAuthState)[HISTORY_AUTH_KEY] = { token };
   } else {
@@ -88,18 +88,61 @@ export function resolveSessionAccessMode(
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   patchHistoryAuthState();
-  const [token, setTok] = useState<string | null>(() => readHistoryAuthToken());
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [loading, setLoading] = useState(() => !!readHistoryAuthToken());
-  const [activeTid, setActiveTid] = useState<string | null>(null);
+  const [token, setTok] = useState<string | null>(() =>
+    STATIC_DEMO_MODE ? "static-demo-token" : readHistoryAuthToken(),
+  );
+  const [user, setUser] = useState<AuthUser | null>(() => (STATIC_DEMO_MODE ? STATIC_DEMO_USER : null));
+  const [loading, setLoading] = useState(() => (STATIC_DEMO_MODE ? false : !!readHistoryAuthToken()));
+  const [activeTid, setActiveTid] = useState<string | null>(() =>
+    STATIC_DEMO_MODE ? STATIC_DEMO_USER.tenant.id : null,
+  );
 
   // wire token holder used by queryClient
-  useEffect(() => { setAuthToken(token); }, [token]);
-  useEffect(() => { setActiveTenantId(activeTid); }, [activeTid]);
+  useEffect(() => {
+    setAuthToken(token);
+  }, [token]);
+  useEffect(() => {
+    setActiveTenantId(activeTid);
+  }, [activeTid]);
+
+  // Manual-test only: when launched with VITE_OPTRASIGHT_TEST_AUTH_BYPASS=1,
+  // ask the server for a short-lived test session and skip the login page.
+  useEffect(() => {
+    if (STATIC_DEMO_MODE || !TEST_AUTH_BYPASS || readHistoryAuthToken()) return;
+    let cancelled = false;
+    setLoading(true);
+    apiRequest("GET", "/api/v1/auth/test-session")
+      .then((r) => r.json())
+      .then(async (data) => {
+        if (cancelled || !data?.access_token) return;
+        setTok(data.access_token);
+        setAuthToken(data.access_token);
+        writeHistoryAuthToken(data.access_token);
+        const me = await apiRequest("GET", "/api/v1/me");
+        if (!me.ok || cancelled) return;
+        const u = await me.json();
+        setUser(u);
+        setActiveTid(u.tenant?.id ?? null);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        writeHistoryAuthToken(null);
+        setTok(null);
+        setUser(null);
+        setActiveTid(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Rehydrate a still-valid server session after refresh or duplicated tab.
   // This deliberately avoids localStorage/sessionStorage/IndexedDB/cookies.
   useEffect(() => {
+    if (STATIC_DEMO_MODE) return;
     const bootToken = readHistoryAuthToken();
     if (!bootToken) return;
     let cancelled = false;
@@ -124,7 +167,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // logout on 401

@@ -15,6 +15,10 @@ import AccountSecuritySetup from "@/pages/AccountSecuritySetup";
 import AISetup from "@/pages/AISetup";
 import OsintMonitoring from "@/pages/OsintMonitoring";
 import ThreatActors from "@/pages/ThreatActors";
+import ClientProfile from "@/pages/ClientProfile";
+import ClientBriefs from "@/pages/ClientBriefs";
+import WorkspaceSetup from "@/pages/WorkspaceSetup";
+import DetectionRules from "@/pages/DetectionRules";
 import OperationsAudit from "@/pages/OperationsAudit";
 import PlatformUsers from "@/pages/PlatformUsers";
 import NotFound from "@/pages/not-found";
@@ -26,19 +30,28 @@ function stripHashQuery(path: string) {
 
 function useHashLocationWithoutQuery() {
   const [location, navigate] = useHashLocation();
-  return [stripHashQuery(location), navigate] as const;
+  // Wouter expects a mutable location tuple. `as const` creates a readonly
+  // tuple, which works at runtime but violates the router hook contract.
+  return [stripHashQuery(location), navigate] as [string, typeof navigate];
 }
 
 function ProtectedRoutes() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
+  if (loading) return null;
   if (!user) return <Login />;
   if (user.passwordMustChange || !(user.mfaEnabled && user.mfaVerifiedAt)) return <AccountSecuritySetup />;
+  if (!user.tenant.operatingMode) return <WorkspaceSetup required />;
   const reviewOnly = user.access_mode === "guest" || user.role === "reviewer";
+  const mssMode = user.tenant.operatingMode === "mss";
   if (BATCH_ONE_RELEASE && typeof window !== "undefined") {
     const hash = window.location.hash || "#/";
     const rawPath = hash.startsWith("#") ? hash.slice(1) : hash;
     const hashPath = stripHashQuery(rawPath);
-    if (reviewOnly && !["/", "/osint", "/intel", "/threat-actors"].includes(hashPath)) {
+    if (!mssMode && ["/client-profile", "/client-briefs"].includes(hashPath)) {
+      window.location.hash = "#/osint";
+      return <OsintMonitoring />;
+    }
+    if (reviewOnly && !["/", "/osint", "/intel", "/threat-actors", "/detection-rules"].includes(hashPath)) {
       window.location.hash = "#/osint";
       return <OsintMonitoring />;
     }
@@ -61,6 +74,14 @@ function ProtectedRoutes() {
           return <OsintMonitoring />;
         case "/threat-actors":
           return <ThreatActors />;
+        case "/client-profile":
+          return reviewOnly || !mssMode ? <OsintMonitoring /> : <ClientProfile />;
+        case "/client-briefs":
+          return reviewOnly || !mssMode ? <OsintMonitoring /> : <ClientBriefs />;
+        case "/workspace-setup":
+          return user.role === "admin" ? <WorkspaceSetup /> : <OsintMonitoring />;
+        case "/detection-rules":
+          return <DetectionRules />;
         case "/ai-setup":
           return reviewOnly ? <OsintMonitoring /> : <AISetup />;
         case "/operations-audit":
@@ -75,6 +96,10 @@ function ProtectedRoutes() {
       <Route path="/" component={OsintMonitoring} />
       <Route path="/osint" component={OsintMonitoring} />
       <Route path="/threat-actors" component={ThreatActors} />
+      <Route path="/client-profile">{reviewOnly || !mssMode ? <OsintMonitoring /> : <ClientProfile />}</Route>
+      <Route path="/client-briefs">{reviewOnly || !mssMode ? <OsintMonitoring /> : <ClientBriefs />}</Route>
+      <Route path="/workspace-setup">{user.role === "admin" ? <WorkspaceSetup /> : <OsintMonitoring />}</Route>
+      <Route path="/detection-rules" component={DetectionRules} />
       <Route path="/ai-setup">{reviewOnly ? <OsintMonitoring /> : <AISetup />}</Route>
       <Route path="/operations-audit">{reviewOnly ? <OsintMonitoring /> : <OperationsAudit />}</Route>
       <Route path="/platform-users">{user.role === "admin" ? <PlatformUsers /> : <OsintMonitoring />}</Route>

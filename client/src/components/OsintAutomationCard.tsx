@@ -11,6 +11,8 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useAiAvailability } from "@/lib/aiAvailability";
+import { STATIC_DEMO_MODE } from "@/lib/staticDemoApi";
+import { showStaticDemoNotice } from "@/lib/staticDemoNotice";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
@@ -73,6 +75,7 @@ export default function OsintAutomationCard() {
   const { toast } = useToast();
   const aiAvailability = useAiAvailability();
   const aiDisabled = !aiAvailability.hasUsableProvider;
+  const readOnly = STATIC_DEMO_MODE;
   const qc = useQueryClient();
 
   const { data, isLoading } = useQuery<AutomationResponse>({
@@ -157,15 +160,16 @@ export default function OsintAutomationCard() {
     draft.analyzeMaxPerTick !== s.analyzeMaxPerTick;
 
   return (
-    <Card data-testid="card-osint-automation">
+    <Card className={readOnly ? "bg-muted/20" : undefined} data-testid="card-osint-automation">
       <CardHeader className="space-y-1">
         <CardTitle className="flex items-center gap-2">
           <Zap className="h-4 w-4 text-amber-500" />
           OSINT automation
         </CardTitle>
         <p className="text-xs text-muted-foreground">
-          Run intel fetching on a schedule and let the AI analyse each new finding in the background. Deep dive then
-          returns instantly because the per-intel CIRT analysis is already cached.
+          {readOnly
+            ? "Static demo mode shows the automation posture as a read-only reference. Scheduling, manual runs, and cache resets are disabled."
+            : "Run intel fetching on a schedule and let the AI analyse each new finding in the background. Deep dive then returns instantly because the per-intel CIRT analysis is already cached."}
         </p>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -175,13 +179,14 @@ export default function OsintAutomationCard() {
             <div className="space-y-1">
               <Label className="text-sm font-medium">Auto-fetch new intel</Label>
               <p className="text-xs text-muted-foreground">
-                Pulls the workspace's monitored sources every interval. Same logic as the manual <em>Scan now</em> button.
+                Pulls the workspace's monitored sources on the configured schedule.
               </p>
             </div>
             <Switch
               data-testid="switch-auto-fetch"
               checked={draft.autoFetchEnabled}
               onCheckedChange={(v) => setDraft({ ...draft, autoFetchEnabled: v })}
+              disabled={readOnly}
             />
           </div>
           <div className="flex items-center gap-3">
@@ -194,7 +199,7 @@ export default function OsintAutomationCard() {
               className="w-24"
               value={draft.fetchIntervalMin}
               onChange={(e) => setDraft({ ...draft, fetchIntervalMin: Number(e.target.value || 60) })}
-              disabled={!draft.autoFetchEnabled}
+              disabled={readOnly || !draft.autoFetchEnabled}
               data-testid="input-fetch-interval"
             />
             <span className="text-xs text-muted-foreground">minutes (15\u20131440)</span>
@@ -215,9 +220,16 @@ export default function OsintAutomationCard() {
             <Button
               size="sm"
               variant="outline"
-              className="h-7"
-              onClick={() => fetchNowMutation.mutate()}
+              className={`h-7 ${readOnly ? "cursor-not-allowed opacity-55 hover:opacity-70" : ""}`}
+              onClick={() => {
+                if (readOnly) {
+                  showStaticDemoNotice({ kind: "source", action: "Manual source fetch restricted" });
+                  return;
+                }
+                fetchNowMutation.mutate();
+              }}
               disabled={fetchNowMutation.isPending}
+              title={readOnly ? "Disabled in the static public demo" : undefined}
               data-testid="button-fetch-now"
             >
               {fetchNowMutation.isPending ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <RefreshCw className="h-3 w-3 mr-1" />}
@@ -243,6 +255,7 @@ export default function OsintAutomationCard() {
               data-testid="switch-auto-analyze"
               checked={draft.autoAnalyzeEnabled}
               onCheckedChange={(v) => setDraft({ ...draft, autoAnalyzeEnabled: v })}
+              disabled={readOnly}
             />
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -252,7 +265,7 @@ export default function OsintAutomationCard() {
                 type="number" min={1} max={8} step={1}
                 value={draft.analyzeConcurrency}
                 onChange={(e) => setDraft({ ...draft, analyzeConcurrency: Number(e.target.value || 2) })}
-                disabled={!draft.autoAnalyzeEnabled}
+                disabled={readOnly || !draft.autoAnalyzeEnabled}
                 data-testid="input-analyze-concurrency"
               />
             </div>
@@ -262,7 +275,7 @@ export default function OsintAutomationCard() {
                 type="number" min={1} max={50} step={1}
                 value={draft.analyzeMaxPerTick}
                 onChange={(e) => setDraft({ ...draft, analyzeMaxPerTick: Number(e.target.value || 8) })}
-                disabled={!draft.autoAnalyzeEnabled}
+                disabled={readOnly || !draft.autoAnalyzeEnabled}
                 data-testid="input-analyze-max"
               />
             </div>
@@ -301,36 +314,54 @@ export default function OsintAutomationCard() {
               </Badge>
             )}
             <Button
-              size="sm" variant="outline" className="h-7"
-              onClick={() => analyzeNowMutation.mutate()}
-              disabled={!canRunAnalyzeNow({
+              size="sm" variant="outline" className={`h-7 ${readOnly ? "cursor-not-allowed opacity-55 hover:opacity-70" : ""}`}
+              onClick={() => {
+                if (readOnly) {
+                  showStaticDemoNotice({ kind: "ai", action: "Background analysis restricted" });
+                  return;
+                }
+                analyzeNowMutation.mutate();
+              }}
+              disabled={!readOnly && !canRunAnalyzeNow({
                 mutationPending: analyzeNowMutation.isPending,
                 autoAnalyzeEnabled: s.autoAnalyzeEnabled,
                 aiDisabled,
               })}
-              title={aiAvailability.disabledReason}
+              title={readOnly ? "Disabled in the static public demo" : aiAvailability.disabledReason}
               data-testid="button-analyze-now"
             >
               {analyzeNowMutation.isPending ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Zap className="h-3 w-3 mr-1" />}
               Analyse now
             </Button>
             <Button
-              size="sm" variant="ghost" className="h-7"
-              onClick={() => resetCacheMutation.mutate(true)}
-              disabled={resetCacheMutation.isPending || q.failed === 0}
+              size="sm" variant="ghost" className={`h-7 ${readOnly ? "cursor-not-allowed opacity-55 hover:opacity-70" : ""}`}
+              onClick={() => {
+                if (readOnly) {
+                  showStaticDemoNotice({ kind: "write", action: "Analysis cache update restricted" });
+                  return;
+                }
+                resetCacheMutation.mutate(true);
+              }}
+              disabled={!readOnly && (resetCacheMutation.isPending || q.failed === 0)}
+              title={readOnly ? "Disabled in the static public demo" : undefined}
               data-testid="button-retry-failed"
             >
               <RotateCcw className="h-3 w-3 mr-1" />
               Retry failed ({q.failed})
             </Button>
             <Button
-              size="sm" variant="ghost" className="h-7 text-muted-foreground"
+              size="sm" variant="ghost" className={`h-7 text-muted-foreground ${readOnly ? "cursor-not-allowed opacity-55 hover:opacity-70" : ""}`}
               onClick={() => {
+                if (readOnly) {
+                  showStaticDemoNotice({ kind: "write", action: "Analysis cache reset restricted" });
+                  return;
+                }
                 if (window.confirm(`Reset CIRT analysis cache for ALL ${q.total} findings? The background analyser will re-run each one.`)) {
                   resetCacheMutation.mutate(false);
                 }
               }}
               disabled={resetCacheMutation.isPending}
+              title={readOnly ? "Disabled in the static public demo" : undefined}
               data-testid="button-reset-all"
             >
               Reset all
@@ -344,16 +375,24 @@ export default function OsintAutomationCard() {
           <p className="text-xs text-muted-foreground">
             Background scheduler runs every 60s and respects the interval above.
           </p>
-          <Button
+            <Button
             size="sm"
-            disabled={!dirty || patchMutation.isPending}
-            onClick={() => patchMutation.mutate({
-              autoFetchEnabled: draft.autoFetchEnabled,
-              fetchIntervalMin: draft.fetchIntervalMin,
-              autoAnalyzeEnabled: draft.autoAnalyzeEnabled,
-              analyzeConcurrency: draft.analyzeConcurrency,
-              analyzeMaxPerTick: draft.analyzeMaxPerTick,
-            })}
+            disabled={!readOnly && (!dirty || patchMutation.isPending)}
+            title={readOnly ? "Disabled in the static public demo" : undefined}
+            className={readOnly ? "cursor-not-allowed opacity-55 hover:opacity-70" : undefined}
+            onClick={() => {
+              if (readOnly) {
+                showStaticDemoNotice({ kind: "write", action: "Automation settings restricted" });
+                return;
+              }
+              patchMutation.mutate({
+                autoFetchEnabled: draft.autoFetchEnabled,
+                fetchIntervalMin: draft.fetchIntervalMin,
+                autoAnalyzeEnabled: draft.autoAnalyzeEnabled,
+                analyzeConcurrency: draft.analyzeConcurrency,
+                analyzeMaxPerTick: draft.analyzeMaxPerTick,
+              });
+            }}
             data-testid="button-save-automation"
           >
             {patchMutation.isPending && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}

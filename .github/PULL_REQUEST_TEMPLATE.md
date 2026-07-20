@@ -10,7 +10,8 @@
 
 ## Verification
 
-- [ ] `npm run lint`
+- [ ] `npm run format:baseline`
+- [ ] `npm run lint:strict`
 - [ ] `npm run typecheck:baseline`
 - [ ] `npm test`
 - [ ] `npm run build`
@@ -19,8 +20,10 @@
 
 - [ ] Public default credentials remain forced through password change and MFA enrollment
 - [ ] New server-side URL fetches use SSRF-safe validation
+- [ ] Browser-supplied files use the validated upload service; no route writes request bytes or request-derived paths
 - [ ] New client API calls use `apiRequest`, not raw `fetch`
 - [ ] New errors avoid returning internal exception details to clients
+- [ ] CodeQL and Snyk workflow coverage remains enabled
 
 ## Behavior Changes
 

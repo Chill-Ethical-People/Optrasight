@@ -117,6 +117,8 @@ export interface RunChatTriageOpts {
   range: ChatRangeKey;
   maxItems?: number;
   findingIds?: string[];
+  analysisMode?: "cirt" | "client_impact";
+  clientIds?: string[];
 }
 export interface RunChatTriageResult {
   reportMd: string;
@@ -124,28 +126,103 @@ export interface RunChatTriageResult {
   itemsAnalysed: number;
   providerLabel: string | null;
   aiDiagnostic: AiDiagnosticInfo | null;
+  clientSelections?: Array<{
+    clientId: string;
+    focusedFindingIds: string[];
+    generalFindingIds: string[];
+  }>;
   generatedAt: string;
 }
 
-function workspaceClientProfile(): {
-  industries: string[]; geos: string[]; technologies: string[];
+function workspaceClientProfile(storage: any, tenantId: string, selectedClientIds: string[] = []): {
+  industries: string[]; geos: string[]; technologies: string[]; clients?: any[];
 } {
-  return {
-    industries: ["security-operations"],
-    geos: ["Global"],
-    technologies: ["osint", "threat-intelligence", "detection-engineering"],
-  };
+  const scope = storage.getClientAnalysisScope?.(tenantId);
+  if (scope?.clients?.length) {
+    const selected = selectedClientIds.length
+      ? selectedClientIds.map((clientId) => scope.clients.find((client: any) => client.id === clientId)).filter(Boolean)
+      : [];
+    const sanitise = (value: string, clientName: string) => String(value || "")
+      .replace(new RegExp(clientName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), "[CLIENT]")
+      .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[EMAIL]")
+      .replace(/\b(?:[a-z0-9-]+\.)+[a-z]{2,}\b/gi, "[DOMAIN]");
+    return {
+      clients: selected.map((client: any, index: number) => ({
+        profileRef: `CLIENT-${String(index + 1).padStart(2, "0")}`,
+        industries: client.industries.map((option: any) => option.label),
+        geographies: client.geographies.map((option: any) => option.label),
+        technologies: client.technologies.map((option: any) => option.label),
+        mappingContext: (client.mappingTerms || []).map((term: string) => sanitise(term, client.name)).filter(Boolean),
+      })),
+      industries: Array.from(new Set(selected.flatMap((client: any) => client.industries.map((option: any) => option.label)))),
+      geos: Array.from(new Set(selected.flatMap((client: any) => client.geographies.map((option: any) => option.label)))),
+      technologies: Array.from(new Set(selected.flatMap((client: any) => client.technologies.map((option: any) => option.label)))),
+    };
+  }
+  return { industries: [], geos: [], technologies: [] };
 }
 
 export async function runChatTriage(storage: any, opts: RunChatTriageOpts): Promise<RunChatTriageResult> {
   const max = opts.maxItems ?? 60;
+  const analysisMode = opts.analysisMode ?? "cirt";
+  const selectedProfiles = analysisMode === "client_impact"
+    ? (opts.clientIds ?? []).map((clientId) => storage.getClientProfile(opts.tenantId, clientId)).filter(Boolean)
+    : [];
+  const sanitiseClientNames = (value: string | null | undefined) => {
+    let output = String(value || "");
+    selectedProfiles.forEach((profile: any, index: number) => {
+      const escaped = String(profile.name || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      if (escaped) output = output.replace(new RegExp(escaped, "gi"), `CLIENT-${String(index + 1).padStart(2, "0")}`);
+    });
+    return output;
+  };
+  const selectedProfileRefs = new Map((opts.clientIds ?? []).map((clientId, index) => [
+    clientId,
+    `CLIENT-${String(index + 1).padStart(2, "0")}`,
+  ]));
+  const priorClientMatchesFor = (finding: OsintFindingDTO) => {
+    if (analysisMode !== "client_impact") return [];
+    const hints = new Map<string, { profileRef: string; relevanceScore: number; reason: string; analystAssigned: boolean }>();
+    for (const match of finding.aiClientMatches ?? []) {
+      const profileRef = selectedProfileRefs.get(match.clientId);
+      if (!profileRef || finding.clientMatchDecisions?.[match.clientId] === "dismissed") continue;
+      const analystAssigned = finding.clientMatchDecisions?.[match.clientId] === "approved"
+        || ((finding.clientTags ?? []).includes(match.clientId) && finding.clientMatchDecisions?.[match.clientId] !== "ai_assigned");
+      hints.set(profileRef, {
+        profileRef,
+        relevanceScore: Math.max(0, Math.min(1, Number(match.relevanceScore) || 0)),
+        reason: sanitiseClientNames(match.reason).slice(0, 600),
+        analystAssigned,
+      });
+    }
+    for (const clientId of finding.clientTags ?? []) {
+      const profileRef = selectedProfileRefs.get(clientId);
+      if (!profileRef || hints.has(profileRef)) continue;
+      hints.set(profileRef, {
+        profileRef,
+        relevanceScore: 1,
+        reason: "An analyst assigned this finding to the client profile; validate the assignment against the supplied evidence.",
+        analystAssigned: true,
+      });
+    }
+    return Array.from(hints.values());
+  };
 
   const sourceFindings = opts.findingIds?.length
     ? opts.findingIds.map((fid) => storage.getOsintFinding(opts.tenantId, fid)).filter(Boolean)
     : storage.listOsintFindings(opts.tenantId);
-  const inRange = filterByRange(sourceFindings, opts.range)
-    .sort((a, b) => (Date.parse(b.publishedAt || b.createdAt || "") - Date.parse(a.publishedAt || a.createdAt || "")))
-    .slice(0, max);
+  const rangedFindings = filterByRange(sourceFindings, opts.range)
+    .sort((a, b) => (Date.parse(b.publishedAt || b.createdAt || "") - Date.parse(a.publishedAt || a.createdAt || "")));
+  const inRange = analysisMode === "client_impact" && !opts.findingIds?.length
+    ? Array.from(new Map([
+      ...rangedFindings
+        .map((finding) => ({ finding, score: Math.max(0, ...priorClientMatchesFor(finding).map((match) => match.relevanceScore)) }))
+        .filter(({ score }) => score > 0)
+        .sort((a, b) => b.score - a.score || Date.parse(b.finding.publishedAt || b.finding.createdAt || "") - Date.parse(a.finding.publishedAt || a.finding.createdAt || ""))
+        .map(({ finding }) => finding),
+      ...rangedFindings,
+    ].map((finding) => [finding.id, finding])).values()).slice(0, max)
+    : rangedFindings.slice(0, max);
 
   // Pre-fetch with a small per-item budget so triage prompt stays compact.
   const fetched = await fetchSourcesBatch(inRange.map((f) => f.url), { includeReferences: true, maxReferenceLinks: 2 });
@@ -158,26 +235,40 @@ export async function runChatTriage(storage: any, opts: RunChatTriageOpts): Prom
       id: f.id,
       source: f.sourceName,
       category: f.sourceCategory,
-      title: f.title,
+      title: analysisMode === "client_impact" ? sanitiseClientNames(f.title) : f.title,
       url: f.url,
       publishedAt: f.publishedAt,
       severity: f.severity,
       cveIds: f.cveIds || [],
       affectedTech: f.affectedTech || [],
       threatActors: f.threatActors || [],
-      summary: f.summary,
+      intelCategory: f.intelCategory ?? null,
+      sectors: f.sectors || [],
+      regions: f.regions || [],
+      attackTechniques: f.attackTechniques || [],
+      clusterId: f.clusterId ?? null,
+      aiRelevanceScore: f.aiRelevanceScore ?? null,
+      analystAssessment: analysisMode === "client_impact" ? sanitiseClientNames(f.analystAssessment) : (f.analystAssessment ?? null),
+      analystDisposition: f.analystDisposition ?? null,
+      analystConfidence: f.analystConfidence ?? null,
+      analystImpact: f.analystImpact ?? null,
+      priorClientMatches: priorClientMatchesFor(f),
+      summary: analysisMode === "client_impact" ? sanitiseClientNames(f.summary) : f.summary,
       // Tight abstract for triage to keep token cost low.
-      sourceContent: body ? body.slice(0, 1200) : null,
+      sourceContent: body ? (analysisMode === "client_impact" ? sanitiseClientNames(body.slice(0, 1200)) : body.slice(0, 1200)) : null,
     };
   });
 
-  const clientProfile = workspaceClientProfile();
+  const clientProfile = analysisMode === "client_impact"
+    ? workspaceClientProfile(storage, opts.tenantId, opts.clientIds ?? [])
+    : { industries: [], geos: [], technologies: [], clients: [] };
   const tenantProvider = storage.resolveAiProvider
     ? storage.resolveAiProvider(opts.tenantId, "osint_overview")
     : null;
 
   const input: ChatTriageInput = {
     rangeLabel: RANGE_LABEL[opts.range],
+    analysisMode,
     clientProfile,
     findings: triageItems,
   };
@@ -185,11 +276,31 @@ export async function runChatTriage(storage: any, opts: RunChatTriageOpts): Prom
   let reportMd = "";
   let providerLabel: string | null = null;
   let aiDiagnostic: AiDiagnosticInfo | null = null;
+  let clientSelections: RunChatTriageResult["clientSelections"];
   if (tenantProvider) {
     const { result: live, diag } = chatTriageLiveDiagnostic(input, tenantProvider);
     aiDiagnostic = diagToInfo(diag);
     if (live) {
       reportMd = live.reportMd;
+      if (analysisMode === "client_impact") {
+        const clientIdByRef = new Map((opts.clientIds ?? []).map((clientId, index) => [
+          `CLIENT-${String(index + 1).padStart(2, "0")}`,
+          clientId,
+        ]));
+        clientSelections = (live.clientSelections ?? []).flatMap((selection) => {
+          const clientId = clientIdByRef.get(selection.profileRef);
+          return clientId ? [{
+            clientId,
+            focusedFindingIds: selection.focusedFindingIds,
+            generalFindingIds: selection.generalFindingIds,
+          }] : [];
+        });
+        selectedProfiles.forEach((profile: any, index: number) => {
+          const profileRef = `CLIENT-${String(index + 1).padStart(2, "0")}`;
+          const clientName = String(profile?.name || "").trim();
+          if (clientName) reportMd = reportMd.replace(new RegExp(`\\b${profileRef}\\b`, "g"), () => clientName);
+        });
+      }
       providerLabel = tenantProvider.label || tenantProvider.provider;
     } else if (diag && !diag.ok) {
       // Provider was configured but the live call failed — surface the
@@ -207,6 +318,7 @@ export async function runChatTriage(storage: any, opts: RunChatTriageOpts): Prom
     itemsAnalysed: triageItems.length,
     providerLabel,
     aiDiagnostic,
+    ...(analysisMode === "client_impact" ? { clientSelections: clientSelections ?? [] } : {}),
     generatedAt: new Date().toISOString(),
   };
 }
@@ -240,7 +352,7 @@ export async function runChatDeepDive(storage: any, opts: RunChatDeepDiveOpts): 
 
   if (findings.length === 0) throw new Error("no matching findings");
 
-  const clientProfile = workspaceClientProfile();
+  const clientProfile = workspaceClientProfile(storage, opts.tenantId);
   const tenantProvider = storage.resolveAiProvider
     ? storage.resolveAiProvider(opts.tenantId, "osint_analysis")
     : null;

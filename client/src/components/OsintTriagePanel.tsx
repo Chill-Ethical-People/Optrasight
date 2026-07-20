@@ -6,19 +6,24 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { AlertTriangle, Brain, Check, Clock, Copy, Download, Eye, FileText, Loader2, Search, Sparkles } from "lucide-react";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { AlertTriangle, Brain, Check, Clock, Copy, Download, Eye, FileText, Loader2, Search, Sparkles, Users } from "lucide-react";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { useAiAvailability } from "@/lib/aiAvailability";
-import type { OsintFindingDTO } from "@shared/schema";
+import { STATIC_DEMO_MODE } from "@/lib/staticDemoApi";
+import { showStaticDemoNotice } from "@/lib/staticDemoNotice";
+import { useAuth } from "@/lib/auth";
+import type { ClientProfileDTO, OsintFindingDTO } from "@shared/schema";
 
 export type RangeKey = "1d" | "7d" | "1m" | "1q" | "1y" | "all";
 
@@ -36,6 +41,13 @@ interface ChatTriageResponse {
   rangeLabel: string;
   itemsAnalysed: number;
   providerLabel: string | null;
+  targetLabel?: string | null;
+  drafts?: Array<{
+    clientId: string;
+    status: "created" | "skipped" | "failed";
+    digestId?: string;
+    message?: string;
+  }>;
   generatedAt: string;
 }
 
@@ -56,6 +68,7 @@ interface ChatDeepDiveResponse {
 interface AiJobSnapshot<T = any> {
   id: string;
   kind?: string;
+  targetLabel?: string | null;
   status: "queued" | "running" | "completed" | "failed";
   progressPct: number;
   result: T | null;
@@ -70,7 +83,7 @@ interface CirtJobSummary {
   id: string;
   kind: "chat_triage" | "chat_deep_dive";
   status: "completed" | "failed";
-  payload: { range?: RangeKey; findingIds?: string[] };
+  payload: { range?: RangeKey; findingIds?: string[]; analysisMode?: "cirt" | "client_impact"; clientIds?: string[] };
   providerLabel: string | null;
   createdAt: string;
   completedAt: string | null;
@@ -166,7 +179,7 @@ function previewFromJob(job: AiJobSnapshot<any> | undefined): PreviewResult | nu
     status: job.status === "failed" ? "failed" : "completed",
     result: job.result,
     error: job.error,
-    label: job.kind === "chat_triage" ? "CIRT triage" : "CIRT deep-dive",
+    label: job.targetLabel ?? (job.kind === "chat_triage" ? "CIRT triage" : "CIRT deep-dive"),
     providerLabel: job.providerLabel,
     completedAt: job.completedAt,
   };
@@ -180,11 +193,21 @@ interface Props {
 /** Inline triage + deep-dive panel — replaces the old AI Overview card. */
 export default function OsintTriagePanel({ range, findings }: Props) {
   const { toast } = useToast();
+  const { user } = useAuth();
   const aiAvailability = useAiAvailability();
   const aiDisabled = !aiAvailability.hasUsableProvider;
   const [mode, setMode] = useState<"triage" | "deepdive">("triage");
   const [previewJobId, setPreviewJobId] = useState<string | null>(null);
   const [inlinePreview, setInlinePreview] = useState<PreviewResult | null>(null);
+  const [triageMode, setTriageMode] = useState<"cirt" | "client_impact">("cirt");
+  const [selectedClientIds, setSelectedClientIds] = useState<string[]>([]);
+  const [profilePickerOpen, setProfilePickerOpen] = useState(false);
+
+  const { data: clientProfileData } = useQuery<{ profiles: ClientProfileDTO[] }>({
+    queryKey: ["/api/v1/client-profiles"],
+    enabled: user?.tenant.operatingMode === "mss",
+  });
+  const clientProfiles = (clientProfileData?.profiles ?? []).filter((profile) => profile.isActive);
 
   const { data: historyData, refetch: refetchCirtHistory } = useQuery<{ jobs: CirtJobSummary[] }>({
     queryKey: ["/api/v1/osint/ai-jobs/history"],
@@ -207,10 +230,29 @@ export default function OsintTriagePanel({ range, findings }: Props) {
   const activePreview = inlinePreview ?? previewFromJob(previewJob);
 
   useEffect(() => {
-    const link = parseCirtDeepLink(window.location.hash || "");
-    if (!link) return;
-    setMode(link.mode);
-    if (link.jobId) setPreviewJobId(link.jobId);
+    const openDeepLink = (hash: string) => {
+      const link = parseCirtDeepLink(hash || "");
+      if (!link) return;
+      setMode(link.mode);
+      if (link.jobId) {
+        setInlinePreview(null);
+        setPreviewJobId(link.jobId);
+      }
+    };
+    openDeepLink(window.location.hash || "");
+
+    const onHashChange = () => openDeepLink(window.location.hash || "");
+    const onAiJobOpen = (event: Event) => {
+      const detail = (event as CustomEvent<{ hash?: string }>).detail;
+      openDeepLink(detail?.hash || window.location.hash || "");
+    };
+
+    window.addEventListener("hashchange", onHashChange);
+    window.addEventListener("optrasight:ai-job-open", onAiJobOpen);
+    return () => {
+      window.removeEventListener("hashchange", onHashChange);
+      window.removeEventListener("optrasight:ai-job-open", onAiJobOpen);
+    };
   }, []);
 
   // Triage state
@@ -269,10 +311,17 @@ export default function OsintTriagePanel({ range, findings }: Props) {
     try {
       // v2.27 — async job + poll. POST returns instantly; the long-running
       // model call happens server-side, immune to edge-proxy timeouts.
-      await startAiJob("/api/v1/osint/chat/triage", { range });
+      await startAiJob("/api/v1/osint/chat/triage", {
+        range,
+        analysisMode: triageMode,
+        clientIds: triageMode === "client_impact" ? selectedClientIds : undefined,
+      });
+      setSelectedClientIds([]);
+      setProfilePickerOpen(false);
+      setTriageMode("cirt");
       refetchCirtHistory();
       toast({
-        title: "CIRT triage queued",
+        title: triageMode === "client_impact" ? "Client-impact assessment queued" : "CIRT triage queued",
         description: "It will keep running server-side. Open it from the background jobs tray or Recent CIRT Results.",
       });
     } catch (e: any) {
@@ -317,54 +366,129 @@ export default function OsintTriagePanel({ range, findings }: Props) {
     return m > 0 ? `${m}m ${s}s` : `${s}s`;
   }
 
-  function toggleOne(id: string) { setSelected((s) => ({ ...s, [id]: !s[id] })); }
+  const deepDiveSelectionReadOnly = STATIC_DEMO_MODE;
+
+  function toggleOne(id: string) {
+    if (deepDiveSelectionReadOnly) {
+      showStaticDemoNotice({ kind: "selection", action: "Deep-dive selection locked" });
+      return;
+    }
+    setSelected((s) => ({ ...s, [id]: !s[id] }));
+  }
   function selectAllVisible() {
+    if (deepDiveSelectionReadOnly) {
+      showStaticDemoNotice({ kind: "selection", action: "Deep-dive selection locked" });
+      return;
+    }
     const next: Record<string, boolean> = {};
     for (const f of filteredFindings.slice(0, 20)) next[f.id] = true;
     setSelected(next);
   }
-  function clearAll() { setSelected({}); }
+  function clearAll() {
+    if (deepDiveSelectionReadOnly) {
+      showStaticDemoNotice({ kind: "selection", action: "Deep-dive selection locked" });
+      return;
+    }
+    setSelected({});
+  }
   function closePreview() {
     setInlinePreview(null);
     setPreviewJobId(null);
+    setMode("triage");
   }
 
   return (
-    <Card className="p-4 border-primary/30 bg-gradient-to-br from-primary/5 via-background to-background" data-testid="card-ai-triage-panel">
-      <div className="flex items-center gap-2 mb-2">
-        <Brain size={14} className="text-primary" />
-        <div className="text-sm font-medium">CIRT Triage &amp; Deep Dive</div>
-      </div>
-      <div className="text-xs text-muted-foreground mb-3">
-        CIRT triage groups current findings into priority buckets and preserves source context for review. Deep Dive runs per-finding analysis on a selected subset.
-      </div>
+    <Card className="overflow-hidden border-primary/25 bg-background" data-testid="card-ai-triage-panel">
+      <Tabs value={mode} onValueChange={(v) => setMode(v as any)}>
+        <TabsContent value="triage" className="m-0">
+          <div className="p-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+              <div className="flex min-w-0 items-center gap-2.5 lg:mr-auto">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-primary/20 bg-primary/5 text-primary">
+                  <Brain size={15} />
+                </span>
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold">CIRT analysis</div>
+                  <div className="truncate text-[11px] text-muted-foreground">{RANGE_LABEL[range]} · evidence-backed tracked result</div>
+                </div>
+              </div>
 
-      <Tabs value={mode} onValueChange={(v) => setMode(v as any)} className="space-y-3">
-        <TabsList data-testid="tabs-triage-panel-mode" className="w-full">
-          <TabsTrigger value="triage" className="flex-1" data-testid="tab-triage-inline">
-            <Sparkles size={13} className="mr-1.5" /> Initial Triage
-          </TabsTrigger>
-          <TabsTrigger value="deepdive" className="flex-1" data-testid="tab-deepdive-inline">
-            <Search size={13} className="mr-1.5" /> Deep Dive
-          </TabsTrigger>
-        </TabsList>
+              <div className="inline-flex h-9 shrink-0 rounded-md border border-border bg-muted/25 p-0.5" data-testid="analysis-mode-selector">
+                <button
+                  type="button"
+                  onClick={() => { setTriageMode("cirt"); setSelectedClientIds([]); setProfilePickerOpen(false); }}
+                  className={`cursor-pointer rounded px-3 text-[11px] font-medium transition-colors duration-200 ${triageMode === "cirt" ? "bg-background text-foreground ring-1 ring-border" : "text-muted-foreground hover:text-foreground"}`}
+                  aria-pressed={triageMode === "cirt"}
+                >
+                  CIRT triage
+                </button>
+                {user?.tenant.operatingMode === "mss" ? (
+                  <button
+                    type="button"
+                    onClick={() => setTriageMode("client_impact")}
+                    className={`cursor-pointer rounded px-3 text-[11px] font-medium transition-colors duration-200 ${triageMode === "client_impact" ? "bg-background text-foreground ring-1 ring-border" : "text-muted-foreground hover:text-foreground"}`}
+                    aria-pressed={triageMode === "client_impact"}
+                  >
+                    Client impact
+                  </button>
+                ) : null}
+              </div>
 
-        <TabsContent value="triage" className="space-y-3 mt-2">
-          <div className="text-xs text-muted-foreground">
-            Generates a CIRT Tier 1-4 bucketed report scoped to <strong>{RANGE_LABEL[range]}</strong>. OptraSight fetches source context before triage so the report stays tied to the original evidence.
-          </div>
-          <Button
-            onClick={runTriage}
-            disabled={triageLoading || aiDisabled}
-            title={aiAvailability.disabledReason}
-            data-testid="button-run-triage-inline"
-          >
-            {triageLoading
-              ? <><Loader2 size={14} className="mr-1.5 animate-spin" />Running CIRT triage…</>
-              : <><Sparkles size={14} className="mr-1.5" />Run CIRT Triage on {RANGE_LABEL[range]}</>}
-          </Button>
+              {triageMode === "client_impact" ? (
+                <Popover open={profilePickerOpen} onOpenChange={setProfilePickerOpen}>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="h-9 min-w-40 justify-start text-xs" data-testid="button-select-client-profiles">
+                      <Users size={13} className="mr-2" />
+                      {selectedClientIds.length ? `${selectedClientIds.length} client${selectedClientIds.length === 1 ? "" : "s"}` : "Select clients"}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent align="end" className="w-[min(360px,calc(100vw-2rem))] p-0 motion-reduce:animate-none" data-testid="client-impact-profile-selector">
+                    <div className="border-b border-border px-3 py-2.5">
+                      <div className="text-xs font-semibold">Client Profiles</div>
+                      <div className="mt-0.5 text-[10px] leading-4 text-muted-foreground">Names are replaced before AI processing.</div>
+                    </div>
+                    <div className="max-h-56 overflow-y-auto p-1.5">
+                      {clientProfiles.map((profile) => (
+                        <label key={profile.id} className="flex cursor-pointer items-center gap-2 rounded px-2.5 py-2 text-xs transition-colors duration-200 hover:bg-muted/40">
+                          <Checkbox
+                            checked={selectedClientIds.includes(profile.id)}
+                            onCheckedChange={(checked) => setSelectedClientIds((current) => checked
+                              ? Array.from(new Set([...current, profile.id]))
+                              : current.filter((clientId) => clientId !== profile.id))}
+                          />
+                          <span className="min-w-0 flex-1 truncate">{profile.name}</span>
+                        </label>
+                      ))}
+                      {clientProfiles.length === 0 ? <div className="px-3 py-5 text-center text-[11px] text-muted-foreground">No active Client Profiles.</div> : null}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              ) : null}
+
+              <Button
+                onClick={runTriage}
+                disabled={triageLoading || aiDisabled || (triageMode === "client_impact" && selectedClientIds.length === 0)}
+                title={aiAvailability.disabledReason}
+                className="h-9 shrink-0 transition-transform duration-150 active:scale-[0.98] motion-reduce:transform-none"
+                data-testid="button-run-triage-inline"
+              >
+                {triageLoading
+                  ? <><Loader2 size={14} className="mr-1.5 animate-spin" />Submitting</>
+                  : <><Sparkles size={14} className="mr-1.5" />{triageMode === "client_impact" ? "Assess clients" : "Run triage"}</>}
+              </Button>
+            </div>
+            {triageMode === "client_impact" && selectedClientIds.length > 0 ? (
+              <div className="mt-3 flex animate-in flex-wrap items-center gap-1.5 border-t border-border pt-3 duration-200 fade-in-0 slide-in-from-top-1 motion-reduce:animate-none" aria-live="polite">
+                <span className="mr-1 text-[10px] text-muted-foreground">Assessment scope</span>
+                {selectedClientIds.map((clientId) => (
+                  <Badge key={clientId} variant="secondary" className="text-[9px] font-medium">
+                    {clientProfiles.find((profile) => profile.id === clientId)?.name ?? "Client Profile"}
+                  </Badge>
+                ))}
+              </div>
+            ) : null}
           {triageLoading && (
-            <div className="text-[11px] text-muted-foreground flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-center" data-testid="text-triage-status">
+            <div className="mt-3 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-center text-[11px] text-muted-foreground" data-testid="text-triage-status">
               <span className="flex items-center gap-1.5">
                 <Loader2 size={11} className="animate-spin" />
                 <span>{triageStatus || "Working…"}</span>
@@ -394,6 +518,7 @@ export default function OsintTriagePanel({ range, findings }: Props) {
               </div>
             </Card>
           )}
+          </div>
         </TabsContent>
 
         <TabsContent value="deepdive" className="space-y-3 mt-2">
@@ -413,12 +538,31 @@ export default function OsintTriagePanel({ range, findings }: Props) {
                   data-testid="input-search-findings-inline"
                 />
               </div>
-              <button type="button" onClick={selectAllVisible} className="text-[11px] underline text-muted-foreground" data-testid="button-select-all-visible-inline">All visible (≤20)</button>
-              <button type="button" onClick={clearAll} className="text-[11px] underline text-muted-foreground" data-testid="button-clear-all-inline">Clear</button>
+              <button
+                type="button"
+                onClick={selectAllVisible}
+                className={`text-[11px] underline text-muted-foreground ${deepDiveSelectionReadOnly ? "cursor-not-allowed opacity-45 hover:opacity-65" : ""}`}
+                data-testid="button-select-all-visible-inline"
+              >
+                All visible (≤20)
+              </button>
+              <button
+                type="button"
+                onClick={clearAll}
+                className={`text-[11px] underline text-muted-foreground ${deepDiveSelectionReadOnly ? "cursor-not-allowed opacity-45 hover:opacity-65" : ""}`}
+                data-testid="button-clear-all-inline"
+              >
+                Clear
+              </button>
             </div>
             <div className="text-[10px] text-muted-foreground font-mono">
               {selectedIds.length} selected · {filteredFindings.length} visible
             </div>
+            {deepDiveSelectionReadOnly && (
+              <div className="text-[10px] text-muted-foreground">
+                Intel selection is disabled in the static public demo. Open the completed deep-dive example from AI background jobs.
+              </div>
+            )}
           </Card>
 
           <div className="max-h-[320px] overflow-y-auto space-y-1.5 pr-1" data-testid="list-deepdive-findings-inline">
@@ -434,9 +578,10 @@ export default function OsintTriagePanel({ range, findings }: Props) {
                     type="button"
                     key={f.id}
                     onClick={() => toggleOne(f.id)}
+                    title={deepDiveSelectionReadOnly ? "Intel selection is disabled in the static public demo" : undefined}
                     className={`w-full text-left p-2 rounded border transition-all ${
                       isSelected ? "bg-primary/10 border-primary/40 ring-1 ring-primary/30" : "bg-card border-border hover:bg-muted/50"
-                    }`}
+                    } ${deepDiveSelectionReadOnly ? "cursor-not-allowed opacity-55 hover:opacity-70" : ""}`}
                     data-testid={`button-toggle-finding-inline-${f.id}`}
                   >
                     <div className="flex items-start gap-2">
@@ -462,17 +607,19 @@ export default function OsintTriagePanel({ range, findings }: Props) {
             )}
           </div>
 
-          <Button
-            onClick={runDeepDive}
-            disabled={deepLoading || aiDisabled || selectedIds.length === 0 || selectedIds.length > 20}
-            title={aiAvailability.disabledReason}
-            className="w-full"
-            data-testid="button-run-deepdive-inline"
-          >
-            {deepLoading
-              ? <><Loader2 size={14} className="mr-1.5 animate-spin" />Running deep analysis…</>
-              : <><Download size={14} className="mr-1.5" />Execute Deep Analysis ({selectedIds.length})</>}
-          </Button>
+          {!STATIC_DEMO_MODE && (
+            <Button
+              onClick={runDeepDive}
+              disabled={deepLoading || aiDisabled || selectedIds.length === 0 || selectedIds.length > 20}
+              title={aiAvailability.disabledReason}
+              className="w-full"
+              data-testid="button-run-deepdive-inline"
+            >
+              {deepLoading
+                ? <><Loader2 size={14} className="mr-1.5 animate-spin" />Running deep analysis…</>
+                : <><Download size={14} className="mr-1.5" />Execute Deep Analysis ({selectedIds.length})</>}
+            </Button>
+          )}
           {deepLoading && (
             <div className="text-[11px] text-muted-foreground flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-center" data-testid="text-deepdive-status">
               <span className="flex items-center gap-1.5">
@@ -521,8 +668,8 @@ export default function OsintTriagePanel({ range, findings }: Props) {
         </TabsContent>
       </Tabs>
 
-      <Card className="mt-3 p-3 bg-background/70" data-testid="card-cirt-history">
-        <div className="flex items-center justify-between gap-2 mb-2">
+      <section className="border-t border-border bg-muted/10 p-3" data-testid="card-cirt-history">
+        <div className="mb-2 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 text-xs font-medium">
             <Clock size={13} className="text-primary" />
             Recent CIRT results
@@ -534,7 +681,7 @@ export default function OsintTriagePanel({ range, findings }: Props) {
         {cirtHistory.length === 0 ? (
           <div className="text-[11px] text-muted-foreground">No cached CIRT results yet. Completed triage and deep-dive jobs will appear here.</div>
         ) : (
-          <div className="space-y-1.5">
+          <div className="animate-in space-y-1.5 duration-200 fade-in-0 motion-reduce:animate-none">
             {cirtHistory.slice(0, 5).map((job) => {
               const ok = job.status === "completed";
               return (
@@ -560,14 +707,14 @@ export default function OsintTriagePanel({ range, findings }: Props) {
                     onClick={() => { setInlinePreview(null); setPreviewJobId(job.id); }}
                     data-testid={`button-preview-cirt-${job.id}`}
                   >
-                    <Eye size={11} className="mr-1" />{ok ? "Preview" : "Pending"}
+                    <Eye size={11} className="mr-1" />{ok ? "Preview" : "Unavailable"}
                   </Button>
                 </div>
               );
             })}
           </div>
         )}
-      </Card>
+      </section>
 
       <Dialog open={!!activePreview || previewLoading} onOpenChange={(open) => { if (!open) closePreview(); }}>
         <DialogContent className="w-[min(1100px,94vw)] max-w-none max-h-[90vh] flex flex-col overflow-hidden">
@@ -588,8 +735,17 @@ export default function OsintTriagePanel({ range, findings }: Props) {
                 {activePreview.error?.message ?? "This CIRT job failed without a stored result."}
               </div>
             ) : activePreview?.kind === "chat_triage" && activePreview.result ? (
-              <div className="prose prose-sm dark:prose-invert max-w-none">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{(activePreview.result as ChatTriageResponse).reportMd}</ReactMarkdown>
+              <div>
+                {(activePreview.result as ChatTriageResponse).drafts?.length ? (
+                  <div className="mb-3 border-b bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                    {(activePreview.result as ChatTriageResponse).drafts!.filter((draft) => draft.status === "created").length > 0
+                      ? `${(activePreview.result as ChatTriageResponse).drafts!.filter((draft) => draft.status === "created").length} client email draft${(activePreview.result as ChatTriageResponse).drafts!.filter((draft) => draft.status === "created").length === 1 ? "" : "s"} created for analyst review. Nothing was sent.`
+                      : "No client email draft was created; review the assessment result and draft status before continuing."}
+                  </div>
+                ) : null}
+                <div className="prose prose-sm dark:prose-invert max-w-none">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{(activePreview.result as ChatTriageResponse).reportMd}</ReactMarkdown>
+                </div>
               </div>
             ) : activePreview?.kind === "chat_deep_dive" && activePreview.result ? (
               <iframe
@@ -604,6 +760,12 @@ export default function OsintTriagePanel({ range, findings }: Props) {
             )}
           </div>
           <DialogFooter>
+            {activePreview?.kind === "chat_triage"
+              && (activePreview.result as ChatTriageResponse | null)?.drafts?.some((draft) => draft.status === "created") && (
+              <Button variant="outline" onClick={() => { window.location.hash = "/client-briefs"; closePreview(); }}>
+                <FileText size={13} className="mr-1.5" />Review email drafts
+              </Button>
+            )}
             {activePreview?.kind === "chat_triage" && activePreview.result && (
               <Button
                 variant="outline"

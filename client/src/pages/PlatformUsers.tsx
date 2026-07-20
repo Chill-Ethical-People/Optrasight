@@ -18,6 +18,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth";
 import { apiRequest, getQueryFn, queryClient } from "@/lib/queryClient";
+import { STATIC_DEMO_MODE } from "@/lib/staticDemoApi";
+import { showStaticDemoNotice } from "@/lib/staticDemoNotice";
 import {
   emptyPlatformUserForm,
   formFromPlatformUser,
@@ -80,6 +82,8 @@ export default function PlatformUsers() {
   const { user } = useAuth();
   const { toast } = useToast();
   const isAdmin = user?.role === "admin";
+  const readOnly = STATIC_DEMO_MODE;
+  const readOnlyTitle = "User management is view-only in the static public demo";
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<PlatformUser | null>(null);
   const [search, setSearch] = useState("");
@@ -130,6 +134,10 @@ export default function PlatformUsers() {
   }
 
   function startNew() {
+    if (readOnly) {
+      showStaticDemoNotice({ kind: "write", action: "User creation restricted" });
+      return;
+    }
     setEditing(null);
     setForm(emptyPlatformUserForm());
     setOpen(true);
@@ -142,6 +150,7 @@ export default function PlatformUsers() {
   }
 
   function toggleSelectedUser(uid: string, checked: boolean) {
+    if (readOnly) return;
     setSelectedUserIds((current) => {
       const next = new Set(current);
       if (checked) next.add(uid);
@@ -151,6 +160,7 @@ export default function PlatformUsers() {
   }
 
   function toggleAllVisible(checked: boolean) {
+    if (readOnly) return;
     setSelectedUserIds((current) => {
       const next = new Set(current);
       for (const uid of selectableFilteredIds) {
@@ -163,6 +173,7 @@ export default function PlatformUsers() {
 
   const saveUser = useMutation({
     mutationFn: async () => {
+      if (readOnly) throw new Error(readOnlyTitle);
       const payload: Record<string, unknown> = {
         email: form.email.trim(),
         role: form.role,
@@ -183,7 +194,10 @@ export default function PlatformUsers() {
   });
 
   const disableUser = useMutation({
-    mutationFn: (uid: string) => apiRequest("POST", `/api/v1/admin/platform-users/${uid}/disable`, {}),
+    mutationFn: (uid: string) => {
+      if (readOnly) throw new Error(readOnlyTitle);
+      return apiRequest("POST", `/api/v1/admin/platform-users/${uid}/disable`, {});
+    },
     onSuccess: () => {
       toast({ title: "Platform login disabled", description: "The account remains visible for audit continuity." });
       invalidate();
@@ -192,7 +206,10 @@ export default function PlatformUsers() {
   });
 
   const resetMfa = useMutation({
-    mutationFn: (uid: string) => apiRequest("POST", `/api/v1/admin/platform-users/${uid}/reset-mfa`, {}),
+    mutationFn: (uid: string) => {
+      if (readOnly) throw new Error(readOnlyTitle);
+      return apiRequest("POST", `/api/v1/admin/platform-users/${uid}/reset-mfa`, {});
+    },
     onSuccess: () => {
       toast({ title: "MFA reset", description: "The user will enroll a new authenticator on next login." });
       invalidate();
@@ -202,6 +219,7 @@ export default function PlatformUsers() {
 
   const bulkManage = useMutation({
     mutationFn: async (action: "disable" | "delete") => {
+      if (readOnly) throw new Error(readOnlyTitle);
       if (action === "delete") {
         const ok = window.confirm(`Delete ${selectedIds.length} selected platform account${selectedIds.length === 1 ? "" : "s"}? This removes the account records and revokes active sessions.`);
         if (!ok) return null;
@@ -232,7 +250,12 @@ export default function PlatformUsers() {
           title="Platform Users"
           description="Manage BatchOne platform accounts, temporary passwords, MFA enrollment, and least-privileged access."
           actions={isAdmin ? (
-            <Button onClick={startNew} data-testid="button-new-platform-user">
+            <Button
+              onClick={startNew}
+              title={readOnly ? readOnlyTitle : undefined}
+              className={readOnly ? "cursor-not-allowed opacity-55 hover:opacity-70" : undefined}
+              data-testid="button-new-platform-user"
+            >
               <UserPlus size={14} className="mr-1.5" /> New platform user
             </Button>
           ) : null}
@@ -272,6 +295,11 @@ export default function PlatformUsers() {
                   </p>
                 </div>
               </div>
+              {readOnly && (
+                <div className="border-t border-primary/10 bg-muted/25 px-4 py-3 text-xs text-muted-foreground">
+                  Static public demo: platform accounts are view-only. Creation, role changes, MFA resets, disables, deletes, and bulk updates are disabled.
+                </div>
+              )}
             </Card>
 
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -331,10 +359,36 @@ export default function PlatformUsers() {
                     {selectedIds.length > 0 ? (
                       <>
                         <Badge variant="secondary" className="font-mono text-[10px]">{selectedIds.length} selected</Badge>
-                        <Button variant="outline" size="sm" className="h-8" disabled={bulkManage.isPending} onClick={() => bulkManage.mutate("disable")}>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className={`h-8 ${readOnly ? "cursor-not-allowed opacity-55 hover:opacity-70" : ""}`}
+                          disabled={bulkManage.isPending}
+                          title={readOnly ? readOnlyTitle : undefined}
+                          onClick={() => {
+                            if (readOnly) {
+                              showStaticDemoNotice({ kind: "write", action: "Bulk account update restricted" });
+                              return;
+                            }
+                            bulkManage.mutate("disable");
+                          }}
+                        >
                           <UserMinus size={13} className="mr-1" /> Disable selected
                         </Button>
-                        <Button variant="destructive" size="sm" className="h-8" disabled={bulkManage.isPending} onClick={() => bulkManage.mutate("delete")}>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          className={`h-8 ${readOnly ? "cursor-not-allowed opacity-55 hover:opacity-70" : ""}`}
+                          disabled={bulkManage.isPending}
+                          title={readOnly ? readOnlyTitle : undefined}
+                          onClick={() => {
+                            if (readOnly) {
+                              showStaticDemoNotice({ kind: "write", action: "Bulk account update restricted" });
+                              return;
+                            }
+                            bulkManage.mutate("delete");
+                          }}
+                        >
                           Delete selected
                         </Button>
                       </>
@@ -353,9 +407,10 @@ export default function PlatformUsers() {
                             type="checkbox"
                             className="h-3.5 w-3.5 accent-primary"
                             checked={allVisibleSelected}
-                            disabled={selectableFilteredIds.length === 0}
+                            disabled={readOnly || selectableFilteredIds.length === 0}
                             onChange={(event) => toggleAllVisible(event.target.checked)}
                             aria-label="Select all visible platform users"
+                            title={readOnly ? readOnlyTitle : undefined}
                             data-testid="checkbox-select-all-platform-users"
                           />
                         </th>
@@ -377,9 +432,10 @@ export default function PlatformUsers() {
                                 type="checkbox"
                                 className="h-3.5 w-3.5 accent-primary"
                                 checked={selectedUserIds.has(row.id)}
-                                disabled={isSelf}
+                                disabled={readOnly || isSelf}
                                 onChange={(event) => toggleSelectedUser(row.id, event.target.checked)}
                                 aria-label={`Select ${row.email}`}
+                                title={readOnly ? readOnlyTitle : undefined}
                                 data-testid={`checkbox-platform-user-${row.id}`}
                               />
                             </td>
@@ -405,13 +461,28 @@ export default function PlatformUsers() {
                             </td>
                             <td className="px-4 py-3 text-xs text-muted-foreground">{lastLoginLabel(row.lastLoginAt)}</td>
                             <td className="px-4 py-3 text-right">
-                              <Button variant="outline" size="sm" className="h-8" onClick={() => startEdit(row)} data-testid={`button-edit-platform-user-${row.id}`}>Edit</Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8"
+                                onClick={() => startEdit(row)}
+                                data-testid={`button-edit-platform-user-${row.id}`}
+                              >
+                                {readOnly ? "View" : "Edit"}
+                              </Button>
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                className="h-8 text-muted-foreground hover:text-foreground"
+                                className="h-8 text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
                                 disabled={!isActive || resetMfa.isPending}
-                                onClick={() => resetMfa.mutate(row.id)}
+                                title={readOnly ? readOnlyTitle : undefined}
+                                onClick={() => {
+                                  if (readOnly) {
+                                    showStaticDemoNotice({ kind: "write", action: "MFA reset restricted" });
+                                    return;
+                                  }
+                                  resetMfa.mutate(row.id);
+                                }}
                                 data-testid={`button-reset-mfa-platform-user-${row.id}`}
                               >
                                 <RotateCcw size={13} className="mr-1" /> Reset MFA
@@ -419,9 +490,16 @@ export default function PlatformUsers() {
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                className="h-8 text-muted-foreground hover:text-foreground"
+                                className="h-8 text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
                                 disabled={!isActive || isSelf || disableUser.isPending}
-                                onClick={() => disableUser.mutate(row.id)}
+                                title={readOnly ? readOnlyTitle : undefined}
+                                onClick={() => {
+                                  if (readOnly) {
+                                    showStaticDemoNotice({ kind: "write", action: "Login disable restricted" });
+                                    return;
+                                  }
+                                  disableUser.mutate(row.id);
+                                }}
                                 data-testid={`button-disable-platform-user-${row.id}`}
                               >
                                 Disable login
@@ -451,22 +529,24 @@ export default function PlatformUsers() {
           <DialogHeader>
             <DialogTitle className="text-base">{editing ? "Edit platform user" : "New platform user"}</DialogTitle>
             <DialogDescription className="text-xs">
-              Platform accounts are for internal BatchOne operators. Use the least privileged role that supports the user&apos;s work.
+              {readOnly
+                ? "Static public demo view. Platform user records can be inspected, but changes are disabled."
+                : "Platform accounts are for internal BatchOne operators. Use the least privileged role that supports the user's work."}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
             <div>
               <Label className="text-xs text-muted-foreground">Display name</Label>
-              <Input value={form.displayName} onChange={(event) => setForm({ ...form, displayName: event.target.value })} placeholder="Jane Doe" data-testid="input-platform-user-display-name" />
+              <Input value={form.displayName} onChange={(event) => setForm({ ...form, displayName: event.target.value })} placeholder="Jane Doe" disabled={readOnly} data-testid="input-platform-user-display-name" />
             </div>
             <div>
               <Label className="text-xs text-muted-foreground">Email</Label>
-              <Input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="jane@cep.com" data-testid="input-platform-user-email" />
+              <Input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="jane@cep.com" disabled={readOnly} data-testid="input-platform-user-email" />
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <Label className="text-xs text-muted-foreground">Role</Label>
-                <Select value={form.role} onValueChange={(role: PlatformUserRole) => setForm({ ...form, role })}>
+                <Select value={form.role} onValueChange={(role: PlatformUserRole) => setForm({ ...form, role })} disabled={readOnly}>
                   <SelectTrigger data-testid="select-platform-user-role"><SelectValue placeholder="Select role" /></SelectTrigger>
                   <SelectContent>
                     {(Object.entries(PLATFORM_ROLE_LABELS) as Array<[PlatformUserRole, string]>).map(([role, label]) => (
@@ -477,7 +557,7 @@ export default function PlatformUsers() {
               </div>
               <div>
                 <Label className="text-xs text-muted-foreground">Status</Label>
-                <Select value={form.status} onValueChange={(status: "active" | "disabled") => setForm({ ...form, status })}>
+                <Select value={form.status} onValueChange={(status: "active" | "disabled") => setForm({ ...form, status })} disabled={readOnly}>
                   <SelectTrigger data-testid="select-platform-user-status"><SelectValue placeholder="Select status" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="active">Active</SelectItem>
@@ -493,6 +573,7 @@ export default function PlatformUsers() {
                 value={form.password}
                 onChange={(event) => setForm({ ...form, password: event.target.value })}
                 placeholder={editing ? "Leave blank to keep current password" : "12+ chars, upper/lower, number, symbol"}
+                disabled={readOnly}
                 data-testid="input-platform-user-password"
               />
               {form.password ? (
@@ -510,7 +591,19 @@ export default function PlatformUsers() {
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button onClick={() => saveUser.mutate()} disabled={!canSave || saveUser.isPending} data-testid="button-save-platform-user">
+            <Button
+              onClick={() => {
+                if (readOnly) {
+                  showStaticDemoNotice({ kind: "write", action: "User changes restricted" });
+                  return;
+                }
+                saveUser.mutate();
+              }}
+              disabled={!readOnly && (!canSave || saveUser.isPending)}
+              title={readOnly ? readOnlyTitle : undefined}
+              className={readOnly ? "cursor-not-allowed opacity-55 hover:opacity-70" : "disabled:cursor-not-allowed disabled:opacity-50"}
+              data-testid="button-save-platform-user"
+            >
               <KeyRound size={14} className="mr-1.5" /> {editing ? "Save user" : "Create user"}
             </Button>
           </DialogFooter>

@@ -1,6 +1,11 @@
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
+import {
+  DEFAULT_CLIENT_DIGEST_BODY_TEMPLATE,
+  DEFAULT_CLIENT_DIGEST_SUBJECT_TEMPLATE,
+  unsupportedClientDigestPlaceholders,
+} from "./clientDigestTemplate";
 
 // ----- Tenants -----
 export const tenants = sqliteTable("tenants", {
@@ -8,7 +13,119 @@ export const tenants = sqliteTable("tenants", {
   name: text("name").notNull(),
   slug: text("slug").notNull().unique(),
   plan: text("plan").notNull().default("starter"),
+  operatingMode: text("operating_mode"),
   createdAt: text("created_at").notNull(),
+});
+
+export const workspaceOperatingModeSchema = z.object({
+  operatingMode: z.enum(["mss", "individual"]),
+});
+
+export const smtpSettingsUpdateSchema = z.object({
+  enabled: z.boolean(),
+  host: z.string().trim().min(1).max(253).regex(/^[A-Za-z0-9.-]+$/, "enter a valid SMTP hostname"),
+  port: z.number().int().min(1).max(65535),
+  secure: z.boolean(),
+  username: z.string().trim().max(320),
+  password: z.string().max(1024).optional(),
+  clearPassword: z.boolean().optional(),
+  fromName: z.string().trim().min(1).max(120).refine((value) => !/[\r\n]/.test(value), "sender name cannot contain line breaks"),
+  fromAddress: z.string().trim().email().max(320),
+  replyTo: z.union([z.literal(""), z.string().trim().email().max(320)]).optional(),
+}).superRefine((settings, context) => {
+  if (
+    settings.host.toLowerCase() === "smtp.protonmail.ch"
+    && settings.username.includes("@")
+    && settings.username.toLowerCase() !== settings.fromAddress.toLowerCase()
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["fromAddress"],
+      message: "Proton SMTP tokens can only send from their paired username address",
+    });
+  }
+});
+
+export interface SmtpSettingsDTO {
+  enabled: boolean;
+  host: string;
+  port: number;
+  secure: boolean;
+  username: string;
+  fromName: string;
+  fromAddress: string;
+  replyTo: string;
+  hasPassword: boolean;
+  configured: boolean;
+}
+
+export const xIntegrationSettingsUpdateSchema = z.object({
+  enabled: z.boolean(),
+  bearerToken: z.string().trim().min(20).max(4096).optional(),
+  clearBearerToken: z.boolean().optional(),
+});
+
+export interface XIntegrationSettingsDTO {
+  enabled: boolean;
+  accountUsername: string;
+  accountUrl: string;
+  hasBearerToken: boolean;
+  configured: boolean;
+  managedByEnvironment: boolean;
+  lastTestedAt: string | null;
+  lastTestOk: boolean | null;
+  lastTestMessage: string | null;
+}
+
+export const kelaIntegrationSettingsUpdateSchema = z.object({
+  enabled: z.boolean(),
+  feedUrl: z.string().trim().url().max(2048),
+  authMode: z.enum(["bearer", "x-api-key"]),
+  apiKey: z.string().trim().min(12).max(4096).optional(),
+  clearApiKey: z.boolean().optional(),
+});
+
+export interface KelaIntegrationSettingsDTO {
+  enabled: boolean;
+  feedUrl: string;
+  authMode: "bearer" | "x-api-key";
+  hasApiKey: boolean;
+  configured: boolean;
+  lastTestedAt: string | null;
+  lastTestOk: boolean | null;
+  lastTestMessage: string | null;
+}
+
+export const communityIntegrationKindSchema = z.enum(["abusech", "taxii", "misp", "urlscan", "greynoise"]);
+export type CommunityIntegrationKind = z.infer<typeof communityIntegrationKindSchema>;
+
+export const communityIntegrationSettingsUpdateSchema = z.object({
+  enabled: z.boolean(),
+  endpoint: z.string().trim().max(2048).default(""),
+  collectionId: z.string().trim().max(512).default(""),
+  username: z.string().trim().max(512).default(""),
+  authMode: z.enum(["api-key", "bearer", "basic"]).default("api-key"),
+  credential: z.string().trim().min(8).max(4096).optional(),
+  clearCredential: z.boolean().optional(),
+});
+
+export interface CommunityIntegrationSettingsDTO {
+  kind: CommunityIntegrationKind;
+  enabled: boolean;
+  mode: "ingestion" | "enrichment";
+  endpoint: string;
+  collectionId: string;
+  username: string;
+  authMode: "api-key" | "bearer" | "basic";
+  hasCredential: boolean;
+  configured: boolean;
+  lastTestedAt: string | null;
+  lastTestOk: boolean | null;
+  lastTestMessage: string | null;
+}
+
+export const communityEnrichmentLookupSchema = z.object({
+  observable: z.string().trim().min(3).max(2048),
 });
 
 // brand_keywords/monitored_domains/etc stored as JSON-encoded text columns.
@@ -26,6 +143,44 @@ export const tenantScopes = sqliteTable("tenant_scopes", {
   industries: text("industries").notNull().default("[]"),           // BANKING|HEALTHCARE|...
   monitoredTechnologies: text("monitored_technologies").notNull().default("[]"), // tech ids for OSINT
   notificationEmails: text("notification_emails").notNull().default("[]"),
+});
+
+// Batch Two client registry. A workspace can manage multiple protected clients
+// without exposing Full Platform tenant switching. Scope selections contain
+// stable taxonomy option ids, never display labels.
+export const clientProfiles = sqliteTable("client_profiles", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  name: text("name").notNull(),
+  clientTypes: text("client_types").notNull().default("[]"),
+  geoIds: text("geo_ids").notNull().default("[]"),
+  industryIds: text("industry_ids").notNull().default("[]"),
+  technologyIds: text("technology_ids").notNull().default("[]"),
+  mappingTerms: text("mapping_terms").notNull().default("[]"),
+  notificationEmails: text("notification_emails").notNull().default("[]"),
+  digestEnabled: integer("digest_enabled").notNull().default(0),
+  digestCadence: text("digest_cadence").notNull().default("weekly"),
+  digestSubjectTemplate: text("digest_subject_template"),
+  digestBodyTemplate: text("digest_body_template"),
+  emailLogoUrl: text("email_logo_url"),
+  lastDigestAt: text("last_digest_at"),
+  isActive: integer("is_active").notNull().default(1),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+// Workspace-defined taxonomy options. `fingerprint` is a SHA-256 digest of a
+// normalized label and kind, used only to prevent duplicate custom records.
+// Relationships and AI output use `id`, not string labels or fingerprints.
+export const clientTaxonomyOptions = sqliteTable("client_taxonomy_options", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  kind: text("kind").notNull(), // geo | industry | technology
+  label: text("label").notNull(),
+  aliases: text("aliases").notNull().default("[]"),
+  fingerprint: text("fingerprint").notNull(),
+  createdBy: text("created_by").notNull(),
+  createdAt: text("created_at").notNull(),
 });
 
 // ----- OSINT sources catalog (500+ feeds) -----
@@ -49,7 +204,15 @@ export const osintFindings = sqliteTable("osint_findings", {
   title: text("title").notNull(),
   url: text("url"),
   publishedAt: text("published_at").notNull(),
+  publishedAtInferred: integer("published_at_inferred").notNull().default(0),
   severity: text("severity").notNull().default("medium"),
+  publisherSeverity: text("publisher_severity"),
+  technicalSeverity: text("technical_severity"),
+  clientImpactSeverity: text("client_impact_severity"),
+  analystFinalSeverity: text("analyst_final_severity"),
+  analystSeverityRationale: text("analyst_severity_rationale"),
+  analystSeverityAt: text("analyst_severity_at"),
+  analystSeverityBy: text("analyst_severity_by"),
   cveIds: text("cve_ids").notNull().default("[]"),
   affectedTech: text("affected_tech").notNull().default("[]"),
   threatActors: text("threat_actors").notNull().default("[]"),
@@ -87,6 +250,19 @@ export const osintFindings = sqliteTable("osint_findings", {
   draftEmailAt: text("draft_email_at"),
   // Analyst triage
   status: text("status").notNull().default("new"), // new|triaged|dismissed|escalated
+  // Batch Two — analyst assessment and client relevance tags for the current
+  // workspace profile. Stored server-side; no browser persistence.
+  analystAssessment: text("analyst_assessment"),
+  analystDisposition: text("analyst_disposition"),
+  analystConfidence: text("analyst_confidence"),
+  analystImpact: text("analyst_impact"),
+  analystNextAction: text("analyst_next_action"),
+  analystAssessedAt: text("analyst_assessed_at"),
+  analystAssessedBy: text("analyst_assessed_by"),
+  clientTags: text("client_tags").notNull().default("[]"),
+  // AI recommendations and provisional/analyst review provenance.
+  aiClientMatches: text("ai_client_matches").notNull().default("[]"),
+  clientMatchDecisions: text("client_match_decisions").notNull().default("{}"),
   createdAt: text("created_at").notNull(),
 });
 
@@ -177,6 +353,31 @@ export const ruleDeployments = sqliteTable("rule_deployments", {
   ruleVersion: integer("rule_version").notNull().default(1),
   deployedAt: text("deployed_at"),
   deployedBy: text("deployed_by"),
+  updatedAt: text("updated_at").notNull(),
+});
+
+// Evidence that a specific rule version was validated for a specific client
+// and SIEM/EDR target. Validation is deliberately separate from author notes:
+// it is an auditable engineering gate, not free-form commentary.
+export const ruleValidations = sqliteTable("rule_validations", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  ruleId: text("rule_id").notNull(),
+  clientId: text("client_id").notNull(),
+  siemId: text("siem_id").notNull(),
+  ruleVersion: integer("rule_version").notNull(),
+  telemetrySources: text("telemetry_sources").notNull().default("[]"),
+  syntaxStatus: text("syntax_status").notNull().default("not_checked"),
+  testStatus: text("test_status").notNull().default("not_tested"),
+  testMethod: text("test_method"),
+  expectedResult: text("expected_result"),
+  observedResult: text("observed_result"),
+  falsePositiveRisk: text("false_positive_risk").notNull().default("unknown"),
+  externalReference: text("external_reference"),
+  notes: text("notes"),
+  testedAt: text("tested_at"),
+  testedBy: text("tested_by"),
+  createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
 
@@ -659,6 +860,7 @@ export const AI_TASKS = [
   "triage", "analysis", "young_domain", "report_summary", "logo_abuse",
   "osint_analysis", "hunt_query", "threat_landscape",
   "osint_overview", "osint_chat", "detection_rule",
+  "client_digest",
   // v2.30.3 — Threat Actor Profile enrichment (DeepSeek populates all 13
   // sections + appendices from primaryName + aliases).
   "threat_actor_enrichment",
@@ -673,6 +875,8 @@ export const BATCH_ONE_AI_TASKS = [
   "osint_overview",
   "osint_chat",
   "hunt_query",
+  "detection_rule",
+  "client_digest",
   "threat_actor_enrichment",
   "tap_portrait",
 ] as const satisfies readonly AiTask[];
@@ -753,7 +957,7 @@ export const INDUSTRIES = [
   { id: "LEGAL",          label: "Legal / Professional Services" },
   { id: "REAL_ESTATE",    label: "Real Estate" },
   { id: "NGO",            label: "NGO / Non-profit" },
-  { id: "CRITICAL_INFRA", label: "Critical Infrastructure (general)" },
+  { id: "CRITICAL_INFRA", label: "Critical Infrastructure" },
 ] as const;
 export type IndustryId = typeof INDUSTRIES[number]["id"];
 
@@ -1131,7 +1335,15 @@ export interface OsintFindingDTO {
   title: string;
   url: string | null;
   publishedAt: string;
+  publishedAtInferred?: boolean;
   severity: string;
+  publisherSeverity?: string | null;
+  technicalSeverity?: string | null;
+  clientImpactSeverity?: string | null;
+  analystFinalSeverity?: string | null;
+  analystSeverityRationale?: string | null;
+  analystSeverityAt?: string | null;
+  analystSeverityBy?: string | null;
   cveIds: string[];
   affectedTech: string[];
   threatActors: string[];
@@ -1146,6 +1358,20 @@ export interface OsintFindingDTO {
   draftEmail: string | null;
   draftEmailAt: string | null;
   status: string;
+  analystAssessment?: string | null;
+  analystDisposition?: "action_required" | "monitor" | "informational" | "false_positive" | null;
+  analystConfidence?: "low" | "medium" | "high" | null;
+  analystImpact?: "none" | "low" | "medium" | "high" | "critical" | null;
+  analystNextAction?: string | null;
+  analystAssessedAt?: string | null;
+  analystAssessedBy?: string | null;
+  clientTags?: string[];
+  aiClientMatches?: Array<{
+    clientId: string;
+    relevanceScore: number;
+    reason: string;
+  }>;
+  clientMatchDecisions?: Record<string, "ai_assigned" | "approved" | "dismissed">;
   createdAt: string;
   rawSnippet?: string | null;
   // v2.17 — analyst-curated free-form tags + audit fields.
@@ -1165,12 +1391,145 @@ export interface OsintFindingDTO {
  *  only provided fields are updated. status takes the extended finding-status
  *  enum (new|triaged|assessed|dismissed|escalated). */
 export interface OsintFindingPatch {
+  severity?: "info" | "low" | "medium" | "high" | "critical";
+  analystFinalSeverity?: "info" | "low" | "medium" | "high" | "critical" | null;
+  analystSeverityRationale?: string | null;
   status?: "new" | "triaged" | "assessed" | "dismissed" | "escalated";
   cveIds?: string[];
   iocs?: FindingIoCs;
   analystTags?: string[];
+  analystAssessment?: string | null;
+  analystDisposition?: "action_required" | "monitor" | "informational" | "false_positive" | null;
+  analystConfidence?: "low" | "medium" | "high" | null;
+  analystImpact?: "none" | "low" | "medium" | "high" | "critical" | null;
+  analystNextAction?: string | null;
+  clientTags?: string[];
+  clientMatchDecisions?: Record<string, "ai_assigned" | "approved" | "dismissed">;
   affectedTech?: string[];
   threatActors?: string[];
+}
+
+export const osintFindingPatchSchema = z.object({
+  severity: z.enum(["info", "low", "medium", "high", "critical"]).optional(),
+  analystFinalSeverity: z.enum(["info", "low", "medium", "high", "critical"]).nullable().optional(),
+  analystSeverityRationale: z.string().max(2000).nullable().optional(),
+  status: z.enum(["new", "triaged", "assessed", "dismissed", "escalated"]).optional(),
+  cveIds: z.array(z.string()).optional(),
+  iocs: z.record(z.array(z.string())).optional(),
+  analystTags: z.array(z.string()).optional(),
+  analystAssessment: z.string().max(12000).nullable().optional(),
+  analystDisposition: z.enum(["action_required", "monitor", "informational", "false_positive"]).nullable().optional(),
+  analystConfidence: z.enum(["low", "medium", "high"]).nullable().optional(),
+  analystImpact: z.enum(["none", "low", "medium", "high", "critical"]).nullable().optional(),
+  analystNextAction: z.string().max(2000).nullable().optional(),
+  clientTags: z.array(z.string()).optional(),
+  clientMatchDecisions: z.record(z.enum(["ai_assigned", "approved", "dismissed"])).optional(),
+  affectedTech: z.array(z.string()).optional(),
+  threatActors: z.array(z.string()).optional(),
+});
+
+export const clientTaxonomyKindSchema = z.enum(["geo", "industry", "technology"]);
+export type ClientTaxonomyKind = z.infer<typeof clientTaxonomyKindSchema>;
+
+export const clientTaxonomyOptionCreateSchema = z.object({
+  kind: clientTaxonomyKindSchema,
+  label: z.string().trim().min(2).max(100),
+  aliases: z.array(z.string().trim().min(1).max(100)).max(20).optional().default([]),
+});
+
+const clientProfileFieldsSchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  clientTypes: z.array(z.string().min(1).max(100)).max(20).optional().default([]),
+  geos: z.array(z.string().uuid()).max(80).optional().default([]),
+  industries: z.array(z.string().uuid()).max(80).optional().default([]),
+  monitoredTechnologies: z.array(z.string().uuid()).max(160).optional().default([]),
+  mappingTerms: z.array(z.string().trim().min(1).max(160)).max(120).optional().default([]),
+  notificationEmails: z.array(z.string().email()).max(40).optional().default([]),
+  digestEnabled: z.boolean().optional().default(false),
+  digestCadence: z.enum(["daily", "weekly", "biweekly", "monthly"]).optional().default("weekly"),
+  digestSubjectTemplate: z.string().trim().min(3).max(500)
+    .refine((value) => unsupportedClientDigestPlaceholders(value).length === 0, "subject template contains an unsupported placeholder")
+    .optional().default(DEFAULT_CLIENT_DIGEST_SUBJECT_TEMPLATE),
+  digestBodyTemplate: z.string().trim().min(20).max(50000)
+    .refine((value) => unsupportedClientDigestPlaceholders(value).length === 0, "body template contains an unsupported placeholder")
+    .optional().default(DEFAULT_CLIENT_DIGEST_BODY_TEMPLATE),
+});
+
+export const clientProfileCreateSchema = clientProfileFieldsSchema;
+
+export const clientProfileUpdateSchema = clientProfileFieldsSchema.partial().extend({
+  isActive: z.boolean().optional(),
+});
+
+export interface ClientTaxonomyOptionDTO {
+  id: string;
+  kind: ClientTaxonomyKind;
+  label: string;
+  aliases: string[];
+  source: "built_in" | "custom";
+  category?: string;
+  optionKind?: string;
+}
+
+export interface ClientProfileDTO {
+  id: string;
+  tenantId: string;
+  name: string;
+  clientTypes: string[];
+  geos: string[];
+  industries: string[];
+  monitoredTechnologies: string[];
+  mappingTerms: string[];
+  notificationEmails: string[];
+  digestEnabled: boolean;
+  digestCadence: "daily" | "weekly" | "biweekly" | "monthly";
+  digestSubjectTemplate: string;
+  digestBodyTemplate: string;
+  emailLogoUrl: string | null;
+  lastDigestAt: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ClientAnalysisScopeDTO {
+  clients: Array<{
+    id: string;
+    name: string;
+    mappingTerms: string[];
+    geographies: ClientTaxonomyOptionDTO[];
+    industries: ClientTaxonomyOptionDTO[];
+    technologies: ClientTaxonomyOptionDTO[];
+  }>;
+}
+
+export const clientDigestGenerateSchema = z.object({
+  cadence: z.enum(["daily", "weekly", "biweekly", "monthly"]).optional(),
+  findingIds: z.array(z.string().trim().min(1)).max(60).optional(),
+});
+
+export const clientDigestPatchSchema = z.object({
+  subject: z.string().trim().min(3).max(240).optional(),
+  bodyMd: z.string().trim().min(20).max(50000).optional(),
+  status: z.enum(["draft", "reviewed", "approved"]).optional(),
+});
+
+export interface ClientDigestDTO {
+  id: string;
+  clientId: string;
+  cadence: "daily" | "weekly" | "biweekly" | "monthly";
+  periodStart: string;
+  periodEnd: string;
+  recipients: string[];
+  subject: string;
+  bodyMd: string;
+  findingIds: string[];
+  status: "draft" | "reviewed" | "approved" | "sent";
+  aiProviderLabel: string | null;
+  createdAt: string;
+  createdBy: string;
+  reviewedAt: string | null;
+  reviewedBy: string | null;
 }
 
 // ---- Hunt query schemas ----
@@ -1190,6 +1549,7 @@ export interface HuntQueryDTO {
   aiProviderLabel: string | null;
   createdAt: string;
   createdBy: string;
+  detectionRuleId?: string;
 }
 
 // ---- Detection rule schemas (v2.30.2) ----
@@ -1211,7 +1571,7 @@ export const SIEM_TARGET_IDS = SIEM_TARGETS.map((s) => s.id) as readonly SiemTar
 // v2.30.2.3 — added 'reviewed' between draft and approved so the kanban
 // board can split out analyst peer-review from final approval. Old rules
 // with status='approved' continue to work unchanged.
-export const RULE_STATUSES = ["draft", "reviewed", "approved", "archived"] as const;
+export const RULE_STATUSES = ["draft", "reviewed", "validated", "approved", "archived"] as const;
 export type RuleStatus = typeof RULE_STATUSES[number];
 export const DEPLOYMENT_STATUSES = ["pending", "deployed", "failed", "rolled_back"] as const;
 export type DeploymentStatus = typeof DEPLOYMENT_STATUSES[number];
@@ -1220,6 +1580,12 @@ export type DeploymentMode = typeof DEPLOYMENT_MODES[number];
 
 export const RULE_SEVERITIES = ["low", "medium", "high", "critical"] as const;
 export type RuleSeverity = typeof RULE_SEVERITIES[number];
+export const RULE_SYNTAX_STATUSES = ["not_checked", "passed", "failed"] as const;
+export type RuleSyntaxStatus = typeof RULE_SYNTAX_STATUSES[number];
+export const RULE_TEST_STATUSES = ["not_tested", "passed", "failed", "needs_tuning"] as const;
+export type RuleTestStatus = typeof RULE_TEST_STATUSES[number];
+export const RULE_FALSE_POSITIVE_RISKS = ["unknown", "low", "medium", "high"] as const;
+export type RuleFalsePositiveRisk = typeof RULE_FALSE_POSITIVE_RISKS[number];
 
 /** POST /api/v1/detection-rules — generate-from-intel mode if findingIds present. */
 export const detectionRuleCreateSchema = z.object({
@@ -1231,6 +1597,7 @@ export const detectionRuleCreateSchema = z.object({
   severity: z.enum(RULE_SEVERITIES).optional(),
   affectedTech: z.array(z.string()).optional(),
   threatActors: z.array(z.string()).optional(),
+  clientIds: z.array(z.string().uuid()).max(32).optional(),
   // When true the server runs the AI to populate sigmaYaml + queries.
   // When false the rule is saved as an empty draft for manual authoring.
   generate: z.boolean().optional().default(true),
@@ -1246,6 +1613,7 @@ export const detectionRulePatchSchema = z.object({
   notes: z.string().nullable().optional(),
   affectedTech: z.array(z.string()).optional(),
   threatActors: z.array(z.string()).optional(),
+  clientIds: z.array(z.string().uuid()).max(32).optional(),
   mitreTechniques: z.array(z.object({ id: z.string(), name: z.string().optional(), tactic: z.string().optional() })).optional(),
 });
 
@@ -1260,6 +1628,44 @@ export const detectionRuleDeploySchema = z.object({
   message: z.string().optional(),
 });
 
+export const detectionRuleValidationSchema = z.object({
+  clientId: z.string().uuid(),
+  siemId: z.enum(SIEM_TARGETS.map((s) => s.id) as [SiemTargetId, ...SiemTargetId[]]),
+  telemetrySources: z.array(z.string().trim().min(1).max(160)).min(1).max(24),
+  syntaxStatus: z.enum(RULE_SYNTAX_STATUSES),
+  testStatus: z.enum(RULE_TEST_STATUSES),
+  testMethod: z.string().trim().max(500).optional().nullable(),
+  expectedResult: z.string().trim().max(2000).optional().nullable(),
+  observedResult: z.string().trim().max(2000).optional().nullable(),
+  falsePositiveRisk: z.enum(RULE_FALSE_POSITIVE_RISKS),
+  externalReference: z.string().trim().max(500).optional().nullable(),
+  notes: z.string().trim().max(4000).optional().nullable(),
+});
+
+export interface RuleValidationDTO {
+  id: string;
+  ruleId: string;
+  clientId: string;
+  siemId: SiemTargetId;
+  siemLabel: string;
+  ruleVersion: number;
+  telemetrySources: string[];
+  syntaxStatus: RuleSyntaxStatus;
+  testStatus: RuleTestStatus;
+  testMethod: string | null;
+  expectedResult: string | null;
+  observedResult: string | null;
+  falsePositiveRisk: RuleFalsePositiveRisk;
+  externalReference: string | null;
+  notes: string | null;
+  testedAt: string | null;
+  testedBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+  isCurrentVersion: boolean;
+  passed: boolean;
+}
+
 export interface RuleDeploymentDTO {
   id: string;
   ruleId: string;
@@ -1273,6 +1679,7 @@ export interface RuleDeploymentDTO {
   deployedAt: string | null;
   deployedBy: string | null;
   updatedAt: string;
+  isStale: boolean;
 }
 
 export interface DetectionRuleDTO {
@@ -1286,6 +1693,7 @@ export interface DetectionRuleDTO {
   mitreTechniques: Array<{ id: string; name?: string; tactic?: string }>;
   affectedTech: string[];
   threatActors: string[];
+  clientIds: string[];
   sigmaYaml: string | null;
   queries: Record<string, string>;
   notes: string | null;
@@ -1295,6 +1703,7 @@ export interface DetectionRuleDTO {
   updatedAt: string;
   createdBy: string;
   deployments: RuleDeploymentDTO[];
+  validations: RuleValidationDTO[];
 }
 
 // ---- Threat landscape schemas ----

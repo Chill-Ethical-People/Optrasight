@@ -26,7 +26,7 @@
 import { storage } from "./storage";
 import { chatDeepDiveLiveDiagnostic, type ChatDeepDiveInputFinding } from "./aiClient";
 import { fetchSourcesBatch } from "./sourceFetch";
-import type { OsintFindingDTO } from "@shared/schema";
+import type { ClientAnalysisScopeDTO, OsintFindingDTO } from "@shared/schema";
 
 const TICK_INTERVAL_MS = 60_000;
 const FETCH_SCAN_MAX = 60;
@@ -34,6 +34,7 @@ const FETCH_SCAN_MAX = 60;
 let timer: NodeJS.Timeout | null = null;
 const inFlightFetch = new Set<string>();
 const inFlightAnalyze = new Set<string>();
+const inFlightDigests = new Set<string>();
 
 /** Boot the scheduler. Safe to call multiple times — repeats are no-ops. */
 export function startOsintBackgroundJobs(): void {
@@ -84,6 +85,34 @@ async function tickAllTenants(): Promise<void> {
         console.error(`[osint-bg] analyze ${tid}:`, e),
       );
     }
+    void runDueClientDigestsForTenant(tid).catch((e) =>
+      console.error(`[client-digest] ${tid}:`, e),
+    );
+  }
+}
+
+async function runDueClientDigestsForTenant(tid: string): Promise<void> {
+  if (inFlightDigests.has(tid)) return;
+  const due = storage.listDueClientDigestProfiles(tid);
+  if (due.length === 0) return;
+  inFlightDigests.add(tid);
+  try {
+    for (const client of due) {
+      try {
+        await storage.generateClientDigest(tid, client.id, {
+          cadence: client.digestCadence,
+          actor: "system",
+        });
+        console.log(`[client-digest] ${tid}/${client.id}: draft generated`);
+      } catch (e: any) {
+        const message = String(e?.message || e);
+        if (!message.startsWith("no triaged client intelligence")) {
+          console.error(`[client-digest] ${tid}/${client.id}: ${message}`);
+        }
+      }
+    }
+  } finally {
+    inFlightDigests.delete(tid);
   }
 }
 
@@ -144,11 +173,15 @@ async function runAutoAnalyzeForTenant(tid: string): Promise<void> {
       return;
     }
 
-    const clientProfile = {
-      industries: ["security-operations"],
-      geos: ["Global"],
-      technologies: ["osint", "threat-intelligence", "detection-engineering"],
-    };
+    const scope = (storage as any).getClientAnalysisScope?.(tid) as ClientAnalysisScopeDTO | undefined;
+    const clientProfile = scope?.clients?.length
+      ? {
+          clients: scope.clients,
+          industries: Array.from(new Set(scope.clients.flatMap((client) => client.industries.map((option) => option.label)))),
+          geos: Array.from(new Set(scope.clients.flatMap((client) => client.geographies.map((option) => option.label)))),
+          technologies: Array.from(new Set(scope.clients.flatMap((client) => client.technologies.map((option) => option.label)))),
+        }
+      : { clients: [], industries: [], geos: [], technologies: [] };
 
     // Pre-fetch source bodies for the whole batch (concurrent under the hood
     // via sourceFetch's existing batching).

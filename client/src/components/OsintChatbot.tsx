@@ -20,6 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { useAiAvailability } from "@/lib/aiAvailability";
+import { STATIC_DEMO_MODE } from "@/lib/staticDemoApi";
 import type { OsintFindingDTO } from "@shared/schema";
 
 /** Day-range key kept for backward compatibility with the page. */
@@ -78,6 +79,7 @@ export default function OsintChatbot({ findings = [] }: Props) {
   const { toast } = useToast();
   const aiAvailability = useAiAvailability();
   const aiDisabled = !aiAvailability.hasUsableProvider;
+  const chatReadOnly = STATIC_DEMO_MODE;
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -106,6 +108,10 @@ export default function OsintChatbot({ findings = [] }: Props) {
   async function send(text: string) {
     const trimmed = text.trim();
     if (!trimmed) return;
+    if (chatReadOnly) {
+      toast({ title: "Static demo chat is read-only", description: "The public demo does not send chat messages to an AI provider." });
+      return;
+    }
     if (aiDisabled) {
       toast({ variant: "destructive", title: "AI unavailable", description: aiAvailability.disabledReason });
       return;
@@ -214,9 +220,11 @@ export default function OsintChatbot({ findings = [] }: Props) {
               Analyst chat
             </SheetTitle>
             <SheetDescription className="text-xs">
-              {hasFindingContext
-                ? `Ask about the ${findings.length} visible findings, a pasted source URL, or any threat-intel question.`
-                : "Ask any threat-intel, TAP, hunt-query, or source URL question."} The assistant uses your configured AI provider and does not perform platform code-development work.
+              {chatReadOnly
+                ? "Static demo chat is read-only. Explore CIRT triage, deep-dive, hunt-query, and TAP examples without sending data to an AI provider."
+                : `${hasFindingContext
+                    ? `Ask about the ${findings.length} visible findings, a pasted source URL, or any threat-intel question.`
+                    : "Ask any threat-intel, TAP, hunt-query, or source URL question."} The assistant uses your configured AI provider and does not perform platform code-development work.`}
             </SheetDescription>
           </SheetHeader>
 
@@ -238,8 +246,8 @@ export default function OsintChatbot({ findings = [] }: Props) {
                       key={s}
                       type="button"
                       onClick={() => send(s)}
-                      disabled={aiDisabled}
-                      className="text-left text-xs px-2.5 py-2 rounded border bg-background hover:bg-primary/5 hover:border-primary/40 transition-colors"
+                      disabled={aiDisabled || chatReadOnly}
+                      className="text-left text-xs px-2.5 py-2 rounded border bg-background hover:bg-primary/5 hover:border-primary/40 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
                       data-testid="button-chat-suggestion"
                     >
                       {s}
@@ -303,25 +311,26 @@ export default function OsintChatbot({ findings = [] }: Props) {
               placeholder="Ask a question or paste a source URL... (Enter to send, Shift+Enter for newline)"
               className="text-sm resize-none min-h-[64px]"
               data-testid="textarea-chat-input"
-              disabled={loading || aiDisabled}
+              disabled={loading || aiDisabled || chatReadOnly}
+              readOnly={chatReadOnly}
             />
             <div className="flex items-center gap-2">
               <Button
                 size="sm" variant="ghost"
                 onClick={clearChat}
-                disabled={loading || messages.length === 0}
+                disabled={loading || messages.length === 0 || chatReadOnly}
                 data-testid="button-chat-clear"
               >
                 <Trash2 size={12} className="mr-1" /> Clear
               </Button>
               <div className="flex-1" />
               <span className="text-[10px] text-muted-foreground">
-                {hasFindingContext ? `${findings.length} findings - up to 20 in context` : "General workspace context"}
+                {chatReadOnly ? "Read-only static demo" : hasFindingContext ? `${findings.length} findings - up to 20 in context` : "General workspace context"}
               </span>
               <Button
                 size="sm"
                 onClick={() => send(input)}
-                disabled={loading || aiDisabled || !input.trim()}
+                disabled={loading || aiDisabled || chatReadOnly || !input.trim()}
                 data-testid="button-chat-send"
               >
                 {loading

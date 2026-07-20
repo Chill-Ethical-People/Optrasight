@@ -2,6 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { AppShell } from "@/components/AppShell";
+import { EmailDeliverySettingsDialog } from "@/components/EmailDeliverySettingsDialog";
+import { KelaIntegrationCard } from "@/components/KelaIntegrationCard";
+import { ConnectorPanel } from "@/components/integrations/ConnectorPanel";
+import { CommunityIntegrationCard } from "@/components/integrations/CommunityIntegrationCard";
 import { PageHeader } from "@/components/PageHeader";
 import { Card } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
@@ -9,6 +13,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Dialog,
@@ -21,14 +27,32 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { STATIC_DEMO_MODE } from "@/lib/staticDemoApi";
 import { showStaticDemoNotice } from "@/lib/staticDemoNotice";
+import { useAuth } from "@/lib/auth";
 import {
   BATCH_ONE_AI_TASKS,
   AI_PROVIDERS,
   type AiProviderSummary,
   type AiTask,
   type AiProviderKind,
+  type XIntegrationSettingsDTO,
+  type SmtpSettingsDTO,
 } from "@shared/schema";
-import { Sparkles, Eye, EyeOff, Save, Loader2, CheckCircle2, XCircle, Plus, Trash2, Settings2 } from "lucide-react";
+import {
+  Sparkles,
+  Eye,
+  EyeOff,
+  Save,
+  Loader2,
+  CheckCircle2,
+  XCircle,
+  Plus,
+  Trash2,
+  Settings2,
+  RadioTower,
+  ExternalLink,
+  KeyRound,
+  MailCheck,
+} from "lucide-react";
 
 const PROVIDER_META: Record<
   AiProviderKind,
@@ -266,6 +290,10 @@ const TASK_META: Partial<Record<AiTask, { label: string; description: string }>>
   osint_chat: {
     label: "Analyst chat",
     description: "Power the floating OSINT chatroom with scoped findings and fetched URL context.",
+  },
+  client_digest: {
+    label: "Client email digest",
+    description: "Draft scheduled client-facing summaries from triaged, client-scoped threat intelligence.",
   },
   threat_actor_enrichment: {
     label: "Threat actor profile",
@@ -736,10 +764,292 @@ function ProviderEditDialog({
   );
 }
 
+function IntegrationsPanel({ readOnly = false }: { readOnly?: boolean }) {
+  const { toast } = useToast();
+  const [emailSettingsOpen, setEmailSettingsOpen] = useState(false);
+  const [enabled, setEnabled] = useState(false);
+  const [bearerToken, setBearerToken] = useState("");
+  const [showToken, setShowToken] = useState(false);
+  const [clearBearerToken, setClearBearerToken] = useState(false);
+
+  const { data: settings, isLoading } = useQuery<XIntegrationSettingsDTO>({
+    queryKey: ["/api/v1/integrations/x"],
+    enabled: !readOnly,
+  });
+  const { data: smtpSettings } = useQuery<SmtpSettingsDTO>({
+    queryKey: ["/api/v1/email-delivery/settings"],
+    enabled: !readOnly,
+  });
+
+  useEffect(() => {
+    if (!settings) return;
+    setEnabled(settings.enabled);
+    setBearerToken("");
+    setShowToken(false);
+    setClearBearerToken(false);
+  }, [settings]);
+
+  const save = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("PUT", "/api/v1/integrations/x", {
+        enabled,
+        bearerToken: bearerToken || undefined,
+        clearBearerToken,
+      });
+      return response.json() as Promise<XIntegrationSettingsDTO>;
+    },
+    onSuccess: async (saved) => {
+      setBearerToken("");
+      setClearBearerToken(false);
+      await queryClient.invalidateQueries({ queryKey: ["/api/v1/integrations/x"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/v1/osint/sources"] });
+      toast({
+        title: "X integration saved",
+        description: saved.enabled
+          ? "FalconFeeds.io alerts are enabled for the next OSINT ingest."
+          : "FalconFeeds.io ingestion is disabled.",
+      });
+    },
+    onError: (error: Error) => toast({
+      title: "Could not save X integration",
+      description: error.message,
+      variant: "destructive",
+    }),
+  });
+
+  const test = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/v1/integrations/x/test", {});
+      return response.json() as Promise<{ ok: true; username: string }>;
+    },
+    onSuccess: async (result) => {
+      await queryClient.invalidateQueries({ queryKey: ["/api/v1/integrations/x"] });
+      toast({ title: "X connection verified", description: `Connected to @${result.username}.` });
+    },
+    onError: (error: Error) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/v1/integrations/x"] });
+      toast({ title: "X connection failed", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const configured = readOnly ? false : settings?.configured === true;
+  const status = !enabled
+    ? { label: "Disabled", tone: "border-border bg-muted/40 text-muted-foreground" }
+    : configured
+      ? { label: "Configured", tone: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" }
+      : { label: "Credential required", tone: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300" };
+  const emailStatus = !smtpSettings?.enabled
+    ? { label: "Disabled", tone: "border-border bg-muted/40 text-muted-foreground" }
+    : smtpSettings.configured
+      ? { label: "Configured", tone: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" }
+      : { label: "Setup required", tone: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300" };
+
+  return (
+    <section className="space-y-4">
+      <div>
+        <div className="text-sm font-semibold">Connected services</div>
+        <div className="mt-1 text-xs text-muted-foreground">
+          Manage inbound intelligence sources and outbound analyst delivery channels.
+        </div>
+      </div>
+
+      <ConnectorPanel
+        icon={<MailCheck size={18} />}
+        title="Email delivery"
+        description="Send approved client briefs through the workspace SMTP account."
+        iconClassName="border-cyan-500/20 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300"
+        badges={<Badge variant="outline" className={emailStatus.tone}>{emailStatus.label}</Badge>}
+        action={<Button
+            variant="outline"
+            onClick={() => {
+              if (readOnly) {
+                showStaticDemoNotice({ kind: "write", action: "Email integration changes restricted" });
+                return;
+              }
+              setEmailSettingsOpen(true);
+            }}
+            className={readOnly ? "cursor-not-allowed opacity-55 hover:opacity-70" : undefined}
+          >
+            <Settings2 size={14} className="mr-2" />Configure
+          </Button>}
+      >
+        <div className="bg-muted/10 px-5 py-4 text-xs text-muted-foreground">
+          {smtpSettings?.configured ? (
+            <div className="flex flex-wrap gap-x-5 gap-y-2">
+              <span>Sender <strong className="font-medium text-foreground">{smtpSettings.fromAddress}</strong></span>
+              <span>Server <strong className="font-mono font-medium text-foreground">{smtpSettings.host}:{smtpSettings.port}</strong></span>
+              <span>{smtpSettings.secure ? "Implicit TLS" : "STARTTLS"}</span>
+            </div>
+          ) : "Open Configure to add a workspace SMTP account."}
+        </div>
+      </ConnectorPanel>
+
+      <ConnectorPanel
+        icon={<RadioTower size={18} />}
+        title="X ransomware alerts"
+        description="Ingest ransomware and extortion early warnings from FalconFeeds.io through the official X API."
+        badges={<Badge variant="outline" className={status.tone}>{status.label}</Badge>}
+        action={
+          <div className="flex items-center gap-3">
+            <Label htmlFor="x-integration-enabled" className="text-xs text-muted-foreground">Enable ingest</Label>
+            <Switch
+              id="x-integration-enabled"
+              checked={enabled}
+              onCheckedChange={setEnabled}
+              disabled={readOnly}
+              aria-label="Enable FalconFeeds.io ingestion"
+            />
+          </div>
+        }
+      >
+
+        <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_280px]">
+          <div className="space-y-5 px-5 py-5">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <Label>Monitored account</Label>
+                <div className="mt-2 flex h-10 items-center justify-between rounded-md border bg-muted/20 px-3 text-sm">
+                  <span className="font-mono">@FalconFeedsio</span>
+                  <a
+                    href="https://x.com/FalconFeedsio"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-muted-foreground hover:text-foreground"
+                    aria-label="Open FalconFeeds.io on X"
+                  >
+                    <ExternalLink size={14} />
+                  </a>
+                </div>
+              </div>
+              <div>
+                <Label>Collection scope</Label>
+                <div className="mt-2 flex h-10 items-center rounded-md border bg-muted/20 px-3 text-sm">
+                  Ransomware, extortion, leak-site alerts
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <Label htmlFor="x-bearer-token">X API bearer token</Label>
+              <div className="mt-2 flex gap-2">
+                <div className="relative flex-1">
+                  <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={14} />
+                  <Input
+                    id="x-bearer-token"
+                    type={showToken ? "text" : "password"}
+                    value={bearerToken}
+                    onChange={(event) => {
+                      setBearerToken(event.target.value);
+                      setClearBearerToken(false);
+                    }}
+                    placeholder={configured ? "Saved, leave blank to keep" : "Paste bearer token"}
+                    className="pl-9 font-mono"
+                    autoComplete="new-password"
+                    spellCheck={false}
+                    disabled={readOnly || settings?.managedByEnvironment}
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setShowToken((current) => !current)}
+                  disabled={readOnly || settings?.managedByEnvironment}
+                  aria-label={showToken ? "Hide bearer token" : "Show bearer token"}
+                >
+                  {showToken ? <EyeOff size={15} /> : <Eye size={15} />}
+                </Button>
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground">
+                {settings?.managedByEnvironment
+                  ? "Credential is supplied by the server environment and cannot be changed here."
+                  : "The token is retained only in the server-side secrets store and is never returned to the browser."}
+              </p>
+            </div>
+
+            {settings?.hasBearerToken && !settings.managedByEnvironment ? (
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+                <Checkbox
+                  checked={clearBearerToken}
+                  onCheckedChange={(checked) => {
+                    setClearBearerToken(checked === true);
+                    if (checked) setBearerToken("");
+                  }}
+                  disabled={readOnly}
+                />
+                Remove the saved bearer token when settings are saved
+              </label>
+            ) : null}
+          </div>
+
+          <aside className="border-t bg-muted/10 px-5 py-5 lg:border-l lg:border-t-0">
+            <div className="text-xs font-medium uppercase text-muted-foreground">Connection health</div>
+            <div className="mt-4 space-y-3 text-xs">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-muted-foreground">Credential</span>
+                <span className="font-medium">{configured ? "Available" : "Not configured"}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-muted-foreground">Reliability</span>
+                <span className="font-medium">B · Usually reliable</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-muted-foreground">Last tested</span>
+                <span className="text-right font-medium">{settings?.lastTestedAt ? fmtTime(settings.lastTestedAt) : "Never"}</span>
+              </div>
+            </div>
+            {settings?.lastTestMessage ? (
+              <div className={`mt-4 rounded-md border px-3 py-2 text-xs ${settings.lastTestOk ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300" : "border-rose-500/20 bg-rose-500/5 text-rose-700 dark:text-rose-300"}`}>
+                {settings.lastTestMessage}
+              </div>
+            ) : null}
+            <div className="mt-5 flex flex-col gap-2">
+              <Button
+                variant="outline"
+                onClick={() => test.mutate()}
+                disabled={readOnly || test.isPending || !configured}
+              >
+                {test.isPending ? <Loader2 size={14} className="mr-2 animate-spin" /> : <RadioTower size={14} className="mr-2" />}
+                Test connection
+              </Button>
+              <Button
+                onClick={() => save.mutate()}
+                disabled={readOnly || save.isPending || isLoading || (enabled && !configured && !bearerToken)}
+              >
+                {save.isPending ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Save size={14} className="mr-2" />}
+                Save integration
+              </Button>
+            </div>
+          </aside>
+        </div>
+      </ConnectorPanel>
+
+      <KelaIntegrationCard readOnly={readOnly} />
+
+      <div className="pt-2">
+        <div className="text-sm font-semibold">Community and open-standard connectors</div>
+        <p className="mt-1 text-xs text-muted-foreground">Free services remain subject to provider fair-use terms and workspace-specific quotas.</p>
+      </div>
+      {(["abusech", "taxii", "misp", "urlscan", "greynoise"] as const).map((kind) => (
+        <CommunityIntegrationCard key={kind} kind={kind} readOnly={readOnly} />
+      ))}
+
+      <EmailDeliverySettingsDialog
+        open={emailSettingsOpen}
+        onOpenChange={setEmailSettingsOpen}
+        settings={smtpSettings}
+      />
+    </section>
+  );
+}
+
 export default function AISetup() {
   const { toast } = useToast();
+  const { user } = useAuth();
+  const mssMode = user?.tenant.operatingMode === "mss";
   const [editing, setEditing] = useState<Partial<AiProviderSummary> | null>(null);
   const [editOpen, setEditOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("providers");
 
   const { data: providersData, isLoading: providersLoading } = useQuery<ProvidersResp>({
     queryKey: ["/api/v1/ai/providers"],
@@ -751,8 +1061,9 @@ export default function AISetup() {
   });
   const assignments = assignmentsData?.assignments;
   const visibleTasks = useMemo(
-    () => assignmentsData?.tasks ?? providersData?.tasks ?? [...BATCH_ONE_AI_TASKS],
-    [assignmentsData?.tasks, providersData?.tasks],
+    () => (assignmentsData?.tasks ?? providersData?.tasks ?? [...BATCH_ONE_AI_TASKS])
+      .filter((task) => mssMode || task !== "client_digest"),
+    [assignmentsData?.tasks, providersData?.tasks, mssMode],
   );
 
   const [draftAssignments, setDraftAssignments] = useState<Record<string, string>>({});
@@ -804,33 +1115,46 @@ export default function AISetup() {
     <AppShell>
       <div className="px-6 md:px-10 py-8 max-w-[1400px]">
         <PageHeader
-          title="AI provider setup"
-          description="Configure language-model providers and route each OptraSight AI task to the model best suited for it."
+          title="AI & integrations"
+          description="Manage analysis providers, task routing, and authenticated intelligence-source connections."
           actions={
             <div className="flex items-center gap-2">
-              <Badge variant="secondary" className="font-mono">
-                <Sparkles size={12} className="mr-1" />
-                {usableCount}/{providers.length} live
-              </Badge>
-              <Button
-                size="sm"
-                onClick={() => {
-                  if (STATIC_DEMO_MODE) {
-                    showStaticDemoNotice({ kind: "write", action: "Provider creation restricted" });
-                    return;
-                  }
-                  setEditing(null);
-                  setEditOpen(true);
-                }}
-                className={STATIC_DEMO_MODE ? "cursor-not-allowed opacity-55 hover:opacity-70" : undefined}
-                data-testid="button-add-provider"
-                title={STATIC_DEMO_MODE ? "Provider editing is disabled in the static public demo" : undefined}
-              >
-                <Plus size={14} className="mr-1.5" /> Add provider
-              </Button>
+              {activeTab === "providers" ? (
+                <>
+                  <Badge variant="secondary" className="font-mono">
+                    <Sparkles size={12} className="mr-1" />
+                    {usableCount}/{providers.length} live
+                  </Badge>
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      if (STATIC_DEMO_MODE) {
+                        showStaticDemoNotice({ kind: "write", action: "Provider creation restricted" });
+                        return;
+                      }
+                      setEditing(null);
+                      setEditOpen(true);
+                    }}
+                    className={STATIC_DEMO_MODE ? "cursor-not-allowed opacity-55 hover:opacity-70" : undefined}
+                    data-testid="button-add-provider"
+                    title={STATIC_DEMO_MODE ? "Provider editing is disabled in the static public demo" : undefined}
+                  >
+                    <Plus size={14} className="mr-1.5" /> Add provider
+                  </Button>
+                </>
+              ) : (
+                <Badge variant="secondary"><RadioTower size={12} className="mr-1" />Source integrations</Badge>
+              )}
             </div>
           }
         />
+
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="mb-6">
+          <TabsList>
+            <TabsTrigger value="providers"><Sparkles size={14} className="mr-2" />AI providers</TabsTrigger>
+            <TabsTrigger value="integrations"><RadioTower size={14} className="mr-2" />Integrations</TabsTrigger>
+          </TabsList>
+        </Tabs>
 
         {STATIC_DEMO_MODE && (
           <Card className="mb-6 border-primary/20 bg-primary/5 p-4 text-sm text-muted-foreground">
@@ -838,7 +1162,7 @@ export default function AISetup() {
           </Card>
         )}
 
-        <section className="mb-8">
+        {activeTab === "providers" ? <><section className="mb-8">
           <div className="flex items-center gap-2 mb-3">
             <div className="text-sm font-semibold">Providers</div>
             <div className="text-xs text-muted-foreground">{providers.length} configured</div>
@@ -965,7 +1289,7 @@ export default function AISetup() {
               Save an API key, enable the provider, and pass its live test to assign tasks and unlock AI features.
             </div>
           )}
-        </section>
+        </section></> : <IntegrationsPanel readOnly={STATIC_DEMO_MODE} />}
 
         <ProviderEditDialog open={editOpen} onOpenChange={setEditOpen} initial={editing} readOnly={STATIC_DEMO_MODE} />
       </div>

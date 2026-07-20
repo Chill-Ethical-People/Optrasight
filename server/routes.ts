@@ -9,8 +9,19 @@ import {
   platformUserUpdateSchema,
   platformUserBulkActionSchema,
   aiProviderUpsertSchema, aiAssignmentUpdateSchema,
-  osintScanSchema, osintAnalyzeSchema, osintOverviewSchema,
+  osintAnalyzeSchema, osintOverviewSchema, osintFindingPatchSchema,
   huntQueryCreateSchema,
+  clientProfileCreateSchema, clientProfileUpdateSchema, clientTaxonomyOptionCreateSchema,
+  clientDigestGenerateSchema, clientDigestPatchSchema,
+  smtpSettingsUpdateSchema,
+  xIntegrationSettingsUpdateSchema,
+  kelaIntegrationSettingsUpdateSchema,
+  communityIntegrationKindSchema,
+  communityIntegrationSettingsUpdateSchema,
+  communityEnrichmentLookupSchema,
+  detectionRuleCreateSchema, detectionRulePatchSchema, detectionRuleDeploySchema,
+  detectionRuleValidationSchema,
+  workspaceOperatingModeSchema,
   // v2.30.3 — Threat Actor Profile (TAP) schemas
   threatActorCreateSchema, threatActorPatchSchema, threatActorEnrichSchema,
   threatActorTtpSchema, threatActorToolSchema, threatActorCampaignSchema,
@@ -20,21 +31,44 @@ import {
   AI_TASKS, BATCH_ONE_AI_TASKS, AI_PROVIDERS,
   CLIENT_TYPES, GEOS, INDUSTRIES, MONITORED_TECHNOLOGIES, HUNT_LANGUAGES,
   OSINT_CATEGORY_LABELS, OSINT_CATEGORY_ORDER, OSINT_OVERVIEW_PERSONAS,
-  type User,
+  type User, type OsintFindingDTO,
 } from "@shared/schema";
 import { hasCapability, isBatchOneApiAllowed, resolveCapabilities, type AccessMode, type Capability } from "@shared/accessPolicy";
 
 const BATCH_ONE_RELEASE = process.env.OPTRASIGHT_BATCH_ONE_RELEASE !== "0";
 const AI_TASKS_FOR_RELEASE = BATCH_ONE_RELEASE ? BATCH_ONE_AI_TASKS : AI_TASKS;
+const TEST_AUTH_BYPASS = process.env.OPTRASIGHT_TEST_AUTH_BYPASS === "1";
 import { fromZodError } from "zod-validation-error";
-import { runChatTriage, runChatDeepDive, runChatConverse, ChatLiveAiError, type ChatRangeKey } from "./osintChat";
+import { runChatDeepDive, runChatConverse, ChatLiveAiError, type ChatRangeKey } from "./osintChat";
 import { runAutoAnalyzeNow, runAutoFetchNow } from "./backgroundJobs";
 import { buildThreatActorDocx } from "./tapDocx";
+import { buildClientTemplateDocx, buildClientTemplateEml, buildClientDigestEml, buildClientDigestEmailContent, type ClientEmailLogo } from "./clientDigestExport";
+import { classifySmtpFailure, clearSmtpCooldown, describeSmtpError, getSmtpCooldownSeconds, getSmtpSettings, saveSmtpSettings, sendSmtpEmail, setSmtpCooldown, verifySmtpConnection } from "./emailDelivery";
+import { getXIntegrationSettings, saveXIntegrationSettings, testXIntegration } from "./socialIntegrations";
+import { getKelaIntegrationSettings, saveKelaIntegrationSettings, testKelaIntegration } from "./kelaIntegration";
+import { getCommunityIntegrationSettings, lookupCommunityEnrichment, saveCommunityIntegrationSettings, testCommunityIntegration } from "./communityIntegrations";
 import { generateActorPortrait, getPortraitGeneratorAvailability, PORTRAITS_DIR } from "./tapPortrait";
+import { ClientLogoUploadService, LocalImageObjectStore, UploadValidationError } from "./imageUploadService";
 import { validateAiProviderBaseUrl } from "./aiProviderSecurity";
+import { buildOsintStixBundle } from "./stixExport";
 import express from "express";
-import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, readdirSync } from "node:fs";
+import { readFileSync, existsSync, unlinkSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { spawn } from "node:child_process";
+
+const CLIENT_EMAIL_LOGOS_DIR = join(process.cwd(), "data", "client-email-logos");
+const clientLogoUploads = new ClientLogoUploadService(
+  new LocalImageObjectStore(CLIENT_EMAIL_LOGOS_DIR, "/client-email-logos"),
+);
+
+async function loadClientEmailLogo(publicUrl: string | null | undefined): Promise<ClientEmailLogo | undefined> {
+  const data = await clientLogoUploads.read(publicUrl);
+  if (!data || !publicUrl) return undefined;
+  return {
+    data,
+    mimeType: new URL(publicUrl, "http://optrasight.invalid").pathname.endsWith(".png") ? "image/png" : "image/jpeg",
+  };
+}
 
 type RunAiJobOptions<T = any> = {
   tenantId: string;
@@ -71,6 +105,79 @@ function runAiJob<T = any>(opts: RunAiJobOptions<T>) {
     }
   });
   return { jobId, status: "queued", kind: opts.kind, targetLabel: opts.targetLabel, targetUrl };
+}
+
+function runOsintAnalysisWorker(opts: {
+  tenantId: string;
+  payload: { ids?: string[]; onlyUnanalyzed?: boolean };
+  createdBy?: string | null;
+  targetLabel: string;
+  targetUrl: string;
+}) {
+  const jobId = storage.createAiJob({
+    tenantId: opts.tenantId,
+    kind: "osint_analysis",
+    payload: opts.payload,
+    createdBy: opts.createdBy ?? null,
+    targetLabel: opts.targetLabel,
+    targetUrl: opts.targetUrl,
+  });
+  const workerArgs = [jobId, opts.tenantId, Buffer.from(JSON.stringify(opts.payload), "utf8").toString("base64url")];
+  const productionWorker = join(process.cwd(), "dist", "osintAnalysisWorker.cjs");
+  const command = existsSync(productionWorker)
+    ? process.execPath
+    : join(process.cwd(), "node_modules", ".bin", "tsx");
+  const args = existsSync(productionWorker)
+    ? [productionWorker, ...workerArgs]
+    : [join(process.cwd(), "server", "osintAnalysisWorker.ts"), ...workerArgs];
+  const child = spawn(command, args, {
+    cwd: process.cwd(),
+    env: process.env,
+    stdio: ["ignore", "inherit", "inherit"],
+  });
+  child.once("error", (error) => storage.failAiJob(jobId, error));
+  child.once("exit", (code, signal) => {
+    if (code === 0) return;
+    const current = storage.getAiJob(opts.tenantId, jobId);
+    if (current?.status === "queued" || current?.status === "running") {
+      storage.failAiJob(jobId, new Error(`OSINT analysis worker exited (${signal || code || "unknown"}).`));
+    }
+  });
+  return { jobId, status: "queued", kind: "osint_analysis", targetLabel: opts.targetLabel, targetUrl: opts.targetUrl };
+}
+
+function runChatTriageWorker(opts: {
+  jobId: string;
+  tenantId: string;
+  payload: {
+    range: ChatRangeKey;
+    findingIds?: string[];
+    analysisMode: "cirt" | "client_impact";
+    clientIds: string[];
+    actor: string;
+  };
+}) {
+  const workerArgs = [opts.jobId, opts.tenantId, Buffer.from(JSON.stringify(opts.payload), "utf8").toString("base64url")];
+  const productionWorker = join(process.cwd(), "dist", "chatTriageWorker.cjs");
+  const command = existsSync(productionWorker)
+    ? process.execPath
+    : join(process.cwd(), "node_modules", ".bin", "tsx");
+  const args = existsSync(productionWorker)
+    ? [productionWorker, ...workerArgs]
+    : [join(process.cwd(), "server", "chatTriageWorker.ts"), ...workerArgs];
+  const child = spawn(command, args, {
+    cwd: process.cwd(),
+    env: process.env,
+    stdio: ["ignore", "inherit", "inherit"],
+  });
+  child.once("error", (error) => storage.failAiJob(opts.jobId, error));
+  child.once("exit", (code, signal) => {
+    if (code === 0) return;
+    const current = storage.getAiJob(opts.tenantId, opts.jobId);
+    if (current?.status === "queued" || current?.status === "running") {
+      storage.failAiJob(opts.jobId, new Error(`Chat triage worker exited (${signal || code || "unknown"}).`));
+    }
+  });
 }
 
 // ---- v2.28 dictionaries (technologies + threat actors) ----
@@ -112,19 +219,6 @@ interface AuthedRequest extends Request {
   effectiveTenantId?: string;
 }
 
-// v2.7 — singleton tracker for the broad OSINT ingest. Module-level so both
-// the POST trigger and the GET status endpoint share state.
-const globalOsintRun: {
-  busy: boolean;
-  startedAt: string | null;
-  finishedAt: string | null;
-  summary: any;
-  error: string | null;
-  progressPct: number;
-  progressDetail: { attempted: number; total: number; parsed: number; feedsOk: number } | null;
-  workspaceId: string | null;
-} = { busy: false, startedAt: null, finishedAt: null, summary: null, error: null, progressPct: 0, progressDetail: null, workspaceId: null };
-
 function requireAuth(req: AuthedRequest, res: Response, next: NextFunction) {
   const auth = req.header("authorization") || "";
   const m = /^Bearer\s+(.+)$/i.exec(auth);
@@ -164,7 +258,15 @@ function requireAuth(req: AuthedRequest, res: Response, next: NextFunction) {
 }
 
 function accountSetupRequired(u: any): boolean {
+  if (TEST_AUTH_BYPASS) return false;
   return !!u.passwordMustChange || !(u.mfaEnabled && u.mfaVerifiedAt);
+}
+
+function requireMssOperatingMode(req: AuthedRequest, res: Response): boolean {
+  const mode = storage.getTenant(req.effectiveTenantId!)?.operatingMode;
+  if (mode === "mss") return true;
+  res.status(409).json({ detail: "Client management is available only when the workspace is in MSS mode." });
+  return false;
 }
 
 function isAccountSetupRoute(path: string): boolean {
@@ -198,6 +300,28 @@ function tenantScopeForRequest(req: AuthedRequest, res: Response): string | unde
   return crossTenant ? undefined : req.effectiveTenantId;
 }
 
+function csvCell(value: unknown): string {
+  let text = value == null
+    ? ""
+    : Array.isArray(value)
+      ? value.join("; ")
+      : typeof value === "object"
+        ? JSON.stringify(value)
+        : String(value);
+  // Excel evaluates formula-like values even when quoted in CSV.
+  // Prefixing them with an apostrophe prevents formula execution on open.
+  if (/^[\t ]*[=+\-@]/.test(text)) text = `'${text}`;
+  return `"${text.replace(/\r?\n/g, " ").replace(/"/g, '""')}"`;
+}
+
+function iocsToText(iocs: Record<string, string[] | undefined> | null | undefined): string {
+  if (!iocs) return "";
+  return Object.entries(iocs)
+    .filter(([, values]) => Array.isArray(values) && values.length > 0)
+    .map(([kind, values]) => `${kind}: ${(values ?? []).join(" | ")}`)
+    .join("; ");
+}
+
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
   // ---- health ----
   // Unauthenticated. Used by load balancers / k8s probes. Returns the
@@ -214,6 +338,25 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // ---- auth ----
+  app.get("/api/v1/auth/test-session", (_req, res) => {
+    if (!TEST_AUTH_BYPASS) return res.status(404).json({ detail: "not found" });
+    const u = storage.createTestSession();
+    if (!u) return res.status(404).json({ detail: "no active test user available" });
+    res.json({
+      access_token: u.accessToken,
+      token_type: "bearer",
+      tenant_id: u.tenantId,
+      role: u.role,
+      email: u.email,
+      access_mode: u.accessMode,
+      capabilities: resolveCapabilities({
+        role: u.role,
+        accessMode: u.accessMode,
+        batchOne: BATCH_ONE_RELEASE,
+      }),
+    });
+  });
+
   app.post("/api/v1/auth/login", (req, res) => {
     const parsed = loginSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ detail: fromZodError(parsed.error).message });
@@ -250,9 +393,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       email: u.email,
       role: u.role,
       tenant: t,
-      passwordMustChange: !!(u as any).passwordMustChange,
-      mfaEnabled: !!(u as any).mfaEnabled,
-      mfaVerifiedAt: (u as any).mfaVerifiedAt ?? null,
+      passwordMustChange: TEST_AUTH_BYPASS ? false : !!(u as any).passwordMustChange,
+      mfaEnabled: TEST_AUTH_BYPASS ? true : !!(u as any).mfaEnabled,
+      mfaVerifiedAt: TEST_AUTH_BYPASS ? ((u as any).mfaVerifiedAt ?? new Date().toISOString()) : ((u as any).mfaVerifiedAt ?? null),
       access_mode: (u as any).accessMode ?? "credentialed",
       capabilities: req.capabilities ?? [],
     };
@@ -260,6 +403,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       body.mfaSetup = storage.getMfaSetup(u.id);
     }
     res.json(body);
+  });
+
+  app.patch("/api/v1/workspace/operating-mode", requireAuth, (req: AuthedRequest, res) => {
+    if (!requireAdmin(req, res)) return;
+    const parsed = workspaceOperatingModeSchema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ detail: fromZodError(parsed.error).message });
+    const tenant = storage.setTenantOperatingMode(
+      req.effectiveTenantId!,
+      parsed.data.operatingMode,
+      req.user?.email || "admin",
+    );
+    if (!tenant) return res.status(404).json({ detail: "workspace not found" });
+    res.json({ tenant });
   });
 
   app.post("/api/v1/auth/change-password", requireAuth, (req: AuthedRequest, res) => {
@@ -527,6 +683,493 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     });
   });
 
+  // ---- Batch Two client profile ----
+  app.get("/api/v1/client-taxonomy-options", requireAuth, (req: AuthedRequest, res) => {
+    if (!requireMssOperatingMode(req, res)) return;
+    res.json({ options: storage.listClientTaxonomyOptions(req.effectiveTenantId!) });
+  });
+
+  app.post("/api/v1/client-taxonomy-options", requireAuth, (req: AuthedRequest, res) => {
+    if (!requireAdmin(req, res)) return;
+    if (!requireMssOperatingMode(req, res)) return;
+    const parsed = clientTaxonomyOptionCreateSchema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ detail: fromZodError(parsed.error).message });
+    try {
+      const option = storage.createClientTaxonomyOption(req.effectiveTenantId!, {
+        ...parsed.data,
+        actor: req.user?.email || "admin",
+      });
+      res.status(201).json(option);
+    } catch (e: any) {
+      res.status(400).json({ detail: String(e?.message ?? e) });
+    }
+  });
+
+  app.get("/api/v1/client-profiles", requireAuth, (req: AuthedRequest, res) => {
+    if (!requireMssOperatingMode(req, res)) return;
+    const profiles = storage.listClientProfiles(req.effectiveTenantId!, {
+      includeArchived: req.user?.role === "admin" && String(req.query.includeArchived || "") === "true",
+    });
+    res.json({
+      profiles: profiles.map((profile) => req.user?.role === "admin"
+        ? profile
+        : { ...profile, notificationEmails: [] }),
+    });
+  });
+
+  app.post("/api/v1/client-profiles", requireAuth, (req: AuthedRequest, res) => {
+    if (!requireAdmin(req, res)) return;
+    if (!requireMssOperatingMode(req, res)) return;
+    const parsed = clientProfileCreateSchema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ detail: fromZodError(parsed.error).message });
+    try {
+      const profile = storage.createClientProfile(req.effectiveTenantId!, {
+        ...parsed.data,
+        actor: req.user?.email || "admin",
+      });
+      res.status(201).json(profile);
+    } catch (e: any) {
+      res.status(400).json({ detail: String(e?.message ?? e) });
+    }
+  });
+
+  app.patch("/api/v1/client-profiles/:cid", requireAuth, (req: AuthedRequest, res) => {
+    if (!requireAdmin(req, res)) return;
+    if (!requireMssOperatingMode(req, res)) return;
+    const parsed = clientProfileUpdateSchema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ detail: fromZodError(parsed.error).message });
+    try {
+      const profile = storage.updateClientProfile(req.effectiveTenantId!, req.params.cid, {
+        ...parsed.data,
+        actor: req.user?.email || "admin",
+      });
+      if (!profile) return res.status(404).json({ detail: "client profile not found" });
+      res.json(profile);
+    } catch (e: any) {
+      res.status(400).json({ detail: String(e?.message ?? e) });
+    }
+  });
+
+  app.delete("/api/v1/client-profiles/:cid", requireAuth, (req: AuthedRequest, res) => {
+    if (!requireAdmin(req, res)) return;
+    if (!requireMssOperatingMode(req, res)) return;
+    const profile = storage.updateClientProfile(req.effectiveTenantId!, req.params.cid, {
+      isActive: false,
+      actor: req.user?.email || "admin",
+    });
+    if (!profile) return res.status(404).json({ detail: "client profile not found" });
+    res.status(204).end();
+  });
+
+  app.get("/api/v1/client-profiles/:cid/digests", requireAuth, (req: AuthedRequest, res) => {
+    if (!requireMssOperatingMode(req, res)) return;
+    res.json({ digests: storage.listClientDigests(req.effectiveTenantId!, req.params.cid) });
+  });
+
+  app.get("/api/v1/email-delivery/settings", requireAuth, (req: AuthedRequest, res) => {
+    if (!requireAdmin(req, res)) return;
+    res.json(getSmtpSettings(req.effectiveTenantId!));
+  });
+
+  app.put("/api/v1/email-delivery/settings", requireAuth, (req: AuthedRequest, res) => {
+    if (!requireAdmin(req, res)) return;
+    const parsed = smtpSettingsUpdateSchema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ detail: fromZodError(parsed.error).message });
+    const settings = saveSmtpSettings(req.effectiveTenantId!, parsed.data);
+    storage.appendAudit(req.effectiveTenantId!, req.user?.email || "admin", "email_delivery.settings.update", "smtp", {
+      enabled: settings.enabled,
+      host: settings.host,
+      port: settings.port,
+      secure: settings.secure,
+      fromAddress: settings.fromAddress,
+      hasPassword: settings.hasPassword,
+    });
+    res.json(settings);
+  });
+
+  app.post("/api/v1/email-delivery/test", requireAuth, async (req: AuthedRequest, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const result = await verifySmtpConnection(req.effectiveTenantId!);
+      storage.appendAudit(req.effectiveTenantId!, req.user?.email || "admin", "email_delivery.connection_test", "smtp", {
+        verified: true,
+      });
+      res.json(result);
+    } catch (error) {
+      const detail = describeSmtpError(error);
+      storage.appendAudit(req.effectiveTenantId!, req.user?.email || "admin", "email_delivery.connection_test_failed", "smtp", {
+        error: detail.slice(0, 500),
+      });
+      res.status(502).json({ detail });
+    }
+  });
+
+  app.get("/api/v1/integrations/x", requireAuth, (req: AuthedRequest, res) => {
+    if (!requireAdmin(req, res)) return;
+    res.json(getXIntegrationSettings(req.effectiveTenantId!));
+  });
+
+  app.put("/api/v1/integrations/x", requireAuth, (req: AuthedRequest, res) => {
+    if (!requireAdmin(req, res)) return;
+    const parsed = xIntegrationSettingsUpdateSchema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ detail: fromZodError(parsed.error).message });
+    const settings = saveXIntegrationSettings(req.effectiveTenantId!, parsed.data);
+    storage.bulkUpdateOsintSources(["osrc-1050"], settings.enabled ? "enable" : "disable");
+    storage.appendAudit(req.effectiveTenantId!, req.user?.email || "admin", "integration.x.settings.update", "x-falconfeeds", {
+      enabled: settings.enabled,
+      configured: settings.configured,
+      accountUsername: settings.accountUsername,
+    });
+    res.json(settings);
+  });
+
+  app.post("/api/v1/integrations/x/test", requireAuth, async (req: AuthedRequest, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const result = await testXIntegration(req.effectiveTenantId!);
+      storage.appendAudit(req.effectiveTenantId!, req.user?.email || "admin", "integration.x.connection_test", "x-falconfeeds", {
+        verified: true,
+        accountUsername: result.username,
+      });
+      res.json(result);
+    } catch (error: any) {
+      const detail = String(error?.message || error).slice(0, 500);
+      storage.appendAudit(req.effectiveTenantId!, req.user?.email || "admin", "integration.x.connection_test_failed", "x-falconfeeds", {
+        error: detail,
+      });
+      res.status(502).json({ detail });
+    }
+  });
+
+  app.get("/api/v1/integrations/kela", requireAuth, (req: AuthedRequest, res) => {
+    if (!requireAdmin(req, res)) return;
+    res.json(getKelaIntegrationSettings(req.effectiveTenantId!));
+  });
+
+  app.put("/api/v1/integrations/kela", requireAuth, async (req: AuthedRequest, res) => {
+    if (!requireAdmin(req, res)) return;
+    const parsed = kelaIntegrationSettingsUpdateSchema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ detail: fromZodError(parsed.error).message });
+    try {
+      const settings = await saveKelaIntegrationSettings(req.effectiveTenantId!, parsed.data);
+      storage.bulkUpdateOsintSources(["osrc-1058"], settings.enabled ? "enable" : "disable");
+      storage.appendAudit(req.effectiveTenantId!, req.user?.email || "admin", "integration.kela.settings.update", "kela-stix", {
+        enabled: settings.enabled,
+        configured: settings.configured,
+        feedHost: settings.feedUrl ? new URL(settings.feedUrl).hostname : null,
+        authMode: settings.authMode,
+      });
+      res.json(settings);
+    } catch (error: any) {
+      res.status(400).json({ detail: String(error?.message || error) });
+    }
+  });
+
+  app.post("/api/v1/integrations/kela/test", requireAuth, async (req: AuthedRequest, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const result = await testKelaIntegration(req.effectiveTenantId!);
+      storage.appendAudit(req.effectiveTenantId!, req.user?.email || "admin", "integration.kela.connection_test", "kela-stix", {
+        verified: true,
+        objectCount: result.objectCount,
+      });
+      res.json(result);
+    } catch (error: any) {
+      const detail = String(error?.message || error).slice(0, 500);
+      storage.appendAudit(req.effectiveTenantId!, req.user?.email || "admin", "integration.kela.connection_test_failed", "kela-stix", {
+        error: detail,
+      });
+      res.status(502).json({ detail });
+    }
+  });
+
+  app.get("/api/v1/integrations/community/:kind", requireAuth, (req: AuthedRequest, res) => {
+    if (!requireAdmin(req, res)) return;
+    const kind = communityIntegrationKindSchema.safeParse(req.params.kind);
+    if (!kind.success) return res.status(404).json({ detail: "Unknown community connector." });
+    res.json(getCommunityIntegrationSettings(req.effectiveTenantId!, kind.data));
+  });
+
+  app.put("/api/v1/integrations/community/:kind", requireAuth, async (req: AuthedRequest, res) => {
+    if (!requireAdmin(req, res)) return;
+    const kind = communityIntegrationKindSchema.safeParse(req.params.kind);
+    if (!kind.success) return res.status(404).json({ detail: "Unknown community connector." });
+    const parsed = communityIntegrationSettingsUpdateSchema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ detail: fromZodError(parsed.error).message });
+    try {
+      const settings = await saveCommunityIntegrationSettings(req.effectiveTenantId!, kind.data, parsed.data);
+      const sourceIds: Record<string, string[]> = { abusech: ["osrc-1040", "osrc-1041", "osrc-1042"], taxii: ["osrc-1062"], misp: ["osrc-1063"], urlscan: [], greynoise: [] };
+      if (sourceIds[kind.data].length) storage.bulkUpdateOsintSources(sourceIds[kind.data], settings.enabled ? "enable" : "disable");
+      storage.appendAudit(req.effectiveTenantId!, req.user?.email || "admin", "integration.community.settings.update", kind.data, { enabled: settings.enabled, configured: settings.configured, mode: settings.mode });
+      res.json(settings);
+    } catch (error: any) {
+      res.status(400).json({ detail: String(error?.message || error) });
+    }
+  });
+
+  app.post("/api/v1/integrations/community/:kind/test", requireAuth, async (req: AuthedRequest, res) => {
+    if (!requireAdmin(req, res)) return;
+    const kind = communityIntegrationKindSchema.safeParse(req.params.kind);
+    if (!kind.success) return res.status(404).json({ detail: "Unknown community connector." });
+    try {
+      const result = await testCommunityIntegration(req.effectiveTenantId!, kind.data);
+      storage.appendAudit(req.effectiveTenantId!, req.user?.email || "admin", "integration.community.connection_test", kind.data, { verified: true });
+      res.json(result);
+    } catch (error: any) {
+      const detail = String(error?.message || error).slice(0, 500);
+      storage.appendAudit(req.effectiveTenantId!, req.user?.email || "admin", "integration.community.connection_test_failed", kind.data, { error: detail });
+      res.status(502).json({ detail });
+    }
+  });
+
+  app.post("/api/v1/integrations/community/:kind/lookup", requireAuth, async (req: AuthedRequest, res) => {
+    const kind = req.params.kind;
+    if (kind !== "urlscan" && kind !== "greynoise") return res.status(404).json({ detail: "This connector does not provide analyst lookup." });
+    const parsed = communityEnrichmentLookupSchema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ detail: fromZodError(parsed.error).message });
+    try {
+      const result = await lookupCommunityEnrichment(req.effectiveTenantId!, kind, parsed.data.observable);
+      storage.appendAudit(req.effectiveTenantId!, req.user?.email || "analyst", "integration.community.observable_lookup", kind, { observableType: /^\d/.test(parsed.data.observable) ? "ip" : /^https?:/.test(parsed.data.observable) ? "url" : "domain" });
+      res.json(result);
+    } catch (error: any) {
+      res.status(502).json({ detail: String(error?.message || error).slice(0, 500) });
+    }
+  });
+
+  app.get("/api/v1/client-profiles/:cid/email-template.docx", requireAuth, async (req: AuthedRequest, res, next: NextFunction) => {
+    try {
+      if (!requireMssOperatingMode(req, res)) return;
+      const client = storage.getClientProfile(req.effectiveTenantId!, req.params.cid);
+      if (!client) return res.status(404).json({ detail: "client profile not found" });
+      const buffer = await buildClientTemplateDocx(client, await loadClientEmailLogo(client.emailLogoUrl));
+      const safeName = client.name.replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 60) || "client";
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      res.setHeader("Content-Disposition", `attachment; filename="${safeName}_Threat_Intelligence_Email_Template.docx"`);
+      res.setHeader("Content-Length", String(buffer.byteLength));
+      res.end(buffer);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/v1/client-profiles/:cid/email-template.eml", requireAuth, async (req: AuthedRequest, res, next: NextFunction) => {
+    try {
+      if (!requireMssOperatingMode(req, res)) return;
+      const client = storage.getClientProfile(req.effectiveTenantId!, req.params.cid);
+      if (!client) return res.status(404).json({ detail: "client profile not found" });
+      const buffer = buildClientTemplateEml(client, await loadClientEmailLogo(client.emailLogoUrl));
+      const safeName = client.name.replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 60) || "client";
+      res.setHeader("Content-Type", "message/rfc822");
+      res.setHeader("Content-Disposition", `attachment; filename="${safeName}_Threat_Intelligence_Email_Template.eml"`);
+      res.setHeader("Content-Length", String(buffer.byteLength));
+      res.end(buffer);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/v1/client-profiles/:cid/email-logo", requireAuth, async (req: AuthedRequest, res, next: NextFunction) => {
+    if (!requireAdmin(req, res)) return;
+    if (!requireMssOperatingMode(req, res)) return;
+    const client = storage.getClientProfile(req.effectiveTenantId!, req.params.cid);
+    if (!client) return res.status(404).json({ detail: "client profile not found" });
+    const fileName = typeof req.body?.fileName === "string" ? req.body.fileName : "";
+    const contentBase64 = typeof req.body?.contentBase64 === "string" ? req.body.contentBase64 : "";
+    try {
+      const uploaded = await clientLogoUploads.store({ fileName, contentBase64 });
+      const logoUrl = `${uploaded.publicUrl}?v=${Date.now()}`;
+      const profile = storage.setClientEmailLogo(req.effectiveTenantId!, client.id, logoUrl, req.user?.email || "admin");
+      await clientLogoUploads.delete(client.emailLogoUrl);
+      res.status(201).json({ emailLogoUrl: logoUrl, bytes: uploaded.bytes, profile });
+    } catch (error) {
+      if (error instanceof UploadValidationError) {
+        return res.status(error.statusCode).json({ detail: error.message });
+      }
+      next(error);
+    }
+  });
+
+  app.delete("/api/v1/client-profiles/:cid/email-logo", requireAuth, async (req: AuthedRequest, res, next: NextFunction) => {
+    if (!requireAdmin(req, res)) return;
+    if (!requireMssOperatingMode(req, res)) return;
+    const client = storage.getClientProfile(req.effectiveTenantId!, req.params.cid);
+    if (!client) return res.status(404).json({ detail: "client profile not found" });
+    try {
+      await clientLogoUploads.delete(client.emailLogoUrl);
+      storage.setClientEmailLogo(req.effectiveTenantId!, client.id, null, req.user?.email || "admin");
+      res.status(204).end();
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.use("/client-email-logos", express.static(CLIENT_EMAIL_LOGOS_DIR, {
+    maxAge: "7d",
+    setHeaders: (response) => response.setHeader("Cache-Control", "public, max-age=604800, immutable"),
+  }));
+
+  app.post("/api/v1/client-profiles/:cid/digests/generate", requireAuth, (req: AuthedRequest, res) => {
+    if (!requireMssOperatingMode(req, res)) return;
+    const parsed = clientDigestGenerateSchema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ detail: fromZodError(parsed.error).message });
+    const client = storage.getClientProfile(req.effectiveTenantId!, req.params.cid);
+    if (!client) return res.status(404).json({ detail: "client profile not found" });
+    if (client.notificationEmails.length === 0) {
+      return res.status(400).json({ detail: "add at least one notification email before generating a client digest" });
+    }
+    const job = runAiJob({
+      tenantId: req.effectiveTenantId!,
+      kind: "client_digest_generation",
+      payload: {
+        clientId: client.id,
+        cadence: parsed.data.cadence ?? client.digestCadence,
+        findingIds: parsed.data.findingIds,
+      },
+      createdBy: req.user?.email ?? null,
+      targetLabel: `${client.name} ${parsed.data.cadence ?? client.digestCadence} client digest`,
+      targetUrl: `/#/client-briefs?client=${encodeURIComponent(client.id)}`,
+      work: () => storage.generateClientDigest(req.effectiveTenantId!, client.id, {
+        cadence: parsed.data.cadence,
+        findingIds: parsed.data.findingIds,
+        actor: req.user?.email || "analyst",
+      }),
+      providerLabel: (digest) => digest.aiProviderLabel,
+    });
+    res.status(202).json(job);
+  });
+
+  app.patch("/api/v1/client-profiles/:cid/digests/:did", requireAuth, (req: AuthedRequest, res) => {
+    if (!requireMssOperatingMode(req, res)) return;
+    const parsed = clientDigestPatchSchema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ detail: fromZodError(parsed.error).message });
+    const digest = storage.updateClientDigest(req.effectiveTenantId!, req.params.cid, req.params.did, {
+      ...parsed.data,
+      actor: req.user?.email || "analyst",
+    });
+    if (!digest) return res.status(404).json({ detail: "client digest not found" });
+    res.json(digest);
+  });
+
+  app.get("/api/v1/client-profiles/:cid/digests/:did/email.eml", requireAuth, async (req: AuthedRequest, res, next: NextFunction) => {
+    try {
+      if (!requireMssOperatingMode(req, res)) return;
+      const client = storage.getClientProfile(req.effectiveTenantId!, req.params.cid);
+      if (!client) return res.status(404).json({ detail: "client profile not found" });
+      const digest = storage.listClientDigests(req.effectiveTenantId!, client.id).find((item: { id: string }) => item.id === req.params.did);
+      if (!digest) return res.status(404).json({ detail: "client digest not found" });
+      const buffer = buildClientDigestEml(client, digest, await loadClientEmailLogo(client.emailLogoUrl));
+      const safeName = client.name.replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 60) || "client";
+      res.setHeader("Content-Type", "message/rfc822");
+      res.setHeader("Content-Disposition", `attachment; filename="${safeName}_${digest.cadence}_Threat_Intelligence_Draft.eml"`);
+      res.setHeader("Cache-Control", "private, no-store");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Content-Length", String(buffer.byteLength));
+      res.end(buffer);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/v1/client-profiles/:cid/digests/:did/send", requireAuth, async (req: AuthedRequest, res, next: NextFunction) => {
+    try {
+      if (!requireAdmin(req, res)) return;
+      if (!requireMssOperatingMode(req, res)) return;
+      const client = storage.getClientProfile(req.effectiveTenantId!, req.params.cid);
+      if (!client) return res.status(404).json({ detail: "client profile not found" });
+      const digest = storage.listClientDigests(req.effectiveTenantId!, client.id).find((item: { id: string }) => item.id === req.params.did);
+      if (!digest) return res.status(404).json({ detail: "client digest not found" });
+      if (digest.status !== "approved") {
+        return res.status(409).json({ detail: "approve the client brief before sending" });
+      }
+      const cooldownSeconds = getSmtpCooldownSeconds(req.effectiveTenantId!);
+      if (cooldownSeconds > 0) {
+        storage.appendAudit(req.effectiveTenantId!, req.user?.email || "admin", "client_digest.send_suppressed", digest.id, {
+          clientId: client.id,
+          reason: "smtp_cooldown_active",
+          retryAfterSeconds: cooldownSeconds,
+        });
+        res.setHeader("Retry-After", String(cooldownSeconds));
+        return res.status(429).json({
+          detail: "SMTP delivery is cooling down after a temporary provider failure. No new provider connection was attempted.",
+          code: "smtp_cooldown_active",
+          retryable: true,
+          retryAfterSeconds: cooldownSeconds,
+        });
+      }
+      const message = buildClientDigestEmailContent(client, digest, await loadClientEmailLogo(client.emailLogoUrl));
+      let delivery: Awaited<ReturnType<typeof sendSmtpEmail>>;
+      try {
+        delivery = await sendSmtpEmail(req.effectiveTenantId!, message);
+      } catch (error: any) {
+        const detail = describeSmtpError(error);
+        const failure = classifySmtpFailure(error);
+        if (failure.retryable && failure.retryAfterSeconds) {
+          setSmtpCooldown(req.effectiveTenantId!, failure.retryAfterSeconds);
+        }
+        storage.appendAudit(req.effectiveTenantId!, req.user?.email || "admin", "client_digest.send_failed", digest.id, {
+          clientId: client.id,
+          recipientCount: digest.recipients.length,
+          error: String(error?.message || error).slice(0, 500),
+          retryable: failure.retryable,
+          code: failure.code,
+        });
+        if (failure.retryAfterSeconds) res.setHeader("Retry-After", String(failure.retryAfterSeconds));
+        return res.status(failure.retryable ? 503 : 502).json({
+          detail,
+          code: failure.code,
+          retryable: failure.retryable,
+          retryAfterSeconds: failure.retryAfterSeconds,
+        });
+      }
+      clearSmtpCooldown(req.effectiveTenantId!);
+      storage.updateClientDigest(req.effectiveTenantId!, client.id, digest.id, {
+        status: "sent",
+        actor: req.user?.email || "admin",
+      });
+      storage.appendAudit(req.effectiveTenantId!, req.user?.email || "admin", "client_digest.send", digest.id, {
+        clientId: client.id,
+        recipientCount: digest.recipients.length,
+        acceptedCount: delivery.accepted.length,
+        rejectedCount: delivery.rejected.length,
+        messageId: delivery.messageId,
+      });
+      res.json({
+        status: "sent",
+        recipientCount: digest.recipients.length,
+        acceptedCount: delivery.accepted.length,
+        rejectedCount: delivery.rejected.length,
+        messageId: delivery.messageId,
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Compatibility view for older clients that expect one workspace profile.
+  app.get("/api/v1/client-profile", requireAuth, (req: AuthedRequest, res) => {
+    if (!requireMssOperatingMode(req, res)) return;
+    const profile = storage.getClientProfile(req.effectiveTenantId!);
+    if (!profile) return res.status(404).json({ detail: "client profile not found" });
+    // Notification contacts are operationally sensitive and are not needed
+    // for read-only review or threat-intel analysis.
+    res.json(req.user?.role === "admin" ? profile : { ...profile, notificationEmails: [] });
+  });
+
+  app.patch("/api/v1/client-profile", requireAuth, (req: AuthedRequest, res) => {
+    if (!requireAdmin(req, res)) return;
+    if (!requireMssOperatingMode(req, res)) return;
+    const parsed = clientProfileUpdateSchema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ detail: fromZodError(parsed.error).message });
+    const current = storage.getClientProfile(req.effectiveTenantId!);
+    if (!current) return res.status(404).json({ detail: "client profile not found" });
+    const updated = storage.updateClientProfile(req.effectiveTenantId!, current.id, {
+      ...parsed.data,
+      actor: req.user?.email || "admin",
+    });
+    if (!updated) return res.status(404).json({ detail: "client profile not found" });
+    res.json(updated);
+  });
+
   // ---- OSINT monitoring ----
   app.get("/api/v1/osint/sources", requireAuth, (req: AuthedRequest, res) => {
     const category = (req.query.category as string) || undefined;
@@ -615,20 +1258,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const dicts = loadDictionaries();
     res.json(dicts);
   });
-  app.post("/api/v1/osint/scan", requireAuth, async (req: AuthedRequest, res, next: NextFunction) => {
-    const parsed = osintScanSchema.safeParse(req.body || {});
-    if (!parsed.success) return res.status(400).json({ detail: fromZodError(parsed.error).message });
-    try {
-      const result = await storage.runOsintScan(req.effectiveTenantId!, parsed.data);
-      res.status(202).json(result);
-    } catch (e) {
-      next(e);
-    }
-  });
-
   // v2.7 broad OSINT ingest — walks the full 514-source catalog with deep
   // custom parsers + a generic RSS/Atom/RDF/JSON adapter, persists per tenant.
-  // Tracked async via a singleton tracker so the UI can poll progress.
+  // Tracked through the durable operations job table so history survives restarts.
   app.post("/api/v1/admin/osint/ingest", requireAuth, async (req: AuthedRequest, res) => {
     if (!requireAdmin(req, res)) return;
     const days = Math.min(Math.max(Number(req.body?.days ?? 365), 1), 730);
@@ -636,20 +1268,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const maxTotal = Math.min(Math.max(Number(req.body?.maxTotal ?? 10000), 100), 50000);
     const actor = req.user?.email || "admin";
     const workspaceId = req.effectiveTenantId!;
-    if (globalOsintRun.busy) {
-      return res.status(202).json({ status: "already_running", started: globalOsintRun.startedAt, durationMs: Date.now() - (globalOsintRun.startedAt ? new Date(globalOsintRun.startedAt).getTime() : Date.now()) });
-    }
-    globalOsintRun.busy = true;
-    globalOsintRun.startedAt = new Date().toISOString();
-    globalOsintRun.finishedAt = null;
-    globalOsintRun.summary = null;
-    globalOsintRun.error = null;
-    globalOsintRun.progressPct = 0;
-    globalOsintRun.progressDetail = null;
-    globalOsintRun.workspaceId = workspaceId;
-    // Fire-and-forget; client polls /api/v1/admin/osint/ingest/status.
+    const existing = storage.listOperationsJobs(workspaceId, { max: 100 }).find((job: any) => job.kind === "osint_global_ingest" && (job.status === "queued" || job.status === "running"));
+    if (existing) return res.status(202).json({ status: "already_running", jobId: existing.id, startedAt: existing.startedAt || existing.createdAt });
+    const jobId = storage.createAiJob({
+      tenantId: workspaceId,
+      kind: "osint_global_ingest",
+      payload: { days, maxPerSource, maxTotal },
+      createdBy: actor,
+      targetLabel: "Refresh all sources",
+      targetUrl: "#/osint?tab=sources",
+    });
     (async () => {
       try {
+        storage.markAiJobRunning(jobId);
         const result = await storage.runGlobalOsintIngest({
           workspaceId,
           days,
@@ -657,35 +1288,35 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           maxTotal,
           actor,
           onProgress: (progress: { attempted: number; total: number; parsed: number; feedsOk: number }) => {
-            globalOsintRun.progressDetail = progress;
-            globalOsintRun.progressPct = progress.total > 0
+            const current = storage.getAiJob(workspaceId, jobId, { includeResult: false });
+            if (!current || current.status === "cancelled") throw new Error("Source refresh cancelled by operator.");
+            const progressPct = progress.total > 0
               ? Math.min(99, Math.max(0, Math.round((progress.attempted / progress.total) * 100)))
               : 0;
+            storage.setAiJobProgressDetail(jobId, progressPct, progress);
           },
         });
-        globalOsintRun.summary = result;
-        globalOsintRun.progressPct = 100;
+        storage.completeAiJob(jobId, result);
       } catch (e: any) {
-        globalOsintRun.error = String(e?.message || e);
-      } finally {
-        globalOsintRun.finishedAt = new Date().toISOString();
-        globalOsintRun.busy = false;
+        storage.failAiJob(jobId, e);
       }
     })();
-    res.status(202).json({ status: "started", startedAt: globalOsintRun.startedAt, params: { days, maxPerSource, maxTotal } });
+    res.status(202).json({ status: "started", jobId, params: { days, maxPerSource, maxTotal } });
   });
 
   app.get("/api/v1/admin/osint/ingest/status", requireAuth, (req: AuthedRequest, res) => {
     if (!requireAdmin(req, res)) return;
-    const sameWorkspace = globalOsintRun.workspaceId === req.effectiveTenantId;
+    const job = storage.getLatestAiJobByKind(req.effectiveTenantId!, "osint_global_ingest");
+    const progressDetail = job?.status === "running" ? job?.result?.progressDetail ?? null : null;
     res.json({
-      busy: globalOsintRun.busy,
-      startedAt: globalOsintRun.startedAt,
-      finishedAt: globalOsintRun.finishedAt,
-      summary: sameWorkspace ? globalOsintRun.summary : null,
-      error: sameWorkspace ? globalOsintRun.error : null,
-      progressPct: sameWorkspace ? globalOsintRun.progressPct : 0,
-      progressDetail: sameWorkspace ? globalOsintRun.progressDetail : null,
+      jobId: job?.id ?? null,
+      busy: job?.status === "queued" || job?.status === "running",
+      startedAt: job?.startedAt ?? null,
+      finishedAt: job?.completedAt ?? null,
+      summary: job?.status === "completed" ? job.result : null,
+      error: job?.error?.message ?? null,
+      progressPct: job?.progressPct ?? 0,
+      progressDetail,
     });
   });
   app.get("/api/v1/osint/findings", requireAuth, (req: AuthedRequest, res) => {
@@ -696,8 +1327,120 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         tech:     (req.query.tech as string) || undefined,
         sourceId: (req.query.sourceId as string) || undefined,
         category: (req.query.category as string) || undefined,
+        publishedAfter: (req.query.publishedAfter as string) || undefined,
       }),
     });
+  });
+  app.get("/api/v1/osint/findings/export.csv", requireAuth, (req: AuthedRequest, res) => {
+    const ids = typeof req.query.findingIds === "string"
+      ? new Set(req.query.findingIds.split(",").map((v) => v.trim()).filter(Boolean))
+      : null;
+    const findings = storage.listOsintFindings(req.effectiveTenantId!, {
+      severity: (req.query.severity as string) || undefined,
+      status: (req.query.status as string) || undefined,
+      tech: (req.query.tech as string) || undefined,
+      sourceId: (req.query.sourceId as string) || undefined,
+      category: (req.query.category as string) || undefined,
+      publishedAfter: (req.query.publishedAfter as string) || undefined,
+    }).filter((f) => !ids || ids.has(f.id));
+    const clientNames = new Map(
+      storage.listClientProfiles(req.effectiveTenantId!, { includeArchived: true })
+        .map((profile) => [profile.id, profile.name]),
+    );
+    const header = [
+      "Threat intel title",
+      "Source",
+      "Source URL",
+      "Published date",
+      "AI triage date",
+      "Threat analyst assessment date",
+      "Effective severity",
+      "Publisher severity",
+      "Technical severity",
+      "Client impact severity",
+      "Analyst final severity",
+      "Severity rationale",
+      "Status",
+      "Client tags",
+      "IoCs",
+      "Analyst disposition",
+      "Analyst confidence",
+      "Business impact",
+      "Next action",
+      "Analyst analysed result",
+      "AI summary",
+      "AI recommendation",
+    ];
+    const rows = findings.map((f) => [
+      f.title,
+      f.sourceName,
+      f.url ?? "",
+      f.publishedAt,
+      f.aiAnalyzedAt ?? "",
+      f.analystAssessedAt ?? f.analystEditedAt ?? "",
+      f.severity,
+      f.publisherSeverity ?? "",
+      f.technicalSeverity ?? "",
+      f.clientImpactSeverity ?? "",
+      f.analystFinalSeverity ?? "",
+      f.analystSeverityRationale ?? "",
+      f.status,
+      (f.clientTags ?? []).map((clientId) => clientNames.get(clientId) ?? "Legacy client tag"),
+      iocsToText(f.iocs as any),
+      f.analystDisposition ?? "",
+      f.analystConfidence ?? "",
+      f.analystImpact ?? "",
+      f.analystNextAction ?? "",
+      f.analystAssessment ?? "",
+      f.aiSummary ?? "",
+      f.aiRecommendation ?? "",
+    ]);
+    const csv = [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n");
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="optrasight-threat-intel-${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.send(`\uFEFF${csv}`);
+  });
+  const selectedExchangeFindings = (req: AuthedRequest) => {
+    const ids = String(req.query.findingIds || "").split(",").map((value) => value.trim()).filter(Boolean);
+    if (ids.length === 0) throw new Error("Select at least one finding.");
+    if (ids.length > 200) throw new Error("A single STIX export supports up to 200 findings.");
+    const uniqueIds = new Set(ids);
+    const findings = storage.listOsintFindings(req.effectiveTenantId!).filter((finding: OsintFindingDTO) => uniqueIds.has(finding.id));
+    if (findings.length !== uniqueIds.size) throw new Error("One or more findings were not found in this workspace.");
+    return findings;
+  };
+  app.get("/api/v1/exchange/stix/preview", requireAuth, (req: AuthedRequest, res) => {
+    try {
+      const result = buildOsintStixBundle(selectedExchangeFindings(req), "OptraSight Threat Intelligence Unit");
+      res.json({
+        findingCount: result.findingCount,
+        objectCount: result.bundle.objects.length,
+        indicatorCount: result.indicatorCount,
+        attackPatternCount: result.attackPatternCount,
+        objectCounts: result.objectCounts,
+        warnings: result.warnings,
+        errors: result.errors,
+        valid: result.valid,
+      });
+    } catch (error: any) {
+      res.status(400).json({ detail: String(error?.message || error) });
+    }
+  });
+  app.get("/api/v1/exchange/stix/export", requireAuth, (req: AuthedRequest, res) => {
+    try {
+      const findings = selectedExchangeFindings(req);
+      const result = buildOsintStixBundle(findings, "OptraSight Threat Intelligence Unit");
+      if (!result.valid) return res.status(422).json({ detail: "STIX validation failed.", errors: result.errors });
+      storage.appendAudit(req.effectiveTenantId!, req.user?.email || "operator", "osint.stix.export", null, {
+        findingCount: result.findingCount,
+        objectCount: result.bundle.objects.length,
+      });
+      res.setHeader("Content-Type", "application/stix+json;version=2.1");
+      res.setHeader("Content-Disposition", `attachment; filename="optrasight-stix-${new Date().toISOString().slice(0, 10)}.json"`);
+      res.send(JSON.stringify(result.bundle, null, 2));
+    } catch (error: any) {
+      res.status(400).json({ detail: String(error?.message || error) });
+    }
   });
   app.post("/api/v1/osint/overview", requireAuth, (req: AuthedRequest, res) => {
     const parsed = osintOverviewSchema.safeParse(req.body || {});
@@ -723,20 +1466,26 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
   // v2.17 — analyst override: status, CVE refs, IoCs, free-form tags, tech, actors.
   app.patch("/api/v1/osint/findings/:fid", requireAuth, (req: AuthedRequest, res) => {
-    const body = (req.body || {}) as any;
+    const parsed = osintFindingPatchSchema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ detail: fromZodError(parsed.error).message });
+    if (storage.getTenant(req.effectiveTenantId!)?.operatingMode === "individual"
+      && (parsed.data.clientTags !== undefined || parsed.data.clientMatchDecisions !== undefined)) {
+      return res.status(409).json({ detail: "Client tagging is available only when the workspace is in MSS mode." });
+    }
     const editedBy = req.user?.email || "analyst";
     try {
+      const existing = storage.getOsintFinding(req.effectiveTenantId!, req.params.fid);
+      if (!existing) return res.status(404).json({ detail: "not found" });
+      if (existing.status === "escalated") {
+        return res.status(409).json({
+          detail: "Escalated intelligence is immutable. Use a separately authorised reopen workflow before making corrections.",
+          code: "finding_integrity_locked",
+        });
+      }
       const updated = storage.updateOsintFinding(
         req.effectiveTenantId!,
         req.params.fid,
-        {
-          status: typeof body.status === "string" ? body.status : undefined,
-          cveIds: Array.isArray(body.cveIds) ? body.cveIds : undefined,
-          iocs: body.iocs && typeof body.iocs === "object" ? body.iocs : undefined,
-          analystTags: Array.isArray(body.analystTags) ? body.analystTags : undefined,
-          affectedTech: Array.isArray(body.affectedTech) ? body.affectedTech : undefined,
-          threatActors: Array.isArray(body.threatActors) ? body.threatActors : undefined,
-        },
+        parsed.data,
         editedBy,
       );
       if (!updated) return res.status(404).json({ detail: "not found" });
@@ -752,18 +1501,26 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const ids = parsed.data.ids ?? [];
     const onlyUnanalyzed = !!parsed.data.onlyUnanalyzed;
     if (!storage.resolveAiProvider(tid, "osint_analysis")) return res.status(409).json({ detail: "No AI provider configured for osint_analysis. Configure one in AI Setup." });
+    const activeAnalysis = storage.listOperationsJobs(tid, { max: 100 }).find((candidate: any) => (
+      candidate.source === "ai_job"
+      && candidate.kind === "osint_analysis"
+      && (candidate.status === "queued" || candidate.status === "running")
+    ));
+    if (activeAnalysis) {
+      return res.status(409).json({
+        detail: "An OSINT AI analysis job is already running. Wait for it to finish or cancel it from Job Control.",
+        jobId: activeAnalysis.id,
+      });
+    }
     const label = ids.length > 0
       ? `OSINT AI analysis — ${ids.length} selected`
       : `OSINT AI analysis — ${onlyUnanalyzed ? "unanalyzed findings" : "all findings"}`;
-    const job = runAiJob({
+    const job = runOsintAnalysisWorker({
       tenantId: tid,
-      kind: "osint_analysis",
       payload: parsed.data,
       createdBy: req.user?.email ?? null,
       targetLabel: label,
       targetUrl: ids.length === 1 ? `/#/osint?finding=${encodeURIComponent(ids[0])}` : "/#/osint",
-      work: () => storage.runOsintAnalysis(tid, parsed.data),
-      providerLabel: (out) => out.provider,
     });
     storage.appendAudit(tid, req.user?.email || "system", "osint.analyze.ai_job.start", job.jobId, { onlyUnanalyzed, idCount: ids.length });
     res.status(202).json(job);
@@ -772,19 +1529,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.get("/api/v1/osint/hunt-queries", requireAuth, (req: AuthedRequest, res) => {
     res.json({ queries: storage.listHuntQueries(req.effectiveTenantId!) });
   });
-  app.post("/api/v1/osint/hunt-queries", requireAuth, async (req: AuthedRequest, res) => {
+  // The OSINT path remains as a compatibility alias for older clients. New
+  // product flows use the Detection Rules route as the canonical endpoint.
+  app.post(["/api/v1/detection-rules/generate", "/api/v1/osint/hunt-queries"], requireAuth, async (req: AuthedRequest, res) => {
     const parsed = huntQueryCreateSchema.safeParse(req.body || {});
     if (!parsed.success) return res.status(400).json({ detail: fromZodError(parsed.error).message });
     const tid = req.effectiveTenantId!;
     const job = runAiJob({
       tenantId: tid,
-      kind: "hunt_query_generation",
+      kind: "detection_rule_generation",
       payload: parsed.data,
       createdBy: req.user?.email ?? null,
-      targetLabel: `Hunt query — ${parsed.data.findingIds.length} finding${parsed.data.findingIds.length === 1 ? "" : "s"}`,
-      targetUrl: "/#/osint?tab=hunt-queries",
-      work: (jobId) => {
-        const out = storage.generateHuntQueries(tid, {
+      targetLabel: `Detection rule — ${parsed.data.findingIds.length} finding${parsed.data.findingIds.length === 1 ? "" : "s"}`,
+      targetUrl: "/#/detection-rules",
+      work: async (jobId) => {
+        const out = await storage.generateHuntQueries(tid, {
           findingIds: parsed.data.findingIds,
           languages: parsed.data.languages,
           title: parsed.data.title,
@@ -793,7 +1552,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         if (out?.id) {
           storage.updateAiJobTarget(jobId, {
             targetLabel: out.title,
-            targetUrl: `/#/osint?tab=hunt-queries&hunt=${encodeURIComponent(out.id)}`,
+            targetUrl: out.detectionRuleId
+              ? `/#/detection-rules?rule=${encodeURIComponent(out.detectionRuleId)}`
+              : "/#/detection-rules",
           });
         }
         return out;
@@ -801,6 +1562,117 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       providerLabel: (out) => out.aiProviderLabel,
     });
     res.status(202).json(job);
+  });
+
+  // ---- Batch Two Detection Rules ----
+  app.get("/api/v1/detection-rules", requireAuth, (req: AuthedRequest, res) => {
+    const status = typeof req.query.status === "string" ? req.query.status : undefined;
+    res.json({ rules: storage.listDetectionRules(req.effectiveTenantId!, status ? { status: status as any } : undefined) });
+  });
+
+  app.get("/api/v1/detection-rules/:rid", requireAuth, (req: AuthedRequest, res) => {
+    const rule = storage.getDetectionRule(req.effectiveTenantId!, req.params.rid);
+    if (!rule) return res.status(404).json({ detail: "detection rule not found" });
+    res.json(rule);
+  });
+
+  app.post("/api/v1/detection-rules", requireAuth, async (req: AuthedRequest, res, next: NextFunction) => {
+    const parsed = detectionRuleCreateSchema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ detail: fromZodError(parsed.error).message });
+    const individualMode = storage.getTenant(req.effectiveTenantId!)?.operatingMode === "individual";
+    if (individualMode && (parsed.data.clientIds?.length ?? 0) > 0) {
+      return res.status(409).json({ detail: "Client assignment is available only when the workspace is in MSS mode." });
+    }
+    try {
+      const rule = await storage.createDetectionRule(req.effectiveTenantId!, {
+        title: parsed.data.title,
+        description: parsed.data.description,
+        findingIds: parsed.data.findingIds,
+        languages: parsed.data.languages,
+        severity: parsed.data.severity,
+        affectedTech: parsed.data.affectedTech,
+        threatActors: parsed.data.threatActors,
+        clientIds: parsed.data.clientIds,
+        generate: parsed.data.generate,
+        createdBy: req.user?.email || "analyst",
+      });
+      res.status(201).json(rule);
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.patch("/api/v1/detection-rules/:rid", requireAuth, (req: AuthedRequest, res) => {
+    const parsed = detectionRulePatchSchema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ detail: fromZodError(parsed.error).message });
+    const current = storage.getDetectionRule(req.effectiveTenantId!, req.params.rid);
+    if (!current) return res.status(404).json({ detail: "detection rule not found" });
+    if ((parsed.data.status === "validated" || parsed.data.status === "approved")
+      && req.user?.role !== "admin" && req.user?.role !== "detection_engineer") {
+      return res.status(403).json({ detail: "detection engineer or platform admin role required for validation and approval" });
+    }
+    const individualMode = storage.getTenant(req.effectiveTenantId!)?.operatingMode === "individual";
+    if (individualMode && parsed.data.clientIds !== undefined) {
+      return res.status(409).json({ detail: "Client assignment is available only when the workspace is in MSS mode." });
+    }
+    const resultingClientIds = parsed.data.clientIds ?? current.clientIds;
+    if (!individualMode && (parsed.data.status === "validated" || parsed.data.status === "approved") && resultingClientIds.length === 0) {
+      return res.status(400).json({ detail: "assign at least one client before validating or approving a detection rule" });
+    }
+    if (parsed.data.status === "validated" || parsed.data.status === "approved") {
+      const readiness = storage.getDetectionRuleReadiness(req.effectiveTenantId!, req.params.rid);
+      if (!readiness.ready) {
+        return res.status(400).json({
+          detail: individualMode
+            ? "a passing current-version workspace validation is required before this lifecycle transition"
+            : "every assigned client requires a passing current-version validation before this lifecycle transition",
+          missingClientIds: readiness.missingClientIds,
+        });
+      }
+    }
+    const rule = storage.updateDetectionRule(req.effectiveTenantId!, req.params.rid, {
+      ...parsed.data,
+      actor: req.user?.email || "analyst",
+    });
+    res.json(rule);
+  });
+
+  app.put("/api/v1/detection-rules/:rid/validation", requireAuth, (req: AuthedRequest, res, next: NextFunction) => {
+    if (req.user?.role !== "admin" && req.user?.role !== "detection_engineer") {
+      return res.status(403).json({ detail: "detection engineer or platform admin role required" });
+    }
+    const parsed = detectionRuleValidationSchema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ detail: fromZodError(parsed.error).message });
+    try {
+      const rule = storage.upsertDetectionRuleValidation(req.effectiveTenantId!, req.params.rid, {
+        ...parsed.data,
+        actor: req.user?.email || "detection-engineer",
+      });
+      if (!rule) return res.status(404).json({ detail: "detection rule not found" });
+      res.json(rule);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.delete("/api/v1/detection-rules/:rid", requireAuth, (req: AuthedRequest, res) => {
+    const ok = storage.deleteDetectionRule(req.effectiveTenantId!, req.params.rid, req.user?.email || "analyst");
+    if (!ok) return res.status(404).json({ detail: "detection rule not found" });
+    res.status(204).end();
+  });
+
+  app.post("/api/v1/detection-rules/:rid/deploy", requireAuth, (req: AuthedRequest, res) => {
+    if (req.user?.role !== "admin" && req.user?.role !== "detection_engineer") {
+      return res.status(403).json({ detail: "detection engineer or platform admin role required" });
+    }
+    const parsed = detectionRuleDeploySchema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ detail: fromZodError(parsed.error).message });
+    const result = storage.deployDetectionRule(req.effectiveTenantId!, req.params.rid, {
+      ...parsed.data,
+      actor: req.user?.email || "analyst",
+    });
+    if ("error" in result) return res.status(400).json({ detail: result.error });
+    res.json(result);
   });
 
   // ============================================================================
@@ -958,72 +1830,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  // v2.32.1 — manual portrait upload. Lets analysts replace the AI-generated
-  // sigil with their own image (mugshot, ATT&CK actor card screenshot, etc).
-  // Accepts JSON `{ fileName, contentBase64 }` to stay consistent with the
-  // exercise PPTX upload pattern — no multer dependency needed.
-  //
-  // The image is stored at  data/portraits/<aid>.<ext>  (original extension
-  // preserved so we don't re-encode). Any previously saved portrait file for
-  // this actor (regardless of extension) is removed first so we never leak
-  // stale bytes through aggressive HTTP caching. The persisted URL gets a
-  // `?v=<timestamp>` cache-buster so the <img> in the SPA picks up the new
-  // image immediately even though `/portraits/*` is served `immutable`.
-  app.post("/api/v1/threat-actors/:aid/portrait/upload", requireAuth, (req: AuthedRequest, res) => {
-    const tid = req.effectiveTenantId!;
-    const aid = req.params.aid;
-    const actor = storage.getThreatActor(tid, aid);
-    if (!actor) return res.status(404).json({ detail: "threat actor not found" });
-
-    const fileName = typeof req.body?.fileName === "string" ? req.body.fileName : "";
-    const b64 = typeof req.body?.contentBase64 === "string" ? req.body.contentBase64 : "";
-    if (!fileName || !b64) return res.status(400).json({ detail: "fileName + contentBase64 required" });
-
-    // Whitelist common image formats. Default to .png if extension is unknown
-    // so the file is still routable through express.static's mime lookup.
-    const extMatch = fileName.toLowerCase().match(/\.(png|jpe?g|webp|gif)$/);
-    if (!extMatch) return res.status(400).json({ detail: "file must be PNG, JPEG, WebP, or GIF" });
-    const ext = extMatch[1] === "jpeg" ? "jpg" : extMatch[1];
-
-    const buf = Buffer.from(b64, "base64");
-    if (buf.byteLength === 0)         return res.status(400).json({ detail: "empty file" });
-    if (buf.byteLength > 5 * 1024 * 1024) return res.status(413).json({ detail: "file too large (5MB max)" });
-
-    // Sanity-check magic bytes — lightweight content-sniff so a renamed .exe
-    // can't slip past the extension check. We check the first 12 bytes against
-    // the canonical signatures for each allowed format.
-    const head = buf.subarray(0, 12);
-    const looksLikeImage = (
-      // PNG: 89 50 4E 47 0D 0A 1A 0A
-      (head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4E && head[3] === 0x47) ||
-      // JPEG: FF D8 FF
-      (head[0] === 0xFF && head[1] === 0xD8 && head[2] === 0xFF) ||
-      // WebP: RIFF....WEBP
-      (head[0] === 0x52 && head[1] === 0x49 && head[2] === 0x46 && head[3] === 0x46 && head[8] === 0x57 && head[9] === 0x45 && head[10] === 0x42 && head[11] === 0x50) ||
-      // GIF: GIF87a / GIF89a
-      (head[0] === 0x47 && head[1] === 0x49 && head[2] === 0x46 && head[3] === 0x38)
-    );
-    if (!looksLikeImage) return res.status(400).json({ detail: "file does not look like a valid image" });
-
-    try { mkdirSync(PORTRAITS_DIR, { recursive: true }); } catch { /* ok */ }
-
-    // Remove any prior portrait file for this actor regardless of extension.
-    try {
-      for (const f of readdirSync(PORTRAITS_DIR)) {
-        if (f.startsWith(`${aid}.`)) {
-          try { unlinkSync(join(PORTRAITS_DIR, f)); } catch { /* swallow */ }
-        }
-      }
-    } catch { /* directory may be empty */ }
-
-    const target = join(PORTRAITS_DIR, `${aid}.${ext}`);
-    writeFileSync(target, buf);
-
-    // Cache-bust on every upload so the browser re-fetches even though the
-    // immutable Cache-Control would otherwise pin the old bytes for 7 days.
-    const publicUrl = `/portraits/${aid}.${ext}?v=${Date.now()}`;
-    storage.setThreatActorPortrait(tid, aid, publicUrl);
-    res.status(201).json({ portraitUrl: publicUrl, status: "ready", bytes: buf.byteLength });
+  // Compatibility tombstone: browser-supplied portrait bytes are intentionally
+  // unsupported. Curated assets and server-side AI generation remain available.
+  app.post("/api/v1/threat-actors/:aid/portrait/upload", requireAuth, (_req: AuthedRequest, res) => {
+    res.status(410).json({
+      detail: "Manual portrait upload is disabled. Use a curated portrait or AI portrait generation.",
+      code: "manual_portrait_upload_disabled",
+    });
   });
 
   // v2.32.1 — remove uploaded / generated portrait. Resets state so the lazy
@@ -1201,37 +2014,44 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const findingIds = Array.isArray(req.body?.findingIds)
       ? (req.body.findingIds as any[]).filter((x) => typeof x === "string")
       : undefined;
+    const analysisMode = req.body?.analysisMode === "client_impact" ? "client_impact" : "cirt";
+    const requestedClientIds = Array.isArray(req.body?.clientIds)
+      ? Array.from(new Set((req.body.clientIds as any[]).filter((x): x is string => typeof x === "string"))).slice(0, 12)
+      : [];
     const tenantId = req.effectiveTenantId!;
+    if (analysisMode === "client_impact" && storage.getTenant(tenantId)?.operatingMode !== "mss") {
+      return res.status(409).json({ detail: "Client-impact assessment is available only in MSS mode." });
+    }
+    const activeClientIds = new Set(storage.listClientProfiles(tenantId).map((profile: { id: string }) => profile.id));
+    const clientIds = requestedClientIds.filter((clientId) => activeClientIds.has(clientId));
+    if (analysisMode === "client_impact" && clientIds.length === 0) {
+      return res.status(400).json({ detail: "Select at least one active Client Profile for client-impact assessment." });
+    }
+    const targetLabel = analysisMode === "client_impact"
+      ? `Client-impact assessment — ${clientIds.length} client${clientIds.length === 1 ? "" : "s"}`
+      : `CIRT triage — ${range}`;
     const jobId = storage.createAiJob({
       tenantId,
       kind: "chat_triage",
-      payload: { range, findingIds },
+      payload: { range, findingIds, analysisMode, clientIds },
       createdBy: req.user?.email ?? null,
-      targetLabel: `CIRT triage — ${range}`,
+      targetLabel,
       targetUrl: null,
     });
     const targetUrl = `/#/osint?ai=triage&job=${encodeURIComponent(jobId)}`;
     storage.updateAiJobTarget(jobId, { targetUrl });
-    setImmediate(async () => {
-      let hb: ReturnType<typeof setInterval> | null = null;
-      try {
-        storage.markAiJobRunning(jobId);
-        storage.setAiJobProgress(jobId, 15);
-        if (!storage.resolveAiProvider(tenantId, "osint_overview")) {
-          throw new Error("No live-tested AI provider is configured for CIRT triage. Open AI Setup, enable a provider, and assign it to OSINT overview.");
-        }
-        hb = setInterval(() => { try { storage.setAiJobHeartbeat(jobId); } catch { /* ignore */ } }, 30000);
-        storage.setAiJobProgress(jobId, 35);
-        const out = await runChatTriage(storage, { tenantId, range, findingIds });
-        storage.setAiJobProgress(jobId, 90);
-        storage.completeAiJob(jobId, out, (out as any)?.providerLabel ?? null);
-      } catch (e: any) {
-        try { storage.failAiJob(jobId, e); } catch { /* keep worker exceptions contained */ }
-      } finally {
-        if (hb) clearInterval(hb);
-      }
+    runChatTriageWorker({
+      jobId,
+      tenantId,
+      payload: {
+        range,
+        findingIds,
+        analysisMode,
+        clientIds,
+        actor: req.user?.email ?? "system",
+      },
     });
-    res.status(202).json({ jobId, status: "queued", kind: "chat_triage", targetLabel: `CIRT triage — ${range}`, targetUrl });
+    res.status(202).json({ jobId, status: "queued", kind: "chat_triage", targetLabel, targetUrl });
   });
   // v2.17 — Free-form chat with the integrated AI provider. The floating
   // AI assistant uses this for back-and-forth Q&A scoped to the current
@@ -1419,22 +2239,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       },
       jobs,
       auditEntries: storage.listAudit(req.effectiveTenantId!, { limit: 200 }),
-      globalIngest: req.user?.role === "admin" && globalOsintRun.workspaceId === req.effectiveTenantId ? {
-        source: "global_ingest",
-        id: "global-osint-ingest",
-        kind: "osint_global_ingest",
-        label: "Global OSINT ingest",
-        status: globalOsintRun.busy ? "running" : (globalOsintRun.error ? "failed" : globalOsintRun.finishedAt ? "done" : "idle"),
-        progressPct: globalOsintRun.progressPct,
-        startedAt: globalOsintRun.startedAt,
-        finishedAt: globalOsintRun.finishedAt,
-        errorMessage: globalOsintRun.error,
-        summary: globalOsintRun.summary,
-        target: globalOsintRun.progressDetail
-          ? `${globalOsintRun.progressDetail.attempted}/${globalOsintRun.progressDetail.total} feeds checked`
-          : null,
-        cancellable: false,
-      } : null,
+      globalIngest: null,
     });
   });
 

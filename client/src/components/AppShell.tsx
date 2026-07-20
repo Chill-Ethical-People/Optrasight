@@ -1,15 +1,32 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link, useLocation } from "wouter";
 import {
-  LayoutDashboard, LogOut, Building2,
-  Sun, Moon, PanelLeftClose, PanelLeftOpen, ChevronDown, Menu,
-  ListChecks, Fingerprint, BrainCircuit, RadioTower, Users,
+  LayoutDashboard,
+  LogOut,
+  Building2,
+  Sun,
+  Moon,
+  PanelLeftClose,
+  PanelLeftOpen,
+  ChevronDown,
+  Menu,
+  ListChecks,
+  Fingerprint,
+  BrainCircuit,
+  RadioTower,
+  Users,
+  ShieldCheck,
+  MailCheck,
+  Settings2,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { AiJobsTray } from "@/components/AiJobsTray";
 import { GlobalCommandPalette } from "@/components/GlobalCommandPalette";
 import OsintChatbot from "@/components/OsintChatbot";
+import { StaticDemoNoticeDialog } from "@/components/StaticDemoNoticeDialog";
 import { useAuth } from "@/lib/auth";
+import { STATIC_DEMO_MODE } from "@/lib/staticDemoApi";
+import { showStaticDemoNotice } from "@/lib/staticDemoNotice";
 import { useUiState, type SidebarMode } from "@/lib/uiState";
 import { BATCH_ONE_RELEASE } from "@/lib/release";
 import { Logo } from "./Logo";
@@ -20,6 +37,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 
 /** Legacy sentinel retained only so old global-mode guards stay compile-time inert in BatchOne. */
 export const GLOBAL_TENANT_ID = "__global__";
+
+const CEP_MARK_SRC = `${import.meta.env.BASE_URL}brand/cep-mark-on-light.svg?v=20260719d`;
+const CEP_MARK_DARK_SRC = `${import.meta.env.BASE_URL}brand/cep-mark-on-dark.svg?v=20260719d`;
 
 // Grouped navigation — collapsible sections keep the rail scannable.
 // Group ids are stable so collapse-state survives re-renders.
@@ -33,12 +53,16 @@ const navGroups: NavGroup[] = [
     items: [
       { href: "/osint", label: "Intel Inbox", icon: RadioTower },
       { href: "/threat-actors", label: "Actor Observatory", icon: Fingerprint },
+      { href: "/detection-rules", label: "Detection Rules", icon: ShieldCheck },
     ],
   },
   {
     id: "admin",
     label: "Operations",
     items: [
+      { href: "/client-profile", label: "Client Profile", icon: Building2 },
+      { href: "/client-briefs", label: "Client Briefs", icon: MailCheck },
+      { href: "/workspace-setup", label: "Workspace Setup", icon: Settings2, adminOnly: true },
       { href: "/ai-setup", label: "AI Setup", icon: BrainCircuit },
       { href: "/operations-audit", label: "Job Control", icon: ListChecks },
       { href: "/platform-users", label: "Platform Users", icon: Users, adminOnly: true },
@@ -56,9 +80,7 @@ function TenantSwitcher() {
       data-testid="badge-release-scope"
     >
       <Building2 size={14} className="text-muted-foreground" />
-      <span className="font-medium truncate max-w-[180px]">
-        {user.tenant.name}
-      </span>
+      <span className="font-medium truncate max-w-[180px]">{user.tenant.name}</span>
       <Badge variant="secondary" className="text-[10px] uppercase tracking-wide">
         Batch 1
       </Badge>
@@ -74,7 +96,8 @@ function ThemeToggle() {
     <Tooltip>
       <TooltipTrigger asChild>
         <Button
-          variant="ghost" size="icon"
+          variant="ghost"
+          size="icon"
           onClick={toggleTheme}
           className="h-9 w-9"
           data-testid="button-theme-toggle"
@@ -84,6 +107,33 @@ function ThemeToggle() {
         </Button>
       </TooltipTrigger>
       <TooltipContent>Switch to {next} mode</TooltipContent>
+    </Tooltip>
+  );
+}
+
+export function CreatorBrand({ showLabel = false, side = "bottom" }: { showLabel?: boolean; side?: "left" | "right" | "top" | "bottom" }) {
+  const { theme } = useUiState();
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <a
+          href="https://github.com/Chill-Ethical-People"
+          target="_blank"
+          rel="noreferrer"
+          className={`group flex h-9 items-center gap-2 rounded-md px-1.5 text-muted-foreground outline-none transition-colors duration-200 hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary ${showLabel ? "w-full" : "w-9 justify-center"}`}
+          aria-label="Chill Ethical People on GitHub"
+          data-testid="link-creator-brand"
+        >
+          <img
+            src={theme === "dark" ? CEP_MARK_DARK_SRC : CEP_MARK_SRC}
+            alt=""
+            className="h-7 w-7 shrink-0 object-contain opacity-60 transition-opacity duration-200 group-hover:opacity-90"
+            draggable={false}
+          />
+          {showLabel ? <span className="truncate text-[10px] font-medium">Chill Ethical People</span> : null}
+        </a>
+      </TooltipTrigger>
+      <TooltipContent side={side}>Created by Chill Ethical People</TooltipContent>
     </Tooltip>
   );
 }
@@ -99,15 +149,14 @@ function SidebarToggle() {
     <Tooltip>
       <TooltipTrigger asChild>
         <Button
-          variant="ghost" size="icon"
+          variant="ghost"
+          size="icon"
           onClick={cycleSidebar}
           className="h-9 w-9"
           data-testid="button-sidebar-toggle"
           aria-label={nextLabel[sidebarMode]}
         >
-          {sidebarMode === "expanded"
-            ? <PanelLeftClose size={16} />
-            : <PanelLeftOpen size={16} />}
+          {sidebarMode === "expanded" ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
         </Button>
       </TooltipTrigger>
       <TooltipContent>{nextLabel[sidebarMode]}</TooltipContent>
@@ -117,20 +166,24 @@ function SidebarToggle() {
 
 /** Single nav row — adapts to expanded vs. icon-only rail. */
 function NavRow({
-  href, label, Icon, active, collapsed,
+  href,
+  label,
+  Icon,
+  active,
+  collapsed,
 }: {
-  href: string; label: string;
+  href: string;
+  label: string;
   Icon: typeof LayoutDashboard;
-  active: boolean; collapsed: boolean;
+  active: boolean;
+  collapsed: boolean;
 }) {
   const testId = `link-${label.toLowerCase().replace(/\s/g, "-")}`;
   // Preview spec: active = brand-soft fill + brand text + brand icon.
   // Inactive rows use muted-foreground so hover/active contrast is unmistakable.
   const className = [
     "os-nav-link flex items-center rounded-md text-sm",
-    collapsed
-      ? "justify-center h-10 w-10 mx-auto"
-      : "gap-3 px-3 py-2",
+    collapsed ? "justify-center h-10 w-10 mx-auto" : "gap-3 px-3 py-2",
     active
       ? "bg-[hsl(var(--brand-soft))]/70 text-[hsl(var(--brand))] font-semibold"
       : "text-muted-foreground hover:bg-muted/55 hover:text-foreground",
@@ -164,15 +217,9 @@ function NavRow({
 /** Collapsible group of nav rows. Header is hidden in icon-rail mode — we still
  *  render the items but separate groups with a thin divider so the grouping is
  *  visible even when labels are gone. */
-function NavGroupSection({
-  group, location, collapsed,
-}: {
-  group: NavGroup; location: string; collapsed: boolean;
-}) {
+function NavGroupSection({ group, location, collapsed }: { group: NavGroup; location: string; collapsed: boolean }) {
   const [open, setOpen] = useState(true);
-  const isActiveGroup = group.items.some(
-    (i) => location === i.href || (i.href !== "/" && location.startsWith(i.href)),
-  );
+  const isActiveGroup = group.items.some((i) => location === i.href || (i.href !== "/" && location.startsWith(i.href)));
   // Force-expanded if a child is active so users don't lose context after navigation.
   const showItems = collapsed || open || isActiveGroup;
 
@@ -182,9 +229,7 @@ function NavGroupSection({
         <div className="h-px bg-sidebar-border/60 mx-2 first:hidden" />
         {group.items.map(({ href, label, icon: Icon }) => {
           const active = location === href || (href !== "/" && location.startsWith(href));
-          return (
-            <NavRow key={href} href={href} label={label} Icon={Icon} active={active} collapsed />
-          );
+          return <NavRow key={href} href={href} label={label} Icon={Icon} active={active} collapsed />;
         })}
       </div>
     );
@@ -201,18 +246,13 @@ function NavGroupSection({
         aria-expanded={showItems}
       >
         <span>{group.label}</span>
-        <ChevronDown
-          size={12}
-          className={`transition-transform ${showItems ? "" : "-rotate-90"}`}
-        />
+        <ChevronDown size={12} className={`transition-transform ${showItems ? "" : "-rotate-90"}`} />
       </button>
       {showItems && (
         <div className="space-y-0.5">
           {group.items.map(({ href, label, icon: Icon }) => {
             const active = location === href || (href !== "/" && location.startsWith(href));
-            return (
-              <NavRow key={href} href={href} label={label} Icon={Icon} active={active} collapsed={false} />
-            );
+            return <NavRow key={href} href={href} label={label} Icon={Icon} active={active} collapsed={false} />;
           })}
         </div>
       )}
@@ -229,17 +269,31 @@ export function AppShell({ children }: { children: ReactNode }) {
   const collapsed = sidebarMode === "collapsed";
   const railWidth = collapsed ? "w-[72px]" : "w-[244px]";
   const reviewOnly = user?.access_mode === "guest" || user?.role === "reviewer";
-  const visibleNavGroups = navGroups.map((group) => ({
-    ...group,
-    items: group.items.filter((item) => {
-      if (item.adminOnly && user?.role !== "admin") return false;
-      if (reviewOnly && !["/osint", "/threat-actors"].includes(item.href)) return false;
-      return true;
-    }),
-  })).filter((group) => group.items.length > 0);
+  const visibleNavGroups = navGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => {
+        if (item.adminOnly && user?.role !== "admin") return false;
+        if (user?.tenant.operatingMode !== "mss" && ["/client-profile", "/client-briefs"].includes(item.href)) return false;
+        if (reviewOnly && !["/osint", "/threat-actors", "/detection-rules"].includes(item.href)) return false;
+        return true;
+      }),
+    }))
+    .filter((group) => group.items.length > 0);
+  const signOutDisabled = STATIC_DEMO_MODE;
+  const signOutLabel = signOutDisabled ? "Sign out is disabled in the static public demo" : "Sign out";
+  const handleSignOut = () => {
+    if (signOutDisabled) {
+      showStaticDemoNotice({ kind: "write", action: "Session changes restricted" });
+      return;
+    }
+    if (!signOutDisabled) logout();
+  };
 
   // Auto-close the mobile drawer on route change so users don't have to dismiss it manually.
-  useEffect(() => { setMobileNavOpen(false); }, [location]);
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [location]);
 
   return (
     <div className="os-app-shell flex min-h-screen w-full bg-background text-foreground">
@@ -248,11 +302,16 @@ export function AppShell({ children }: { children: ReactNode }) {
         data-testid={`sidebar-${sidebarMode}`}
       >
         {/* Brand lockup — aperture mark + two-tone wordmark + concise English subline. */}
-        <div className={`os-brand-plate flex items-center border-b border-sidebar-border ${collapsed ? "justify-center py-5" : "gap-3 px-5 py-5"}`}>
+        <div
+          className={`os-brand-plate flex items-center border-b border-sidebar-border ${collapsed ? "justify-center py-5" : "gap-3 px-5 py-5"}`}
+        >
           <Logo className="text-primary shrink-0" size={collapsed ? 28 : 32} />
           {!collapsed && (
             <div className="flex flex-col leading-tight min-w-0">
-              <span className="os-wordmark text-[17px]"><span className="opt">Optra</span><span className="sight">Sight</span></span>
+              <span className="os-wordmark text-[17px]">
+                <span className="opt">Optra</span>
+                <span className="sight">Sight</span>
+              </span>
               <span className="os-brand-sub">Evidence-led operations</span>
             </div>
           )}
@@ -278,12 +337,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         {/* Nav */}
         <nav className={`flex-1 overflow-y-auto ${collapsed ? "px-1 py-3 space-y-1" : "px-2 py-3"}`}>
           {visibleNavGroups.map((group) => (
-            <NavGroupSection
-              key={group.id}
-              group={group}
-              location={location}
-              collapsed={collapsed}
-            />
+            <NavGroupSection key={group.id} group={group} location={location} collapsed={collapsed} />
           ))}
         </nav>
         {/* User + sign-out */}
@@ -296,7 +350,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </AvatarFallback>
               </Avatar>
               <div className="flex flex-col min-w-0">
-                <span className="text-xs font-medium truncate" data-testid="text-user-email">{user.email}</span>
+                <span className="text-xs font-medium truncate" data-testid="text-user-email">
+                  {user.email}
+                </span>
                 <span className="text-[10px] text-muted-foreground truncate">
                   {reviewOnly ? "Read-only reviewer" : user.role === "admin" ? "Platform admin" : user.tenant?.name}
                 </span>
@@ -307,23 +363,26 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  variant="ghost" size="icon"
-                  className="h-10 w-10 mx-auto flex"
-                  onClick={logout}
+                  variant="ghost"
+                  size="icon"
+                  className={`h-10 w-10 mx-auto flex ${signOutDisabled ? "cursor-not-allowed opacity-55 hover:opacity-70" : ""}`}
+                  onClick={handleSignOut}
                   data-testid="button-logout"
-                  aria-label="Sign out"
+                  aria-label={signOutLabel}
                 >
                   <LogOut size={16} />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent side="right">Sign out</TooltipContent>
+              <TooltipContent side="right">{signOutLabel}</TooltipContent>
             </Tooltip>
           ) : (
             <Button
-              variant="ghost" size="sm"
-              className="w-full justify-start text-muted-foreground"
-              onClick={logout}
+              variant="ghost"
+              size="sm"
+              className={`w-full justify-start text-muted-foreground ${signOutDisabled ? "cursor-not-allowed opacity-55 hover:opacity-70" : ""}`}
+              onClick={handleSignOut}
               data-testid="button-logout"
+              title={signOutLabel}
             >
               <LogOut size={14} className="mr-2" />
               Sign out
@@ -338,7 +397,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           {/* Mobile hamburger — opens the nav drawer. Hidden on md+. */}
           <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
             <Button
-              variant="ghost" size="icon"
+              variant="ghost"
+              size="icon"
               className="md:hidden h-9 w-9"
               onClick={() => setMobileNavOpen(true)}
               data-testid="button-mobile-nav-open"
@@ -353,21 +413,22 @@ export function AppShell({ children }: { children: ReactNode }) {
                   <SheetTitle className="flex items-center gap-3">
                     <Logo className="text-primary shrink-0" size={28} />
                     <div className="flex flex-col leading-tight text-left min-w-0">
-                      <span className="os-wordmark text-[16px]"><span className="opt">Optra</span><span className="sight">Sight</span></span>
+                      <span className="os-wordmark text-[16px]">
+                        <span className="opt">Optra</span>
+                        <span className="sight">Sight</span>
+                      </span>
                       <span className="os-brand-sub">Evidence-led operations</span>
                     </div>
                   </SheetTitle>
                 </SheetHeader>
                 <nav className="flex-1 overflow-y-auto px-2 py-3">
                   {visibleNavGroups.map((group) => (
-                    <NavGroupSection
-                      key={group.id}
-                      group={group}
-                      location={location}
-                      collapsed={false}
-                    />
+                    <NavGroupSection key={group.id} group={group} location={location} collapsed={false} />
                   ))}
                 </nav>
+                <div className="border-t border-sidebar-border px-4 py-2">
+                  <CreatorBrand showLabel side="right" />
+                </div>
                 {user && (
                   <div className="border-t border-sidebar-border p-3">
                     <div className="flex items-center gap-2.5 mb-2 px-1.5">
@@ -379,15 +440,21 @@ export function AppShell({ children }: { children: ReactNode }) {
                       <div className="flex flex-col min-w-0">
                         <span className="text-xs font-medium truncate">{user.email}</span>
                         <span className="text-[10px] text-muted-foreground truncate">
-                          {reviewOnly ? "Read-only reviewer" : user.role === "admin" ? "Platform admin" : user.tenant?.name}
+                          {reviewOnly
+                            ? "Read-only reviewer"
+                            : user.role === "admin"
+                              ? "Platform admin"
+                              : user.tenant?.name}
                         </span>
                       </div>
                     </div>
                     <Button
-                      variant="ghost" size="sm"
-                      className="w-full justify-start text-muted-foreground"
-                      onClick={logout}
+                      variant="ghost"
+                      size="sm"
+                      className={`w-full justify-start text-muted-foreground ${signOutDisabled ? "cursor-not-allowed opacity-55 hover:opacity-70" : ""}`}
+                      onClick={handleSignOut}
                       data-testid="button-logout-mobile"
+                      title={signOutLabel}
                     >
                       <LogOut size={14} className="mr-2" />
                       Sign out
@@ -398,10 +465,15 @@ export function AppShell({ children }: { children: ReactNode }) {
             </SheetContent>
           </Sheet>
           {/* Desktop sidebar collapse toggle. */}
-          <div className="hidden md:block"><SidebarToggle /></div>
+          <div className="hidden md:block">
+            <SidebarToggle />
+          </div>
           <div className="flex items-center gap-2 md:hidden">
             <Logo className="text-primary" size={20} />
-            <span className="os-wordmark text-[15px]"><span className="opt">Optra</span><span className="sight">Sight</span></span>
+            <span className="os-wordmark text-[15px]">
+              <span className="opt">Optra</span>
+              <span className="sight">Sight</span>
+            </span>
           </div>
           <div className="flex-1 min-w-3" />
           {/* Utility toolbar — fixed-height controls with enough breathing room for shortcut text. */}
@@ -410,12 +482,18 @@ export function AppShell({ children }: { children: ReactNode }) {
             <ThemeToggle />
             <AiJobsTray />
           </div>
+          <div className="hidden h-8 shrink-0 items-center border-l border-border pl-2 sm:flex">
+            <CreatorBrand side="bottom" />
+          </div>
           {!BATCH_ONE_RELEASE && (
-            <div className="hidden sm:block shrink-0"><TenantSwitcher /></div>
+            <div className="hidden sm:block shrink-0">
+              <TenantSwitcher />
+            </div>
           )}
         </div>
         <div className="flex-1 min-w-0">{children}</div>
         <OsintChatbot />
+        <StaticDemoNoticeDialog />
       </main>
     </div>
   );
