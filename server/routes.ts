@@ -33,8 +33,9 @@ import { buildThreatActorDocx } from "./tapDocx";
 import { generateActorPortrait, getPortraitGeneratorAvailability, PORTRAITS_DIR } from "./tapPortrait";
 import { validateAiProviderBaseUrl } from "./aiProviderSecurity";
 import express from "express";
+import rateLimit from "express-rate-limit";
 import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join, resolve } from "node:path";
 
 type RunAiJobOptions<T = any> = {
   tenantId: string;
@@ -46,6 +47,37 @@ type RunAiJobOptions<T = any> = {
   work: (jobId: string) => Promise<T> | T;
   providerLabel?: (result: T) => string | null | undefined;
 };
+
+function routeRateLimit(opts: { windowMs: number; max: number; keyPrefix: string }) {
+  return rateLimit({
+    windowMs: opts.windowMs,
+    limit: opts.max,
+    standardHeaders: "draft-8",
+    legacyHeaders: false,
+    keyGenerator: (req) => `${opts.keyPrefix}:${req.ip || req.socket.remoteAddress || "unknown"}`,
+    message: { detail: "too many requests" },
+  });
+}
+
+function bearerToken(authHeader: string | undefined): string | null {
+  const value = (authHeader ?? "").trim();
+  if (!value.toLowerCase().startsWith("bearer ")) return null;
+  const token = value.slice(7).trim();
+  return token.length > 0 ? token : null;
+}
+
+function actorIdParam(value: string): string | null {
+  return /^[A-Za-z0-9_-]{1,96}$/.test(value) ? value : null;
+}
+
+function portraitFilePath(actorId: string, ext: string): string {
+  const target = resolve(PORTRAITS_DIR, `${actorId}.${ext}`);
+  const root = `${resolve(PORTRAITS_DIR)}/`;
+  if (!target.startsWith(root) || basename(target) !== `${actorId}.${ext}`) {
+    throw new Error("invalid portrait path");
+  }
+  return target;
+}
 
 function runAiJob<T = any>(opts: RunAiJobOptions<T>) {
   const jobId = storage.createAiJob({
@@ -126,10 +158,9 @@ const globalOsintRun: {
 } = { busy: false, startedAt: null, finishedAt: null, summary: null, error: null, progressPct: 0, progressDetail: null, workspaceId: null };
 
 function requireAuth(req: AuthedRequest, res: Response, next: NextFunction) {
-  const auth = req.header("authorization") || "";
-  const m = /^Bearer\s+(.+)$/i.exec(auth);
-  if (!m) return res.status(401).json({ detail: "missing bearer token" });
-  const u = storage.getUser(m[1]);
+  const token = bearerToken(req.header("authorization"));
+  if (!token) return res.status(401).json({ detail: "missing bearer token" });
+  const u = storage.getUser(token);
   if (!u) return res.status(401).json({ detail: "invalid token" });
   req.user = u;
   req.accessMode = (u as any).accessMode ?? "credentialed";
@@ -214,7 +245,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // ---- auth ----
-  app.post("/api/v1/auth/login", (req, res) => {
+  app.post("/api/v1/auth/login", routeRateLimit({ keyPrefix: "routes-login", windowMs: 60_000, max: 10 }), (req, res) => {
     const parsed = loginSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ detail: fromZodError(parsed.error).message });
     const u = storage.login(parsed.data.email, parsed.data.password, parsed.data.mfaCode);
@@ -236,9 +267,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.post("/api/v1/auth/logout", requireAuth, (req: AuthedRequest, res) => {
-    const auth = req.header("authorization") || "";
-    const m = /^Bearer\s+(.+)$/i.exec(auth);
-    if (m) storage.logout(m[1]);
+    const token = bearerToken(req.header("authorization"));
+    if (token) storage.logout(token);
     res.json({ ok: true });
   });
 
@@ -922,7 +952,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.delete("/api/v1/threat-actors/:aid", requireAuth, (req: AuthedRequest, res) => {
-    const aid = req.params.aid;
+    const aid = actorIdParam(String(req.params.aid ?? ""));
+    if (!aid) return res.status(400).json({ detail: "invalid threat actor id" });
     const ok = storage.deleteThreatActor(req.effectiveTenantId!, aid, req.user!.email);
     if (!ok) return res.status(404).json({ detail: "threat actor not found" });
     try {
@@ -940,10 +971,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ready, or 200 + url when generation finishes inline (it usually takes 15-40s).
   // The frontend hits this endpoint at most ONCE per actor (gated by portraitStatus)
   // and shows a soft spinner over the existing sigil fallback while it works.
-  app.post("/api/v1/threat-actors/:aid/portrait", requireAuth, async (req: AuthedRequest, res, next: NextFunction) => {
+  app.post("/api/v1/threat-actors/:aid/portrait", routeRateLimit({ keyPrefix: "tap-portrait-generate", windowMs: 60_000, max: 8 }), requireAuth, async (req: AuthedRequest, res, next: NextFunction) => {
     try {
       const tid = req.effectiveTenantId!;
-      const aid = req.params.aid;
+      const aid = actorIdParam(String(req.params.aid ?? ""));
+      if (!aid) return res.status(400).json({ detail: "invalid threat actor id" });
       const actor = storage.getThreatActor(tid, aid);
       if (!actor) return res.status(404).json({ detail: "threat actor not found" });
       // If we already have a ready portrait, short-circuit unless force=true.
@@ -969,9 +1001,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // stale bytes through aggressive HTTP caching. The persisted URL gets a
   // `?v=<timestamp>` cache-buster so the <img> in the SPA picks up the new
   // image immediately even though `/portraits/*` is served `immutable`.
-  app.post("/api/v1/threat-actors/:aid/portrait/upload", requireAuth, (req: AuthedRequest, res) => {
+  app.post("/api/v1/threat-actors/:aid/portrait/upload", routeRateLimit({ keyPrefix: "tap-portrait-upload", windowMs: 60_000, max: 6 }), requireAuth, (req: AuthedRequest, res) => {
     const tid = req.effectiveTenantId!;
-    const aid = req.params.aid;
+    const aid = actorIdParam(String(req.params.aid ?? ""));
+    if (!aid) return res.status(400).json({ detail: "invalid threat actor id" });
     const actor = storage.getThreatActor(tid, aid);
     if (!actor) return res.status(404).json({ detail: "threat actor not found" });
 
@@ -1016,7 +1049,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
     } catch { /* directory may be empty */ }
 
-    const target = join(PORTRAITS_DIR, `${aid}.${ext}`);
+    const target = portraitFilePath(aid, ext);
     writeFileSync(target, buf);
 
     // Cache-bust on every upload so the browser re-fetches even though the
@@ -1028,9 +1061,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // v2.32.1 — remove uploaded / generated portrait. Resets state so the lazy
   // IntersectionObserver may auto-regenerate on the next viewport entry.
-  app.delete("/api/v1/threat-actors/:aid/portrait", requireAuth, (req: AuthedRequest, res) => {
+  app.delete("/api/v1/threat-actors/:aid/portrait", routeRateLimit({ keyPrefix: "tap-portrait-delete", windowMs: 60_000, max: 20 }), requireAuth, (req: AuthedRequest, res) => {
     const tid = req.effectiveTenantId!;
-    const aid = req.params.aid;
+    const aid = actorIdParam(String(req.params.aid ?? ""));
+    if (!aid) return res.status(400).json({ detail: "invalid threat actor id" });
     const actor = storage.getThreatActor(tid, aid);
     if (!actor) return res.status(404).json({ detail: "threat actor not found" });
     try {
@@ -1048,7 +1082,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // direct URL can fetch (they're already gated by needing the actor id and a
   // valid session to retrieve the URL in the first place). Aggressive cache
   // because URLs are content-addressed by actor id and only change on re-gen.
-  app.use("/portraits", express.static(PORTRAITS_DIR, {
+  app.use("/portraits", routeRateLimit({ keyPrefix: "portraits-static", windowMs: 60_000, max: 240 }), express.static(PORTRAITS_DIR, {
     maxAge: "7d",
     setHeaders: (res) => {
       res.setHeader("Cache-Control", "public, max-age=604800, immutable");
@@ -1057,7 +1091,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // Backward-compatible alias for deployments or browser cache entries that
   // reference the physical data path. The DB persists /portraits/*, but this
   // keeps /data/portraits/* from rendering as broken images after exports.
-  app.use("/data/portraits", express.static(PORTRAITS_DIR, {
+  app.use("/data/portraits", routeRateLimit({ keyPrefix: "portraits-legacy-static", windowMs: 60_000, max: 240 }), express.static(PORTRAITS_DIR, {
     maxAge: "7d",
     setHeaders: (res) => {
       res.setHeader("Cache-Control", "public, max-age=604800, immutable");
@@ -1070,7 +1104,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const parsed = threatActorEnrichSchema.safeParse(req.body || {});
     if (!parsed.success) return res.status(400).json({ detail: fromZodError(parsed.error).message });
     const tid = req.effectiveTenantId!;
-    const aid = req.params.aid;
+    const aid = actorIdParam(String(req.params.aid ?? ""));
+    if (!aid) return res.status(400).json({ detail: "invalid threat actor id" });
     const head = storage.getThreatActor(tid, aid);
     if (!head) return res.status(404).json({ detail: "threat actor not found" });
     const job = runAiJob({

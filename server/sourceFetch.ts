@@ -58,27 +58,39 @@ function cacheSet(url: string, value: string | null) {
   CACHE.set(url, { value, expiresAt: Date.now() + CACHE_TTL_MS });
 }
 
+function removeHtmlBlock(html: string, tagName: string): string {
+  let out = html;
+  const openNeedle = `<${tagName}`;
+  const closeNeedle = `</${tagName}`;
+  for (;;) {
+    const lower = out.toLowerCase();
+    const start = lower.indexOf(openNeedle);
+    if (start < 0) return out;
+    const closeStart = lower.indexOf(closeNeedle, start + openNeedle.length);
+    if (closeStart < 0) return `${out.slice(0, start)} `;
+    const closeEnd = lower.indexOf(">", closeStart + closeNeedle.length);
+    out = `${out.slice(0, start)} ${closeEnd < 0 ? "" : out.slice(closeEnd + 1)}`;
+  }
+}
+
 function stripHtml(html: string): string {
-  return html
+  let text = html;
+  for (const tag of ["script", "style", "noscript", "header", "footer", "nav", "aside"]) {
+    text = removeHtmlBlock(text, tag);
+  }
+  return text
     // Remove scripts, styles, head, nav-ish blocks
-    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, " ")
-    .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, " ")
-    .replace(/<noscript\b[^<]*(?:(?!<\/noscript>)<[^<]*)*<\/noscript>/gi, " ")
-    .replace(/<header\b[^<]*(?:(?!<\/header>)<[^<]*)*<\/header>/gi, " ")
-    .replace(/<footer\b[^<]*(?:(?!<\/footer>)<[^<]*)*<\/footer>/gi, " ")
-    .replace(/<nav\b[^<]*(?:(?!<\/nav>)<[^<]*)*<\/nav>/gi, " ")
-    .replace(/<aside\b[^<]*(?:(?!<\/aside>)<[^<]*)*<\/aside>/gi, " ")
     // Strip all remaining tags
     .replace(/<[^>]+>/g, " ")
     // HTML entities
     .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, "\"")
     .replace(/&#39;/g, "'")
     .replace(/&apos;/g, "'")
     .replace(/&hellip;/g, "…")
+    .replace(/&amp;/g, "&")
     // RSS feeds often entity-encode article HTML inside content:encoded.
     .replace(/<[^>]+>/g, " ")
     // Collapse whitespace
@@ -88,11 +100,11 @@ function stripHtml(html: string): string {
 
 function decodeHtmlAttribute(value: string): string {
   return value
-    .replace(/&amp;/g, "&")
     .replace(/&quot;/g, "\"")
     .replace(/&#39;/g, "'")
     .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">");
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
 }
 
 function normaliseSourceLink(raw: string, baseUrl: string): string | null {

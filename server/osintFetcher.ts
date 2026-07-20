@@ -85,12 +85,12 @@ function stripHtml(s: string): string {
   return (s || "")
     .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
     .replace(/<[^>]+>/g, " ")
-    .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -737,7 +737,7 @@ function buildDeepParsers(): DeepParser[] {
   for (const eco of OSV_ECOS) {
     parsers.push({
       id: `deep-osv-${eco}`,
-      sourceId: findCatalogId("CVE_VULN", new RegExp(`OSV — ${eco.toLowerCase()}`, "i")) || `osrc-osv-${eco}`,
+      sourceId: findCatalogId("CVE_VULN", new RegExp(`^OSV — ${eco.toLowerCase()}$`, "i")) || `osrc-osv-${eco}`,
       sourceName: `OSV — ${eco}`,
       sourceCategory: "CVE_VULN",
       sourceUrl: `https://osv.dev/list?ecosystem=${eco}`,
@@ -862,7 +862,7 @@ function buildDeepParsers(): DeepParser[] {
   // ---- 7. CVE.org official JSON (recent) ----
   parsers.push({
     id: "deep-cveorg",
-    sourceId: findCatalogId("CVE_VULN", /CVE\.org/i) || "osrc-cveorg",
+    sourceId: findCatalogId("CVE_VULN", /^CVE\.org(?: Project — JSON v5)?$/i) || "osrc-cveorg",
     sourceName: "CVE.org Project — JSON v5",
     sourceCategory: "CVE_VULN",
     sourceUrl: "https://www.cve.org/",
