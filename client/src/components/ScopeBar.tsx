@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Network, Building2, Briefcase, Globe2 } from "lucide-react";
+import { Network, Building2, Briefcase, Globe2, type LucideIcon } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,7 +28,7 @@ interface ScopeBarProps {
   rightSlot?: React.ReactNode;
 }
 
-const DIMENSIONS: Array<{ id: ScopeDimension; label: string; icon: React.ComponentType<{ size?: number; className?: string }> }> = [
+const DIMENSIONS: Array<{ id: ScopeDimension; label: string; icon: LucideIcon }> = [
   { id: "client", label: "Client", icon: Building2 },
   { id: "industry", label: "Industry", icon: Briefcase },
   { id: "geo", label: "Geography", icon: Globe2 },

@@ -34,42 +34,17 @@ import { OSINT_SOURCES, type OsintSourceSeed } from "./osintSeed";
 import { createHash } from "crypto";
 import { isSecurityPublisherHost } from "./iocPublisherBlocklist";
 import { isSafeSourceFetchUrl } from "./sourceFetch";
+import type { KelaIngestConfig } from "./kelaIntegration";
+import { createThreatIntelConnectors } from "./connectors/registry";
+import type { ConnectorIntelItem } from "./connectors/types";
+import type { CommunityIngestConfig } from "./communityIntegrations";
 
-export interface ParsedItem {
-  sourceId?: string;          // canonical osrc-XXXX id from the catalog (when known)
-  sourceName: string;
-  sourceCategory: string;
-  sourceUrl: string;
-  title: string;
-  url: string;
-  publishedAt: string;        // ISO
-  severity: "critical" | "high" | "medium" | "low" | "info";
-  cveIds: string[];
-  affectedTech: string[];
-  threatActors: string[];
-  /** v2.8 — parsed Indicators of Compromise. */
-  iocs?: FindingIoCs;
-  /** v2.8 — SHA-1 over normalised (title + host). Used for cross-source dedupe. */
-  contentHash?: string;
-  summary: string;
-  rawSnippet: string;
-}
+export interface ParsedItem extends ConnectorIntelItem {}
 
 // ---------- shared helpers -------------------------------------------------
 
 const FETCH_TIMEOUT_MS = 9000;
 const FEED_CONCURRENCY = 8;
-const OSV_SOURCE_NAME_RE: Record<string, RegExp> = {
-  npm: /^OSV — npm$/i,
-  PyPI: /^OSV — PyPI$/i,
-  Maven: /^OSV — Maven$/i,
-  RubyGems: /^OSV — RubyGems$/i,
-  NuGet: /^OSV — NuGet$/i,
-  Packagist: /^OSV — Packagist$/i,
-  Go: /^OSV — Go$/i,
-  "crates.io": /^OSV — crates\.io$/i,
-  Pub: /^OSV — Pub$/i,
-};
 
 async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
   if (!(await isSafeSourceFetchUrl(url))) throw new Error("unsafe source URL");
@@ -96,12 +71,12 @@ function stripHtml(s: string): string {
   return (s || "")
     .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
     .replace(/<[^>]+>/g, " ")
+    .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -292,6 +267,15 @@ function safeDateIso(s: string): string {
   const d = new Date(s);
   if (isNaN(d.getTime())) return new Date().toISOString();
   return d.toISOString();
+}
+
+function resolvePublishedAt(value: unknown): { publishedAt: string; inferred: boolean } {
+  const raw = typeof value === "string" ? value.trim() : "";
+  if (raw) {
+    const parsed = new Date(raw);
+    if (!Number.isNaN(parsed.getTime())) return { publishedAt: parsed.toISOString(), inferred: false };
+  }
+  return { publishedAt: new Date().toISOString(), inferred: true };
 }
 
 // ---------- v2.8 helpers: URL normalisation, content hash, IoC extraction ----
@@ -595,8 +579,14 @@ function findCatalogIdByName(name: string, hostFallback?: string): string | unde
 
 // Build deep parsers. Each parser is wrapped in try/catch in the runner so a
 // single upstream outage never breaks the whole ingest.
-function buildDeepParsers(): DeepParser[] {
-  const parsers: DeepParser[] = [];
+function buildDeepParsers(xBearerToken?: string | null, kelaConfig?: KelaIngestConfig | null, communityConfigs?: CommunityIngestConfig[]): DeepParser[] {
+  const parsers: DeepParser[] = createThreatIntelConnectors(
+    { xBearerToken, kelaConfig, communityConfigs },
+    { stripHtml, safeDateIso, severityFromText, extractCves, detectTech, detectActors },
+  ).map((connector) => ({
+    ...connector.metadata,
+    run: (options) => connector.fetch(options),
+  }));
 
   // ---- 1. CISA KEV — full catalog ----
   parsers.push({
@@ -748,7 +738,7 @@ function buildDeepParsers(): DeepParser[] {
   for (const eco of OSV_ECOS) {
     parsers.push({
       id: `deep-osv-${eco}`,
-      sourceId: findCatalogId("CVE_VULN", OSV_SOURCE_NAME_RE[eco]) || `osrc-osv-${eco}`,
+      sourceId: findCatalogId("CVE_VULN", new RegExp(`OSV — ${eco.toLowerCase()}`, "i")) || `osrc-osv-${eco}`,
       sourceName: `OSV — ${eco}`,
       sourceCategory: "CVE_VULN",
       sourceUrl: `https://osv.dev/list?ecosystem=${eco}`,
@@ -873,7 +863,7 @@ function buildDeepParsers(): DeepParser[] {
   // ---- 7. CVE.org official JSON (recent) ----
   parsers.push({
     id: "deep-cveorg",
-    sourceId: findCatalogId("CVE_VULN", /^CVE\.org(?: Project — JSON v5)?$/i) || "osrc-cveorg",
+    sourceId: findCatalogId("CVE_VULN", /CVE\.org/i) || "osrc-cveorg",
     sourceName: "CVE.org Project — JSON v5",
     sourceCategory: "CVE_VULN",
     sourceUrl: "https://www.cve.org/",
@@ -1560,8 +1550,8 @@ async function runOneGeneric(src: OsintSourceSeed, sinceIso: string, maxPerSourc
   // RSS / Atom / RDF
   const entries = parseFeed(body);
   for (const e of entries.slice(0, maxPerSource)) {
-    const pub = safeDateIso(e.pubDate);
-    if (pub < sinceIso) continue;
+    const publication = resolvePublishedAt(e.pubDate);
+    if (!publication.inferred && publication.publishedAt < sinceIso) continue;
     if (!e.title) continue;
     const text = `${e.title} ${e.description}`;
     items.push({
@@ -1571,8 +1561,11 @@ async function runOneGeneric(src: OsintSourceSeed, sinceIso: string, maxPerSourc
       sourceUrl: src.url,
       title: e.title.slice(0, 280),
       url: e.link || src.url,
-      publishedAt: pub,
+      publishedAt: publication.publishedAt,
+      publishedAtInferred: publication.inferred,
       severity: severityFromText(text),
+      publisherSeverity: severityFromText(text),
+      technicalSeverity: severityFromText(text),
       cveIds: extractCves(text),
       affectedTech: detectTech(text),
       threatActors: detectActors(text),
@@ -1607,6 +1600,9 @@ function looksLikeFeedUrl(url: string): boolean {
 export async function fetchRealOsintItems(opts: {
   techs: string[];
   maxItems: number;
+  xBearerToken?: string | null;
+  kelaConfig?: KelaIngestConfig | null;
+  communityConfigs?: CommunityIngestConfig[];
 }): Promise<{ items: ParsedItem[]; feedsTried: number; feedsOk: number; errors: string[] }> {
   const sinceIso = new Date(Date.now() - 30 * 86400_000).toISOString();
   const broad = await runBroadIngest({
@@ -1614,6 +1610,9 @@ export async function fetchRealOsintItems(opts: {
     maxPerSource: 30,
     maxTotal: opts.maxItems * 4,
     deepOnly: true,
+    xBearerToken: opts.xBearerToken,
+    kelaConfig: opts.kelaConfig,
+    communityConfigs: opts.communityConfigs,
   });
   const allowed = new Set(opts.techs);
   const filtered = allowed.size === 0
@@ -1638,6 +1637,10 @@ export async function runBroadIngest(opts: {
   maxTotal: number;            // hard cap on total returned items
   deepOnly?: boolean;          // skip the generic 514-source walk (used by legacy scan)
   categoryFilter?: string[];   // optional whitelist of seed categories
+  enabledSourceIds?: string[]; // canonical source ids enabled by the administrator
+  xBearerToken?: string | null; // null disables the optional X parser for this workspace
+  kelaConfig?: KelaIngestConfig | null; // null disables the licensed KELA parser
+  communityConfigs?: CommunityIngestConfig[]; // enabled community ingestion connectors
   onProgress?: (progress: { attempted: number; total: number; parsed: number; feedsOk: number }) => void;
 }): Promise<{ items: ParsedItem[]; feedsTried: number; feedsOk: number; errors: string[] }> {
   const errors: string[] = [];
@@ -1646,8 +1649,11 @@ export async function runBroadIngest(opts: {
   let feedsOk = 0;
 
   // ---- Phase A: deep parsers ----
-  const deep = buildDeepParsers();
+  const enabledSourceIds = opts.enabledSourceIds ? new Set(opts.enabledSourceIds) : null;
+  const deep = buildDeepParsers(opts.xBearerToken, opts.kelaConfig, opts.communityConfigs)
+    .filter((parser) => !enabledSourceIds || enabledSourceIds.has(parser.sourceId));
   const candidates = opts.deepOnly ? [] : OSINT_SOURCES.filter((s) => {
+    if (enabledSourceIds && !enabledSourceIds.has(s.id)) return false;
     if (opts.categoryFilter && !opts.categoryFilter.includes(s.category)) return false;
     const FEED_CATS = new Set(["SECURITY_NEWS","CVE_VULN","CERT_GOV","VENDOR_RESEARCH","THREAT_INTEL","RANSOMWARE_LEAK"]);
     if (!FEED_CATS.has(s.category)) return false;

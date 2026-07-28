@@ -6,6 +6,7 @@ import { serveStatic } from "./static";
 import { startOsintBackgroundJobs } from "./backgroundJobs";
 import { assertModeConsistency, logProductionMode } from "./productionMode";
 import { createServer } from "node:http";
+import { redactForLog } from "./logRedaction";
 
 // Boot-time sanity check — fail loud if mutually-exclusive mode flags are set
 // (OPTRASIGHT_STRICT=1 AND OPTRASIGHT_DEMO=1). Runs before any module-init so
@@ -42,30 +43,7 @@ export function log(message: string, source = "express") {
     hour12: true,
   });
 
-  const cleanSource = JSON.stringify(source.replace(/[\r\n\t]/g, " ").slice(0, 40));
-  const cleanMessage = JSON.stringify(message.replace(/[\r\n\t]/g, " ").slice(0, 2000));
-  console.log(`${formattedTime} source=${cleanSource} message=${cleanMessage}`);
-}
-
-function redactForLog(value: unknown, depth = 0): unknown {
-  if (depth > 4) return "[truncated]";
-  if (value == null) return value;
-  if (typeof value === "string") {
-    return value.length > 240 ? `${value.slice(0, 240)}…[truncated]` : value;
-  }
-  if (Array.isArray(value)) return value.slice(0, 20).map((v) => redactForLog(v, depth + 1));
-  if (typeof value !== "object") return value;
-  const out: Record<string, unknown> = {};
-  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
-    if (/password|token|secret|api[-_]?key|authorization|access_token/i.test(key)) {
-      out[key] = "[redacted]";
-    } else if (/body|content|payload|result|report|narrative|html|markdown|base64|data/i.test(key)) {
-      out[key] = "[redacted]";
-    } else {
-      out[key] = redactForLog(raw, depth + 1);
-    }
-  }
-  return out;
+  console.log(`${formattedTime} [${source}] ${message}`);
 }
 
 const rateBuckets = new Map<string, { count: number; resetAt: number }>();
@@ -117,6 +95,10 @@ app.use((req, res, next) => {
 });
 
 app.use("/api/v1/auth/login", rateLimit({ keyPrefix: "login", windowMs: 60_000, max: 10 }));
+app.use(
+  "/api/v1/client-profiles/:cid/email-logo",
+  rateLimit({ keyPrefix: "client-logo-upload", windowMs: 15 * 60_000, max: 12 }),
+);
 
 app.use((req, res, next) => {
   const start = Date.now();

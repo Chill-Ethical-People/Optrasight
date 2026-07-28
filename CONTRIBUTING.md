@@ -34,7 +34,7 @@ npm run dev
 * Shared components live under `client/src/components/`. shadcn/ui base components in `components/ui/` are auto-generated — don't hand-edit.
 * `apiRequest` from `@/lib/queryClient` is the only allowed HTTP helper. Never use raw `fetch()` — it bypasses the `__PORT_5000__` rewrite and 404s after deploy.
 * Mutations must invalidate React Query keys: `queryClient.invalidateQueries({ queryKey: ["/api/v1/X"] })`.
-* All interactive elements need a `data-testid="<action>-<target>"` attribute (e.g. `button-upload-portrait`, `input-actor-name`).
+* All interactive elements need a `data-testid="<action>-<target>"` attribute (e.g. `button-regenerate-portrait`, `input-actor-name`).
 * `<Switch>` lives inside `<Router hook={useHashLocation}>`. Never put `hook` on `<Switch>`.
 * **No `localStorage`, `sessionStorage`, `indexedDB`, or cookies.** They are blocked in the sandbox iframe and crash the page. Use React state + server storage instead.
 

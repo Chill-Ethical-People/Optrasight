@@ -43,16 +43,34 @@ The internal authn model is intentionally simple but production-hardened enough 
 | AI provider keys | `data/secrets/optrasight-secrets.db` | AES-256-GCM ciphertext with per-instance key at `data/.optrasight-kek`; keep this DB outside public data exports and keep disk-level encryption enabled. |
 | Connector API keys/secrets | `data/secrets/optrasight-secrets.db` | Same secret store as AI provider keys; only masks remain in the workspace DB. |
 | Finding content (OSINT) | `osint_findings.*` | Public-source data — not sensitive. |
-| Portrait images | `data/portraits/*` | Filesystem only. Validated by magic-byte sniff on upload (`POST /api/v1/threat-actors/:aid/portrait/upload`). |
+| Portrait images | `data/portraits/*` | Curated assets or server-side AI output only. Browser-supplied portrait upload is disabled with HTTP 410. |
+| Client email logos | `data/client-email-logos/*` | Validated and normalized by the dedicated image upload service, then stored under server-generated object keys. |
+| Client email Word templates | Client Profile subject/body fields | `.docx` only, 5MB limit, CRC-checked ZIP package, bounded Word XML, supported-placeholder allowlist; the raw upload is not retained. |
 
 ## Upload validation
 
-`POST /api/v1/threat-actors/:aid/portrait/upload` accepts only:
+`POST /api/v1/threat-actors/:aid/portrait/upload` is a compatibility tombstone and
+returns HTTP 410. Curated portrait assets and server-side AI portrait generation
+are the supported paths.
 
-* PNG / JPEG / WebP / GIF (extension regex AND magic-byte sniff).
-* Maximum 5 MB.
+Client email logos are the only current browser-supplied image upload. They are:
 
-Add any future uploads through the same JSON+base64 pattern. There is no multer / multipart endpoint by design, and a 50 MB body limit applies globally in `server/index.ts`.
+* restricted to PNG and JPEG with a 2 MB input quota and a 16-megapixel decode limit;
+* decoded, structurally validated, metadata-stripped, and re-encoded with `sharp`;
+* stored through `ImageObjectStore` under random server-generated object keys; and
+* protected by an upload-specific request rate limit.
+
+Any future upload must extend a dedicated upload service with strict content
+validation, server-generated object keys, per-object and per-tenant quotas,
+rate limits, and a storage abstraction. Route-local filesystem writes using
+request data are prohibited.
+
+## Repository security gates
+
+CodeQL runs for JavaScript and TypeScript on pushes and pull requests to `main`,
+on a weekly schedule, and on manual dispatch. Snyk dependency scanning remains
+part of the release quality workflow when `SNYK_TOKEN` is configured. GitHub
+secret scanning and push protection must remain enabled in repository settings.
 
 ## CORS
 

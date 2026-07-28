@@ -86,13 +86,17 @@ export function navigateToAiJobTarget(url: string) {
     // Fire both a normal hashchange and an app-level event so page-level
     // deep-link consumers can open their dialogs deterministically.
     const dispatchDeepLink = () => {
-      window.dispatchEvent(new HashChangeEvent("hashchange", {
-        oldURL: window.location.href,
-        newURL: window.location.href,
-      }));
-      window.dispatchEvent(new CustomEvent("optrasight:ai-job-open", {
-        detail: { url, hash: targetHash },
-      }));
+      window.dispatchEvent(
+        new HashChangeEvent("hashchange", {
+          oldURL: window.location.href,
+          newURL: window.location.href,
+        }),
+      );
+      window.dispatchEvent(
+        new CustomEvent("optrasight:ai-job-open", {
+          detail: { url, hash: targetHash },
+        }),
+      );
     };
     dispatchDeepLink();
     window.setTimeout(dispatchDeepLink, 0);
@@ -109,7 +113,10 @@ interface AiJobsContextValue {
 }
 
 const AiJobsContext = createContext<AiJobsContextValue>({
-  jobs: [], running: [], recent: [], loading: false,
+  jobs: [],
+  running: [],
+  recent: [],
+  loading: false,
 });
 
 // Map a job kind to the React-Query keys that should be invalidated on completion.
@@ -127,9 +134,20 @@ function queryKeysForKind(kind: string): unknown[][] {
       return [["/api/v1/osint/findings"], ["/api/v1/operations/audit"]];
     case "finding_ai_triage":
     case "osint_analysis":
-      return [["/api/v1/osint/findings"], ["/api/v1/osint/sources/scorecard"], ["/api/v1/osint/sources/quadrant"], ["/api/v1/osint/sources/overlap"], ["/api/v1/osint/sources/heatmaps"], ["/api/v1/operations/audit"]];
+      return [
+        ["/api/v1/osint/findings"],
+        ["/api/v1/osint/sources/scorecard"],
+        ["/api/v1/osint/sources/quadrant"],
+        ["/api/v1/osint/sources/overlap"],
+        ["/api/v1/osint/sources/heatmaps"],
+        ["/api/v1/operations/audit"],
+      ];
     case "hunt_query_generation":
-      return [["/api/v1/osint/hunt-queries"], ["/api/v1/operations/audit"]];
+    case "detection_rule_generation":
+      return [["/api/v1/detection-rules"], ["/api/v1/operations/audit"]];
+    case "client_digest_generation":
+    case "client_digest_delivery":
+      return [["/api/v1/client-profiles"], ["/api/v1/client-briefs"], ["/api/v1/operations/audit"]];
     case "osint_run":
       return [["/api/v1/osint/findings"], ["/api/v1/osint/sources/health"], ["/api/v1/operations/audit"]];
     default:
@@ -138,7 +156,13 @@ function queryKeysForKind(kind: string): unknown[][] {
 }
 
 function isTerminal(status: AiJobSummary["status"]): boolean {
-  return status === "succeeded" || status === "failed" || status === "completed" || status === "completed_with_errors" || status === "cancelled";
+  return (
+    status === "succeeded" ||
+    status === "failed" ||
+    status === "completed" ||
+    status === "completed_with_errors" ||
+    status === "cancelled"
+  );
 }
 
 function statusBucket(status: AiJobSummary["status"]): "success" | "failure" | "running" {
@@ -166,8 +190,12 @@ export function AiJobsProvider({ children }: { children: ReactNode }) {
       return r.json();
     },
     enabled,
-    // 4s while user is on the page; React-Query already pauses when window blurs.
-    refetchInterval: 4000,
+    // Keep running work responsive without continuously polling an idle
+    // workspace. React Query already pauses this timer while the tab is hidden.
+    refetchInterval: (query) => {
+      const current = (query.state.data as { jobs?: AiJobSummary[] } | undefined)?.jobs ?? [];
+      return current.some((job) => job.status === "running" || job.status === "queued") ? 2000 : 15000;
+    },
     refetchIntervalInBackground: false,
     staleTime: 0,
   });
@@ -188,22 +216,19 @@ export function AiJobsProvider({ children }: { children: ReactNode }) {
       const label = job.targetLabel ?? job.kind.replaceAll("_", " ");
       const url = job.targetUrl ?? undefined;
       const title =
-        bucket === "success" ? "AI analysis complete"
-          : bucket === "failure" ? "AI analysis failed"
+        bucket === "success"
+          ? "AI analysis complete"
+          : bucket === "failure"
+            ? "AI analysis failed"
             : "AI analysis updated";
-      const description = job.errorMessage
-        ? `${label} — ${job.errorMessage}`
-        : label;
+      const description = job.errorMessage ? `${label} — ${job.errorMessage}` : label;
 
       toast({
         title,
         description,
         variant: bucket === "failure" ? "destructive" : "default",
         action: url ? (
-          <ToastAction
-            altText="Open"
-            onClick={() => navigateToAiJobTarget(url)}
-          >
+          <ToastAction altText="Open" onClick={() => navigateToAiJobTarget(url)}>
             Open
           </ToastAction>
         ) : undefined,

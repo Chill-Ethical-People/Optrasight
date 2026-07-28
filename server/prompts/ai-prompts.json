@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "global": {
+    "default": { "mode": "append", "text": "" },
+    "providers": {
+      "deepseek": {
+        "mode": "append",
+        "text": "When structured JSON is requested, return one complete valid JSON object only. Keep prose concise enough to finish every required field within the output budget."
+      }
+    },
+    "models": {}
+  },
+  "tasks": {
+    "triage": { "default": { "mode": "append", "text": "" }, "providers": {}, "models": {} },
+    "analysis": { "default": { "mode": "append", "text": "" }, "providers": {}, "models": {} },
+    "young_domain": { "default": { "mode": "append", "text": "" }, "providers": {}, "models": {} },
+    "report_summary": { "default": { "mode": "append", "text": "" }, "providers": {}, "models": {} },
+    "logo_abuse": { "default": { "mode": "append", "text": "" }, "providers": {}, "models": {} },
+    "osint_analysis": { "default": { "mode": "append", "text": "" }, "providers": {}, "models": {} },
+    "hunt_query": { "default": { "mode": "append", "text": "" }, "providers": {}, "models": {} },
+    "threat_landscape": { "default": { "mode": "append", "text": "" }, "providers": {}, "models": {} },
+    "osint_overview": { "default": { "mode": "append", "text": "" }, "providers": {}, "models": {} },
+    "osint_chat": { "default": { "mode": "append", "text": "" }, "providers": {}, "models": {} },
+    "detection_rule": { "default": { "mode": "append", "text": "" }, "providers": {}, "models": {} },
+    "client_digest": {
+      "default": {
+        "mode": "append",
+        "text": "The client brief must preserve the client-impact triage distinction between direct client relevance and general threat awareness. Never present unconfirmed exposure as fact."
+      },
+      "providers": {},
+      "models": {}
+    },
+    "threat_actor_enrichment": { "default": { "mode": "append", "text": "" }, "providers": {}, "models": {} },
+    "tap_portrait": { "default": { "mode": "append", "text": "" }, "providers": {}, "models": {} },
+    "chat_triage": { "default": { "mode": "append", "text": "" }, "providers": {}, "models": {} },
+    "client_impact": { "default": { "mode": "append", "text": "" }, "providers": {}, "models": {} },
+    "chat_deep_dive": { "default": { "mode": "append", "text": "" }, "providers": {}, "models": {} }
+  }
+}

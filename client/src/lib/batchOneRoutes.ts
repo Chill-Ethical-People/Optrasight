@@ -4,7 +4,14 @@ import type { AccessMode } from "../../../shared/accessPolicy";
 const DEFAULT_BATCH_ONE_REDIRECT = "#/osint";
 const ROOT_PATH = "/";
 const HASH_PREFIX = "#";
-const BATCH_ONE_REVIEW_PATHS = new Set<string>([ROOT_PATH, "/osint", "/intel", "/threat-actors"]);
+const BATCH_ONE_REVIEW_PATHS = new Set<string>([
+  ROOT_PATH,
+  "/osint",
+  "/intel",
+  "/threat-actors",
+  "/detection-rules",
+  "/account-security",
+]);
 
 export function stripHashQuery(path: string): string {
   const qix = path.indexOf("?");

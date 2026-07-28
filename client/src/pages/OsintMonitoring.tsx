@@ -1,5 +1,6 @@
 import { useMemo, useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { STATIC_DEMO_MODE } from "@/lib/staticDemoApi";
 import { showStaticDemoNotice } from "@/lib/staticDemoNotice";
@@ -14,23 +15,29 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription, DialogTrigger,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
+  DialogTrigger,
 } from "@/components/ui/dialog";
-import {
-  Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
-} from "@/components/ui/sheet";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { relativeTime } from "@/lib/format";
 import type {
-  OsintFindingDTO, HuntQueryDTO, OsintSourceRowDTO,
-  FindingIoCs, OsintFindingPatch,
+  OsintFindingDTO,
+  OsintSourceRowDTO,
+  ClientProfileDTO,
+  FindingIoCs,
+  OsintFindingPatch,
 } from "@shared/schema";
 
 /** Findings response shape from the BatchOne OSINT endpoint. */
 type TenantFindingsResp = { findings: OsintFindingDTO[] };
+type ClientProfilesResp = { profiles: ClientProfileDTO[] };
 type StixPreviewResp = {
   valid: boolean;
   objectCount: number;
@@ -51,9 +58,33 @@ type AiJobStatusResp = {
   errorMessage?: string | null;
 };
 import {
-  Radar, Sparkles, Search, Loader2, Code2, ExternalLink, Copy, ChevronRight, RefreshCw,
-  ChevronLeft, Pencil, X as XIcon, Plus, Check as CheckIcon, ArrowUpDown, ArrowUp, ArrowDown, Power, PowerOff,
-  Trash2, Megaphone, FileText, ShieldAlert, FileJson, Download,
+  Radar,
+  Sparkles,
+  Search,
+  Loader2,
+  ExternalLink,
+  Copy,
+  ChevronRight,
+  RefreshCw,
+  ChevronLeft,
+  Pencil,
+  X as XIcon,
+  Plus,
+  Check as CheckIcon,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  Power,
+  PowerOff,
+  Trash2,
+  Megaphone,
+  FileText,
+  ShieldAlert,
+  FileJson,
+  Download,
+  Clock3,
+  Database,
+  ListChecks,
 } from "lucide-react";
 import type { RangeKey } from "@/components/OsintChatbot";
 import OsintTriagePanel from "@/components/OsintTriagePanel";
@@ -64,10 +95,20 @@ import { useAiAvailability } from "@/lib/aiAvailability";
 
 // v2.15 — Day-range filter (matches server osintChat.ts RANGE_HOURS).
 const RANGE_HOURS: Record<RangeKey, number | null> = {
-  "1d": 24, "7d": 168, "1m": 720, "1q": 2160, "1y": 8760, "all": null,
+  "1d": 24,
+  "7d": 168,
+  "1m": 720,
+  "1q": 2160,
+  "1y": 8760,
+  all: null,
 };
 const RANGE_BUTTON_LABEL: Record<RangeKey, string> = {
-  "1d": "1d", "7d": "7d", "1m": "1m", "1q": "1q", "1y": "1y", "all": "All",
+  "1d": "1d",
+  "7d": "7d",
+  "1m": "1m",
+  "1q": "1q",
+  "1y": "1y",
+  all: "All",
 };
 const FINDINGS_PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
 
@@ -100,10 +141,20 @@ function freshnessTier(publishedAt?: string | null) {
   const ts = Date.parse(publishedAt || "");
   if (!Number.isFinite(ts)) return { label: "undated", tone: "border-muted text-muted-foreground" };
   const hours = (Date.now() - ts) / 3_600_000;
-  if (hours < 0) return { label: "future source date", tone: "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300" };
-  if (hours <= 24) return { label: "fresh <24h", tone: "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" };
-  if (hours <= 168) return { label: "fresh 7d", tone: "border-cyan-500/40 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300" };
-  if (hours <= 720) return { label: "aging 30d", tone: "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300" };
+  if (hours < 0)
+    return {
+      label: "future source date",
+      tone: "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+    };
+  if (hours <= 24)
+    return {
+      label: "fresh <24h",
+      tone: "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+    };
+  if (hours <= 168)
+    return { label: "fresh 7d", tone: "border-cyan-500/40 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300" };
+  if (hours <= 720)
+    return { label: "aging 30d", tone: "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300" };
   return { label: "stale >30d", tone: "border-muted text-muted-foreground" };
 }
 
@@ -116,8 +167,16 @@ function confidenceTier(f: OsintFindingDTO) {
   if (f.threatActors.length) score += 1;
   const rel = relevancePercent(f.aiRelevanceScore);
   if (rel != null && rel >= 70) score += 1;
-  if (score >= 6) return { label: "confidence high", tone: "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" };
-  if (score >= 3) return { label: "confidence medium", tone: "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300" };
+  if (score >= 6)
+    return {
+      label: "confidence high",
+      tone: "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+    };
+  if (score >= 3)
+    return {
+      label: "confidence medium",
+      tone: "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+    };
   return { label: "confidence low", tone: "border-muted text-muted-foreground" };
 }
 
@@ -125,7 +184,6 @@ interface SourcesResp {
   sources: OsintSourceRowDTO[];
   summary: { category: string; label: string; count: number }[];
 }
-interface HuntQueriesResp { queries: HuntQueryDTO[] }
 interface TaxonomiesResp {
   huntLanguages: { id: string; label: string }[];
   osintOverviewPersonas?: { id: string; label: string; blurb: string }[];
@@ -134,11 +192,16 @@ interface TaxonomiesResp {
 
 function severityColor(s: string) {
   switch (s) {
-    case "critical": return "bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/30";
-    case "high":     return "bg-orange-500/15 text-orange-700 dark:text-orange-300 border-orange-500/30";
-    case "medium":   return "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30";
-    case "low":      return "bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/30";
-    default:         return "bg-muted text-muted-foreground border-border";
+    case "critical":
+      return "bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/30";
+    case "high":
+      return "bg-orange-500/15 text-orange-700 dark:text-orange-300 border-orange-500/30";
+    case "medium":
+      return "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30";
+    case "low":
+      return "bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/30";
+    default:
+      return "bg-muted text-muted-foreground border-border";
   }
 }
 
@@ -161,18 +224,18 @@ function IntelCategoryChip({
           cls: "bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/30",
         }
       : category === "regular_report"
-      ? {
-          Icon: FileText,
-          label: "Regular Report",
-          cls: "bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/30",
-        }
-      : category === "advertisement"
-      ? {
-          Icon: Megaphone,
-          label: "Advertisement",
-          cls: "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30",
-        }
-      : null;
+        ? {
+            Icon: FileText,
+            label: "Regular Report",
+            cls: "bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/30",
+          }
+        : category === "advertisement"
+          ? {
+              Icon: Megaphone,
+              label: "Advertisement",
+              cls: "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30",
+            }
+          : null;
   if (!conf) return null;
   const Icon = conf.Icon;
   const pad = size === "md" ? "px-1.5 py-0.5" : "px-1.5 py-0";
@@ -190,12 +253,107 @@ function IntelCategoryChip({
   );
 }
 
+function FindingMetaStrip({ finding, detail = false }: { finding: OsintFindingDTO; detail?: boolean }) {
+  const fresh = freshnessTier(finding.publishedAt);
+  const confidence = confidenceTier(finding);
+  const count = iocCount(finding.iocs);
+  const score = relevancePercent(finding.aiRelevanceScore);
+  const freshDot = fresh.label.startsWith("fresh")
+    ? "bg-emerald-500"
+    : fresh.label.startsWith("aging")
+      ? "bg-amber-500"
+      : "bg-slate-400";
+  const confidenceDot = confidence.label.endsWith("high")
+    ? "bg-emerald-500"
+    : confidence.label.endsWith("medium")
+      ? "bg-amber-500"
+      : "bg-slate-400";
+  return (
+    <div className={detail ? "space-y-2" : "mb-1.5 space-y-1.5"}>
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+        <Badge className={`h-5 rounded px-1.5 text-[10px] uppercase ${severityColor(finding.severity)}`}>
+          {finding.severity}
+        </Badge>
+        <IntelCategoryChip
+          category={finding.intelCategory ?? null}
+          testId={detail ? "badge-detail-intel-category" : `badge-intel-category-${finding.id}`}
+        />
+        <Badge
+          variant="outline"
+          className="h-5 max-w-[190px] rounded px-1.5 text-[10px] uppercase text-muted-foreground"
+        >
+          <span className="truncate">{finding.sourceCategory.replace(/_/g, " ")}</span>
+        </Badge>
+        <span
+          className="min-w-0 max-w-[260px] truncate text-[10px] font-medium text-muted-foreground"
+          title={finding.sourceName}
+        >
+          {finding.sourceName}
+        </span>
+      </div>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
+        <span
+          className="inline-flex items-center gap-1"
+          title={formatIntelTimestamp(finding.publishedAt)}
+          data-testid={detail ? "text-detail-published-at" : `text-published-at-${finding.id}`}
+        >
+          <Clock3 size={11} />
+          Published {publishedTimeLabel(finding.publishedAt)}
+        </span>
+        <span
+          className="inline-flex items-center gap-1"
+          title={formatIntelTimestamp(finding.createdAt)}
+          data-testid={detail ? "text-detail-ingested-at" : `text-ingested-at-${finding.id}`}
+        >
+          <Database size={11} />
+          Ingested {relativeTime(finding.createdAt)}
+        </span>
+        <span
+          className="inline-flex items-center gap-1 whitespace-nowrap"
+          data-testid={detail ? "badge-detail-freshness" : `badge-freshness-${finding.id}`}
+        >
+          <span className={`h-1.5 w-1.5 rounded-full ${freshDot}`} />
+          {fresh.label}
+        </span>
+        <span
+          className="inline-flex items-center gap-1 whitespace-nowrap"
+          data-testid={detail ? "badge-detail-confidence" : `badge-confidence-${finding.id}`}
+        >
+          <span className={`h-1.5 w-1.5 rounded-full ${confidenceDot}`} />
+          {confidence.label.replace("confidence ", "")} confidence
+        </span>
+        {!detail && score != null ? (
+          <span className="font-mono" data-testid={`badge-relevance-${finding.id}`}>
+            analysis {score}%
+          </span>
+        ) : null}
+        {!detail && count > 0 ? (
+          <span className="font-mono" data-testid={`badge-ioc-count-${finding.id}`}>
+            {count} IoCs
+          </span>
+        ) : null}
+        {!detail && finding.attackTechniques?.length ? (
+          <span className="font-mono">{finding.attackTechniques.length} ATT&amp;CK</span>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 // ---- Sources tab ----------------------------------------------------------
 interface IngestStatus {
   busy: boolean;
   startedAt: string | null;
   finishedAt: string | null;
-  summary: { count: number; workspaces?: number; tenants?: number; feedsTried: number; feedsOk: number; errors: string[]; durationMs: number } | null;
+  summary: {
+    count: number;
+    workspaces?: number;
+    tenants?: number;
+    feedsTried: number;
+    feedsOk: number;
+    errors: string[];
+    durationMs: number;
+  } | null;
   error: string | null;
 }
 
@@ -230,7 +388,9 @@ function SourcesTab() {
   const refresh = useMutation({
     mutationFn: async () => {
       const r = await apiRequest("POST", "/api/v1/admin/osint/ingest", {
-        days: 365, maxPerSource: 60, maxTotal: 10000,
+        days: 365,
+        maxPerSource: 60,
+        maxTotal: 10000,
       });
       return r.json();
     },
@@ -241,17 +401,20 @@ function SourcesTab() {
         toast({ title: "Broad ingest started", description: "Walking the full source catalog — takes ~3-5 minutes" });
       }
       queryClient.invalidateQueries({ queryKey: ["/api/v1/admin/osint/ingest/status"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/v1/operations/audit"] });
     },
     onError: (e: any) => {
       toast({ title: "Failed to start ingest", description: String(e?.message || e), variant: "destructive" });
     },
   });
 
-  // When an ingest finishes, refetch the sources list so the parsed counts update.
-  const wasBusy = useMemo(() => ingestStatus?.busy, [ingestStatus?.busy]);
-  if (ingestStatus && !ingestStatus.busy && wasBusy === false && ingestStatus.finishedAt) {
-    // no-op, react-query already invalidated above on completion
-  }
+  // Refresh the data views once Job Control reports a completed source run.
+  useEffect(() => {
+    if (ingestStatus?.busy || !ingestStatus?.finishedAt) return;
+    queryClient.invalidateQueries({ queryKey: ["/api/v1/osint/sources"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/v1/osint/findings"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/v1/operations/audit"] });
+  }, [ingestStatus?.busy, ingestStatus?.finishedAt]);
 
   // v2.29 — Bulk enable / disable / delete mutation.
   const bulk = useMutation({
@@ -260,14 +423,18 @@ function SourcesTab() {
       return r.json();
     },
     onSuccess: (resp: any, vars) => {
-      toast({ title: `${vars.action[0].toUpperCase() + vars.action.slice(1)}d sources`, description: `${resp.changed ?? 0} rows updated.` });
+      toast({
+        title: `${vars.action[0].toUpperCase() + vars.action.slice(1)}d sources`,
+        description: `${resp.changed ?? 0} rows updated.`,
+      });
       setSelected(new Set());
       queryClient.invalidateQueries({ queryKey: ["/api/v1/osint/sources"] });
     },
-    onError: (e: any) => toast({ variant: "destructive", title: "Bulk update failed", description: String(e?.message || e) }),
+    onError: (e: any) =>
+      toast({ variant: "destructive", title: "Bulk update failed", description: String(e?.message || e) }),
   });
 
-  const { data, isLoading, refetch: refetchSources } = useQuery<SourcesResp>({
+  const { data, isLoading } = useQuery<SourcesResp>({
     queryKey: ["/api/v1/osint/sources", category, q],
     queryFn: async () => {
       const path = "/api/v1/osint/sources";
@@ -308,14 +475,19 @@ function SourcesTab() {
     });
     const cmp = (a: OsintSourceRowDTO, b: OsintSourceRowDTO): number => {
       switch (sortKey) {
-        case "name":     return a.englishName.localeCompare(b.englishName);
-        case "category": return a.categoryLabel.localeCompare(b.categoryLabel);
-        case "status":   return (Number(a.enabled) - Number(b.enabled));
+        case "name":
+          return a.englishName.localeCompare(b.englishName);
+        case "category":
+          return a.categoryLabel.localeCompare(b.categoryLabel);
+        case "status":
+          return Number(a.enabled) - Number(b.enabled);
         case "lastFetched": {
-          const av = a.lastFetchedAt || ""; const bv = b.lastFetchedAt || "";
+          const av = a.lastFetchedAt || "";
+          const bv = b.lastFetchedAt || "";
           return av.localeCompare(bv);
         }
-        case "findings": return a.findingCount - b.findingCount;
+        case "findings":
+          return a.findingCount - b.findingCount;
       }
       return 0;
     };
@@ -330,20 +502,23 @@ function SourcesTab() {
   const visibleIds = useMemo(() => visibleSources.map((s) => s.id), [visibleSources]);
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
   const someVisibleSelected = visibleIds.some((id) => selected.has(id));
-  const toggleOne = (id: string) => setSelected((prev) => {
-    const next = new Set(prev);
-    if (next.has(id)) next.delete(id); else next.add(id);
-    return next;
-  });
-  const toggleAllVisible = () => setSelected((prev) => {
-    const next = new Set(prev);
-    if (allVisibleSelected) {
-      for (const id of visibleIds) next.delete(id);
-    } else {
-      for (const id of visibleIds) next.add(id);
-    }
-    return next;
-  });
+  const toggleOne = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const toggleAllVisible = () =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        for (const id of visibleIds) next.delete(id);
+      } else {
+        for (const id of visibleIds) next.add(id);
+      }
+      return next;
+    });
   const clickSort = (k: SourceSortKey) => {
     if (sortKey === k) {
       setSortDir(sortDir === "asc" ? "desc" : "asc");
@@ -355,9 +530,11 @@ function SourcesTab() {
   };
   const SortIcon = ({ k }: { k: SourceSortKey }) => {
     if (sortKey !== k) return <ArrowUpDown className="w-3 h-3 inline ml-1 text-muted-foreground/60" />;
-    return sortDir === "asc"
-      ? <ArrowUp className="w-3 h-3 inline ml-1 text-primary" />
-      : <ArrowDown className="w-3 h-3 inline ml-1 text-primary" />;
+    return sortDir === "asc" ? (
+      <ArrowUp className="w-3 h-3 inline ml-1 text-primary" />
+    ) : (
+      <ArrowDown className="w-3 h-3 inline ml-1 text-primary" />
+    );
   };
 
   return (
@@ -400,60 +577,60 @@ function SourcesTab() {
             <Badge variant="secondary" className="font-mono text-xs" data-testid="badge-source-total">
               {total} sources
             </Badge>
-            <Badge variant="default" className="font-mono text-xs bg-primary/15 text-primary border-primary/30 border" data-testid="badge-source-parsed-total">
+            <Badge
+              variant="default"
+              className="font-mono text-xs bg-primary/15 text-primary border-primary/30 border"
+              data-testid="badge-source-parsed-total"
+            >
               {totalParsed} parsed
             </Badge>
             {isAdmin && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  if (STATIC_DEMO_MODE) {
-                    showStaticDemoNotice({ kind: "source", action: "Source refresh restricted" });
-                    return;
+              <>
+                <Button asChild size="sm" variant="ghost" className="gap-1.5 text-xs">
+                  <Link href="/operations-audit">
+                    <ListChecks className="w-3.5 h-3.5" /> Job Control
+                  </Link>
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    if (STATIC_DEMO_MODE) {
+                      showStaticDemoNotice({ kind: "source", action: "Source refresh restricted" });
+                      return;
+                    }
+                    refresh.mutate();
+                  }}
+                  disabled={refresh.isPending || ingestStatus?.busy}
+                  data-testid="button-refresh-all-sources"
+                  className={cn(
+                    "gap-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50",
+                    STATIC_DEMO_MODE && "opacity-55 hover:opacity-70",
+                  )}
+                  title={
+                    STATIC_DEMO_MODE
+                      ? "Source refresh is disabled in the static public demo"
+                      : "Walk the full source catalog and pull the last 12 months of threat intel (admin only)"
                   }
-                  refresh.mutate();
-                }}
-                disabled={refresh.isPending || ingestStatus?.busy}
-                data-testid="button-refresh-all-sources"
-                className={cn(
-                  "gap-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50",
-                  STATIC_DEMO_MODE && "opacity-55 hover:opacity-70",
-                )}
-                title={
-                  STATIC_DEMO_MODE
-                    ? "Source refresh is disabled in the static public demo"
-                    : "Walk the full source catalog and pull the last 12 months of threat intel (admin only)"
-                }
-              >
-                {ingestStatus?.busy ? (
-                  <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Ingesting…</>
-                ) : (
-                  <><RefreshCw className="w-3.5 h-3.5" /> Refresh all sources</>
-                )}
-              </Button>
+                >
+                  {ingestStatus?.busy ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" /> Ingesting…
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5" /> Refresh all sources
+                    </>
+                  )}
+                </Button>
+              </>
             )}
           </div>
         </div>
-        {isAdmin && ingestStatus?.summary && !ingestStatus.busy && (
-          <div className="mb-3 text-[11px] text-muted-foreground bg-muted/40 border rounded px-3 py-2 flex flex-wrap items-center gap-x-4 gap-y-1" data-testid="text-ingest-summary">
-            <span>Last broad ingest: <span className="font-mono">{ingestStatus.summary.count}</span> findings inserted into this workspace</span>
-            <span>Feeds OK: <span className="font-mono">{ingestStatus.summary.feedsOk}/{ingestStatus.summary.feedsTried}</span></span>
-            <span>Duration: <span className="font-mono">{Math.round(ingestStatus.summary.durationMs / 1000)}s</span></span>
-            <Button size="sm" variant="ghost" className="h-6 text-[11px] gap-1" onClick={() => refetchSources()} data-testid="button-reload-source-counts">
-              <RefreshCw className="w-3 h-3" /> Reload parsed counts
-            </Button>
-          </div>
-        )}
-        {isAdmin && ingestStatus?.busy && (
-          <div className="mb-3 text-[11px] text-muted-foreground bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 rounded px-3 py-2 flex items-center gap-2" data-testid="text-ingest-busy">
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            Broad OSINT ingest in progress — walking the source catalog with deep parsers. Started {ingestStatus.startedAt ? new Date(ingestStatus.startedAt).toLocaleTimeString() : ""}.
-          </div>
-        )}
         <div className="flex flex-wrap gap-2">
           <Input
-            value={q} onChange={(e) => setQ(e.target.value)}
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
             placeholder="Search sources by name or URL…"
             className="flex-1 min-w-[240px]"
             data-testid="input-source-filter"
@@ -465,7 +642,9 @@ function SourcesTab() {
             <SelectContent>
               <SelectItem value="_all">All categories ({total})</SelectItem>
               {summary.map((s) => (
-                <SelectItem key={s.category} value={s.category}>{s.label} ({s.count})</SelectItem>
+                <SelectItem key={s.category} value={s.category}>
+                  {s.label} ({s.count})
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -483,12 +662,17 @@ function SourcesTab() {
 
         {/* v2.29 — Bulk-action toolbar. Visible only when at least one row is selected. */}
         {isAdmin && selected.size > 0 && (
-          <div className="mt-3 flex items-center gap-2 rounded border bg-primary/5 px-3 py-2 text-xs" data-testid="toolbar-bulk">
+          <div
+            className="mt-3 flex items-center gap-2 rounded border bg-primary/5 px-3 py-2 text-xs"
+            data-testid="toolbar-bulk"
+          >
             <span className="font-medium">{selected.size} selected</span>
             <span className="text-muted-foreground">— apply to all</span>
             <div className="flex-1" />
             <Button
-              size="sm" variant="outline" className="gap-1.5 h-7"
+              size="sm"
+              variant="outline"
+              className="gap-1.5 h-7"
               disabled={bulk.isPending}
               onClick={() => bulk.mutate({ ids: [...selected], action: "enable" })}
               data-testid="button-bulk-enable"
@@ -496,7 +680,9 @@ function SourcesTab() {
               <Power className="w-3.5 h-3.5 text-emerald-600" /> Enable selected
             </Button>
             <Button
-              size="sm" variant="outline" className="gap-1.5 h-7"
+              size="sm"
+              variant="outline"
+              className="gap-1.5 h-7"
               disabled={bulk.isPending}
               onClick={() => bulk.mutate({ ids: [...selected], action: "disable" })}
               data-testid="button-bulk-disable"
@@ -504,7 +690,9 @@ function SourcesTab() {
               <PowerOff className="w-3.5 h-3.5 text-amber-600" /> Disable selected
             </Button>
             <Button
-              size="sm" variant="outline" className="gap-1.5 h-7 text-rose-600 hover:text-rose-700"
+              size="sm"
+              variant="outline"
+              className="gap-1.5 h-7 text-rose-600 hover:text-rose-700"
               disabled={bulk.isPending}
               onClick={() => {
                 if (window.confirm(`Permanently delete ${selected.size} source(s)? This cannot be undone.`)) {
@@ -516,7 +704,9 @@ function SourcesTab() {
               <Trash2 className="w-3.5 h-3.5" /> Delete selected
             </Button>
             <Button
-              size="sm" variant="ghost" className="h-7 text-xs"
+              size="sm"
+              variant="ghost"
+              className="h-7 text-xs"
               onClick={() => setSelected(new Set())}
               data-testid="button-bulk-clear"
             >
@@ -556,22 +746,47 @@ function SourcesTab() {
                       />
                     </th>
                   )}
-                  <th className="text-left px-4 py-2 font-medium cursor-pointer select-none" onClick={() => clickSort("name")} data-testid="th-source-name">
-                    Name (English)<SortIcon k="name" />
+                  <th
+                    className="text-left px-4 py-2 font-medium cursor-pointer select-none"
+                    onClick={() => clickSort("name")}
+                    data-testid="th-source-name"
+                  >
+                    Name (English)
+                    <SortIcon k="name" />
                   </th>
-                  <th className="text-left px-4 py-2 font-medium cursor-pointer select-none" onClick={() => clickSort("category")} data-testid="th-source-category">
-                    Category<SortIcon k="category" />
+                  <th
+                    className="text-left px-4 py-2 font-medium cursor-pointer select-none"
+                    onClick={() => clickSort("category")}
+                    data-testid="th-source-category"
+                  >
+                    Category
+                    <SortIcon k="category" />
                   </th>
-                  <th className="text-left px-4 py-2 font-medium cursor-pointer select-none" onClick={() => clickSort("status")} data-testid="th-source-status">
-                    Status<SortIcon k="status" />
+                  <th
+                    className="text-left px-4 py-2 font-medium cursor-pointer select-none"
+                    onClick={() => clickSort("status")}
+                    data-testid="th-source-status"
+                  >
+                    Status
+                    <SortIcon k="status" />
                   </th>
                   <th className="text-left px-4 py-2 font-medium">Type</th>
                   <th className="text-left px-4 py-2 font-medium">URL</th>
-                  <th className="text-left px-4 py-2 font-medium cursor-pointer select-none" onClick={() => clickSort("lastFetched")} data-testid="th-source-last">
-                    Last fetched<SortIcon k="lastFetched" />
+                  <th
+                    className="text-left px-4 py-2 font-medium cursor-pointer select-none"
+                    onClick={() => clickSort("lastFetched")}
+                    data-testid="th-source-last"
+                  >
+                    Last fetched
+                    <SortIcon k="lastFetched" />
                   </th>
-                  <th className="text-right px-4 py-2 font-medium cursor-pointer select-none" onClick={() => clickSort("findings")} data-testid="th-source-findings">
-                    Parsed<SortIcon k="findings" />
+                  <th
+                    className="text-right px-4 py-2 font-medium cursor-pointer select-none"
+                    onClick={() => clickSort("findings")}
+                    data-testid="th-source-findings"
+                  >
+                    Parsed
+                    <SortIcon k="findings" />
                   </th>
                 </tr>
               </thead>
@@ -589,39 +804,65 @@ function SourcesTab() {
                       </td>
                     )}
                     <td className="px-4 py-1.5 align-middle text-xs font-medium">
-                      <div className="truncate" data-testid={`text-source-english-${s.id}`} title={s.englishName}>{s.englishName}</div>
+                      <div className="truncate" data-testid={`text-source-english-${s.id}`} title={s.englishName}>
+                        {s.englishName}
+                      </div>
                       {s.englishName !== s.name && (
-                        <div className="text-[10px] text-muted-foreground truncate" title={s.name}>{s.name}</div>
+                        <div className="text-[10px] text-muted-foreground truncate" title={s.name}>
+                          {s.name}
+                        </div>
                       )}
                     </td>
                     <td className="px-4 py-1.5 align-middle text-xs text-muted-foreground">
-                      <div className="truncate" title={s.categoryLabel}>{s.categoryLabel}</div>
+                      <div className="truncate" title={s.categoryLabel}>
+                        {s.categoryLabel}
+                      </div>
                     </td>
                     <td className="px-4 py-1.5 align-middle" data-testid={`text-source-status-${s.id}`}>
                       {s.enabled ? (
-                        <Badge variant="outline" className="text-[10px] gap-1 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30">
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] gap-1 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30"
+                        >
                           <Power className="w-3 h-3" /> Enabled
                         </Badge>
                       ) : (
-                        <Badge variant="outline" className="text-[10px] gap-1 bg-muted text-muted-foreground border-border">
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] gap-1 bg-muted text-muted-foreground border-border"
+                        >
                           <PowerOff className="w-3 h-3" /> Disabled
                         </Badge>
                       )}
                     </td>
                     <td className="px-4 py-1.5 align-middle text-[10px] font-mono text-muted-foreground">{s.kind}</td>
                     <td className="px-4 py-1.5 align-middle text-xs">
-                      <a href={s.url || "#"} target="_blank" rel="noreferrer" className="block truncate font-mono text-[11px] text-primary hover:underline" title={s.url || undefined}>
+                      <a
+                        href={s.url || "#"}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="block truncate font-mono text-[11px] text-primary hover:underline"
+                        title={s.url || undefined}
+                      >
                         {s.url}
                       </a>
                     </td>
                     <td
                       className="px-4 py-1.5 align-middle text-[11px] text-muted-foreground whitespace-nowrap"
-                      title={s.lastFetchedAt ? `Last evidence-bearing ingest: ${new Date(s.lastFetchedAt).toLocaleString()}` : "No completed source ingest is recorded yet"}
+                      title={
+                        s.lastFetchedAt
+                          ? `Last evidence-bearing ingest: ${new Date(s.lastFetchedAt).toLocaleString()}`
+                          : "No completed source ingest is recorded yet"
+                      }
                     >
                       {s.lastFetchedAt ? relativeTime(s.lastFetchedAt) : "Not fetched yet"}
                     </td>
                     <td className="px-4 py-1.5 align-middle text-right">
-                      <Badge variant={s.findingCount > 0 ? "secondary" : "outline"} className="font-mono text-[10px]" data-testid={`badge-source-count-${s.id}`}>
+                      <Badge
+                        variant={s.findingCount > 0 ? "secondary" : "outline"}
+                        className="font-mono text-[10px]"
+                        data-testid={`badge-source-count-${s.id}`}
+                      >
                         {s.findingCount} parsed
                       </Badge>
                     </td>
@@ -708,9 +949,7 @@ function FindingsTab() {
   // active category filter.
   const sourceOptions = useMemo(() => {
     const all = sourcesData?.sources || [];
-    const filtered = (category && category !== "_all")
-      ? all.filter((s) => s.category === category)
-      : all;
+    const filtered = category && category !== "_all" ? all.filter((s) => s.category === category) : all;
     return filtered
       .filter((s) => s.findingCount > 0)
       .sort((a, b) => (a.englishName || "").localeCompare(b.englishName || "", undefined, { sensitivity: "base" }))
@@ -718,7 +957,7 @@ function FindingsTab() {
   }, [sourcesData, category]);
 
   const { data, isLoading } = useQuery<TenantFindingsResp>({
-    queryKey: ["/api/v1/osint/findings", severity, status, tech, sourceId, category],
+    queryKey: ["/api/v1/osint/findings", severity, status, tech, sourceId, category, range],
     queryFn: async () => {
       const u = new URL("/api/v1/osint/findings", window.location.origin);
       if (severity && severity !== "_all") u.searchParams.set("severity", severity);
@@ -726,6 +965,8 @@ function FindingsTab() {
       if (tech) u.searchParams.set("tech", tech);
       if (sourceId && sourceId !== "_all") u.searchParams.set("sourceId", sourceId);
       if (category && category !== "_all") u.searchParams.set("category", category);
+      const rangeHours = RANGE_HOURS[range];
+      if (rangeHours) u.searchParams.set("publishedAfter", new Date(Date.now() - rangeHours * 3_600_000).toISOString());
       const r = await apiRequest("GET", u.pathname + u.search);
       return r.json();
     },
@@ -748,9 +989,9 @@ function FindingsTab() {
     },
   });
   const rawFindings = data?.findings || [];
-  // v2.15 — day-range filter. Prefer the source fetch timestamp so "1d/7d"
-  // reflects the analyst action of refreshing feeds, then fall back to finding
-  // ingest time and source-provided publish time.
+  // Day ranges describe when the intelligence was published, not when a feed
+  // happened to be refreshed. The server applies the same cutoff before its
+  // row limit; this client check keeps placeholder/cached data consistent.
   const allFindings = useMemo(() => {
     const hours = RANGE_HOURS[range];
     const scoped = hideAdvertisements
@@ -759,7 +1000,7 @@ function FindingsTab() {
     if (!hours) return scoped;
     const cutoff = Date.now() - hours * 3_600_000;
     return scoped.filter((f) => {
-      const ts = Date.parse((f.sourceFetchedAt as any) || (f.createdAt as any) || (f.publishedAt as any) || "");
+      const ts = Date.parse((f.publishedAt as any) || (f.createdAt as any) || "");
       if (!isFinite(ts)) return true; // keep undated items rather than silently drop them
       return ts >= cutoff;
     });
@@ -773,8 +1014,15 @@ function FindingsTab() {
     return allFindings.filter((f) => {
       const iocFields = f.iocs ? Object.values(f.iocs).flat() : [];
       const haystack = [
-        f.title, f.summary, f.url, f.sourceName, f.sourceCategory,
-        f.aiSummary, f.aiRecommendation, f.severity, f.status,
+        f.title,
+        f.summary,
+        f.url,
+        f.sourceName,
+        f.sourceCategory,
+        f.aiSummary,
+        f.aiRecommendation,
+        f.severity,
+        f.status,
         // v2.18 — search the full raw body and analyst tags. The "gentleman"
         // miss was because rawSnippet (full ingested body) wasn't in the
         // haystack — so any keyword that lives only in the article body
@@ -785,7 +1033,10 @@ function FindingsTab() {
         ...(f.threatActors || []),
         ...(f.analystTags || []),
         ...iocFields,
-      ].filter(Boolean).join(" \u241F ").toLowerCase();
+      ]
+        .filter(Boolean)
+        .join(" \u241F ")
+        .toLowerCase();
       return tokens.every((t) => haystack.includes(t));
     });
   }, [allFindings, keyword]);
@@ -806,38 +1057,21 @@ function FindingsTab() {
     if (findingsPage > findingsPageCount) setFindingsPage(findingsPageCount);
   }, [findingsPage, findingsPageCount]);
 
-  const selectedIds = Object.entries(selected).filter(([, v]) => v).map(([k]) => k);
+  const selectedIds = Object.entries(selected)
+    .filter(([, v]) => v)
+    .map(([k]) => k);
   const selectedQuery = selectedIds.join(",");
 
   const stixPreview = useQuery<StixPreviewResp>({
     queryKey: ["/api/v1/exchange/stix/preview", selectedQuery],
     enabled: stixOpen && selectedIds.length > 0,
     queryFn: async () => {
-      const r = await apiRequest("GET", `/api/v1/exchange/stix/preview?findingIds=${encodeURIComponent(selectedQuery)}`);
+      const r = await apiRequest(
+        "GET",
+        `/api/v1/exchange/stix/preview?findingIds=${encodeURIComponent(selectedQuery)}`,
+      );
       return r.json();
     },
-  });
-
-  const scan = useMutation({
-    mutationFn: async () => {
-      const r = await apiRequest("POST", "/api/v1/osint/scan", { maxFindings: 60, mode: "auto" });
-      return r.json();
-    },
-    onSuccess: (r: any) => {
-      const count = r?.count ?? r?.added ?? 0;
-      const mode = r?.mode ?? "unknown";
-      const feedsOk = r?.feedsOk;
-      const feedsTried = r?.feedsTried;
-      let desc = `${count} findings ingested across the watchlist.`;
-      if (mode === "real" && feedsOk != null && feedsTried != null) {
-        desc += ` Live feeds: ${feedsOk}/${feedsTried} healthy.`;
-      } else if (mode === "mock") {
-        desc += ` Live feeds unreachable — using cached templates.`;
-      }
-      toast({ title: `OSINT scan complete (${mode})`, description: desc });
-      queryClient.invalidateQueries({ queryKey: ["/api/v1/osint/findings"] });
-    },
-    onError: (e: any) => toast({ variant: "destructive", title: "Scan failed", description: String(e.message ?? e) }),
   });
 
   // v2.30.1.1 — bulk AI analyse no longer blocks the HTTP request. When the
@@ -852,12 +1086,37 @@ function FindingsTab() {
       });
     },
     onSuccess: (r: any) => {
-      toast({ title: "AI analysis queued", description: r.targetLabel ?? "The background jobs tray will show progress and completion." });
+      clearSelection();
+      toast({
+        title: "AI analysis queued",
+        description: r.targetLabel ?? "The background jobs tray will show progress and completion.",
+      });
     },
-    onError: (e: any) => toast({ variant: "destructive", title: "Analyze failed", description: String(e.message ?? e) }),
+    onError: (e: any) =>
+      toast({ variant: "destructive", title: "Analyze failed", description: String(e.message ?? e) }),
   });
 
-  function toggle(id: string) { setSelected((s) => ({ ...s, [id]: !s[id] })); }
+  const deepDive = useMutation({
+    mutationFn: async () => {
+      if (selectedIds.length === 0) throw new Error("Select at least one finding");
+      if (selectedIds.length > 20) throw new Error("Deep Dive supports up to 20 findings at a time");
+      return startBackgroundJob("/api/v1/osint/chat/deep-dive", { findingIds: selectedIds });
+    },
+    onSuccess: async (result: any) => {
+      clearSelection();
+      await queryClient.invalidateQueries({ queryKey: ["/api/v1/osint/ai-jobs/history"] });
+      toast({
+        title: "Deep Dive queued",
+        description: result.targetLabel ?? "The result will appear under Recent CIRT results.",
+      });
+    },
+    onError: (error: any) =>
+      toast({ variant: "destructive", title: "Deep Dive failed", description: String(error?.message ?? error) }),
+  });
+
+  function toggle(id: string) {
+    setSelected((s) => ({ ...s, [id]: !s[id] }));
+  }
   function selectAllVisible() {
     setSelected((current) => {
       const next = { ...current };
@@ -865,10 +1124,57 @@ function FindingsTab() {
       return next;
     });
   }
-  function clearSelection() { setSelected({}); }
-  function exportSelectedStix() {
+  function clearSelection() {
+    setSelected({});
+  }
+  async function exportSelectedStix() {
     if (!selectedIds.length) return;
-    window.location.href = `/api/v1/exchange/stix/export?findingIds=${encodeURIComponent(selectedIds.join(","))}`;
+    try {
+      const response = await apiRequest(
+        "GET",
+        `/api/v1/exchange/stix/export?findingIds=${encodeURIComponent(selectedIds.join(","))}`,
+      );
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `optrasight-stix-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (error: any) {
+      toast({ variant: "destructive", title: "STIX export failed", description: String(error?.message || error) });
+    }
+  }
+  async function exportThreatIntelCsv() {
+    if (STATIC_DEMO_MODE) {
+      showStaticDemoNotice({ kind: "export", action: "Threat-intel Excel export restricted" });
+      return;
+    }
+    try {
+      const params = new URLSearchParams();
+      if (selectedIds.length) params.set("findingIds", selectedIds.join(","));
+      if (severity !== "_all") params.set("severity", severity);
+      if (status !== "_all") params.set("status", status);
+      if (tech) params.set("tech", tech);
+      if (sourceId !== "_all") params.set("sourceId", sourceId);
+      if (category !== "_all") params.set("category", category);
+      const rangeHours = RANGE_HOURS[range];
+      if (rangeHours) params.set("publishedAfter", new Date(Date.now() - rangeHours * 3_600_000).toISOString());
+      const response = await apiRequest("GET", `/api/v1/osint/findings/export.csv?${params.toString()}`);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `optrasight-threat-intel-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Export failed", description: String(e?.message ?? e) });
+    }
   }
 
   const techScopeBanner = tech ? (
@@ -881,7 +1187,8 @@ function FindingsTab() {
           ATT&amp;CK: {tech}
         </Badge>
         <span className="text-muted-foreground">
-          Scoped from Coverage Radar; {findings.length} observed finding{findings.length === 1 ? "" : "s"} in the active range.
+          Scoped from Coverage Radar; {findings.length} observed finding{findings.length === 1 ? "" : "s"} in the active
+          range.
         </span>
       </div>
       <div className="flex items-center gap-2 shrink-0">
@@ -904,41 +1211,58 @@ function FindingsTab() {
       {techScopeBanner}
       {/* v2.17 — Triage + Deep-dive panel replaces the old AiOverviewPanel.
           The free-form chat moved into the floating widget at the bottom-right. */}
-      <OsintTriagePanel
-        range={range}
-        findings={findings as any}
-      />
+      <OsintTriagePanel range={range} findings={findings as any} />
       <Card className="p-4">
         <div className="flex flex-wrap items-center gap-2">
           <Select value={severity} onValueChange={setSeverity}>
-            <SelectTrigger className="w-[150px]" data-testid="select-severity"><SelectValue placeholder="Severity" /></SelectTrigger>
+            <SelectTrigger className="w-[150px]" data-testid="select-severity">
+              <SelectValue placeholder="Severity" />
+            </SelectTrigger>
             <SelectContent>
               <SelectItem value="_all">All severities</SelectItem>
-              {["critical","high","medium","low","info"].map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+              {["critical", "high", "medium", "low", "info"].map((s) => (
+                <SelectItem key={s} value={s}>
+                  {s}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
           <Select value={status} onValueChange={setStatus}>
-            <SelectTrigger className="w-[150px]" data-testid="select-status"><SelectValue placeholder="Status" /></SelectTrigger>
+            <SelectTrigger className="w-[150px]" data-testid="select-status">
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
             <SelectContent>
               <SelectItem value="_all">All statuses</SelectItem>
-              {["new","reviewed","relevant","not_relevant","escalated"].map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+              {STATUS_OPTIONS.map((s) => (
+                <SelectItem key={s.value} value={s.value}>
+                  {s.label}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
           <Select value={category} onValueChange={setCategory}>
-            <SelectTrigger className="w-[200px]" data-testid="select-category-filter"><SelectValue placeholder="Category" /></SelectTrigger>
+            <SelectTrigger className="w-[200px]" data-testid="select-category-filter">
+              <SelectValue placeholder="Category" />
+            </SelectTrigger>
             <SelectContent>
               <SelectItem value="_all">All categories</SelectItem>
               {Object.entries(categoryLabels).map(([code, label]) => (
-                <SelectItem key={code} value={code}>{label}</SelectItem>
+                <SelectItem key={code} value={code}>
+                  {label}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
           <Select value={sourceId} onValueChange={setSourceId}>
-            <SelectTrigger className="w-[220px]" data-testid="select-source-filter"><SelectValue placeholder="Source" /></SelectTrigger>
+            <SelectTrigger className="w-[220px]" data-testid="select-source-filter">
+              <SelectValue placeholder="Source" />
+            </SelectTrigger>
             <SelectContent>
               <SelectItem value="_all">All sources</SelectItem>
               {sourceOptions.map((s) => (
-                <SelectItem key={s.id} value={s.id}>{s.englishName} ({s.findingCount})</SelectItem>
+                <SelectItem key={s.id} value={s.id}>
+                  {s.englishName} ({s.findingCount})
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -946,7 +1270,10 @@ function FindingsTab() {
               v2.17 — separate tech-id input removed; the keyword box already
               matches against affectedTech so the dedicated input was redundant. */}
           <div className="relative">
-            <Search size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+            <Search
+              size={14}
+              className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+            />
             <Input
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}
@@ -960,7 +1287,9 @@ function FindingsTab() {
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-xs"
                 data-testid="button-clear-keyword"
                 aria-label="Clear search"
-              >✕</button>
+              >
+                ✕
+              </button>
             )}
           </div>
           {/* v2.15 — day-range segmented control. Filters the list AND drives the chatbot triage scope. */}
@@ -996,20 +1325,6 @@ function FindingsTab() {
           <Button
             onClick={() => {
               if (STATIC_DEMO_MODE) {
-                showStaticDemoNotice({ kind: "source", action: "Live scan restricted" });
-                return;
-              }
-              scan.mutate();
-            }}
-            disabled={scan.isPending}
-            variant="outline"
-            data-testid="button-osint-scan"
-          >
-            {scan.isPending ? <><Loader2 size={14} className="mr-1.5 animate-spin" />Scanning</> : <><Search size={14} className="mr-1.5" />Scan now</>}
-          </Button>
-          <Button
-            onClick={() => {
-              if (STATIC_DEMO_MODE) {
                 showStaticDemoNotice({ kind: "ai", action: "Live AI analysis restricted" });
                 return;
               }
@@ -1019,7 +1334,45 @@ function FindingsTab() {
             title={STATIC_DEMO_MODE ? "Available in the local Batch One app" : aiAvailability.disabledReason}
             data-testid="button-osint-analyze"
           >
-            {analyze.isPending ? <><Loader2 size={14} className="mr-1.5 animate-spin" />Analysing</> : <><Sparkles size={14} className="mr-1.5" />AI analyse</>}
+            {analyze.isPending ? (
+              <>
+                <Loader2 size={14} className="mr-1.5 animate-spin" />
+                Analysing
+              </>
+            ) : (
+              <>
+                <Sparkles size={14} className="mr-1.5" />
+                AI analyse
+              </>
+            )}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => {
+              if (STATIC_DEMO_MODE) {
+                showStaticDemoNotice({ kind: "ai", action: "Deep Dive restricted" });
+                return;
+              }
+              deepDive.mutate();
+            }}
+            disabled={
+              !STATIC_DEMO_MODE &&
+              (deepDive.isPending || aiDisabled || selectedIds.length === 0 || selectedIds.length > 20)
+            }
+            title={selectedIds.length > 20 ? "Select no more than 20 findings" : aiAvailability.disabledReason}
+            data-testid="button-osint-deep-dive"
+          >
+            {deepDive.isPending ? (
+              <>
+                <Loader2 size={14} className="mr-1.5 animate-spin" />
+                Queuing
+              </>
+            ) : (
+              <>
+                <Search size={14} className="mr-1.5" />
+                Deep Dive ({selectedIds.length})
+              </>
+            )}
           </Button>
           <Dialog open={huntOpen} onOpenChange={setHuntOpen}>
             <DialogTrigger asChild>
@@ -1031,27 +1384,34 @@ function FindingsTab() {
                   if (STATIC_DEMO_MODE) {
                     event.preventDefault();
                     event.stopPropagation();
-                    showStaticDemoNotice({ kind: "ai", action: "Hunt-query generation restricted" });
+                    showStaticDemoNotice({ kind: "ai", action: "Detection-rule generation restricted" });
                   }
                 }}
                 className={cn(STATIC_DEMO_MODE && "opacity-60 hover:opacity-75")}
-                data-testid="button-open-hunt-dialog"
+                data-testid="button-open-detection-rule-dialog"
               >
-                <Code2 size={14} className="mr-1.5" /> Hunt query ({selectedIds.length})
+                <ShieldAlert size={14} className="mr-1.5" /> Detection rule ({selectedIds.length})
               </Button>
             </DialogTrigger>
-            <HuntQueryDialog
+            <DetectionRuleGenerationDialog
               findingIds={selectedIds}
               languages={tax?.huntLanguages || []}
               onClose={() => setHuntOpen(false)}
-              onCreated={() => { setHuntOpen(false); clearSelection(); }}
+              onCreated={() => {
+                setHuntOpen(false);
+                clearSelection();
+              }}
             />
           </Dialog>
           <Button
             variant="outline"
             disabled={false}
             data-testid="button-preview-stix"
-            title={STATIC_DEMO_MODE ? "Available in the local Batch One app" : "Preview STIX object counts and validation before export."}
+            title={
+              STATIC_DEMO_MODE
+                ? "Available in the local Batch One app"
+                : "Preview STIX object counts and validation before export."
+            }
             className={cn((STATIC_DEMO_MODE || !selectedIds.length) && "opacity-55 hover:opacity-70")}
             onClick={() => {
               if (STATIC_DEMO_MODE || !selectedIds.length) {
@@ -1063,12 +1423,26 @@ function FindingsTab() {
           >
             <FileJson size={14} className="mr-1.5" /> STIX preview ({selectedIds.length})
           </Button>
+          <Button
+            variant="outline"
+            onClick={() => void exportThreatIntelCsv()}
+            data-testid="button-export-threat-intel-csv"
+            title="Export selected findings, or the current filtered view when nothing is selected, as an Excel-compatible CSV."
+          >
+            <Download size={14} className="mr-1.5" /> Excel CSV{selectedIds.length ? ` (${selectedIds.length})` : ""}
+          </Button>
         </div>
         {findings.length > 0 && (
           <div className="flex flex-wrap items-center gap-3 mt-3 text-xs text-muted-foreground">
-            <button className="underline" onClick={selectAllVisible} data-testid="link-select-all">Select all visible</button>
-            <button className="underline" onClick={clearSelection} data-testid="link-clear-selection">Clear</button>
-            <span className="font-mono">{selectedIds.length} selected · showing {pageStart}-{pageEnd} of {findings.length}</span>
+            <button className="underline" onClick={selectAllVisible} data-testid="link-select-all">
+              Select all visible
+            </button>
+            <button className="underline" onClick={clearSelection} data-testid="link-clear-selection">
+              Clear
+            </button>
+            <span className="font-mono">
+              {selectedIds.length} selected · showing {pageStart}-{pageEnd} of {findings.length}
+            </span>
           </div>
         )}
       </Card>
@@ -1097,20 +1471,26 @@ function FindingsTab() {
                 <div className="text-xs font-medium mb-2">Object types</div>
                 <div className="flex flex-wrap gap-1.5">
                   {Object.entries(stixPreview.data.objectCounts).map(([k, v]) => (
-                    <Badge key={k} variant="outline" className="font-mono text-[10px]">{k}: {v}</Badge>
+                    <Badge key={k} variant="outline" className="font-mono text-[10px]">
+                      {k}: {v}
+                    </Badge>
                   ))}
                 </div>
               </div>
               {stixPreview.data.errors.length > 0 && (
                 <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs">
                   <div className="font-medium text-destructive mb-1">Validation errors</div>
-                  {stixPreview.data.errors.map((e) => <div key={e}>{e}</div>)}
+                  {stixPreview.data.errors.map((e) => (
+                    <div key={e}>{e}</div>
+                  ))}
                 </div>
               )}
               {stixPreview.data.warnings.length > 0 && (
                 <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs">
                   <div className="font-medium mb-1">Warnings</div>
-                  {stixPreview.data.warnings.map((w) => <div key={w}>{w}</div>)}
+                  {stixPreview.data.warnings.map((w) => (
+                    <div key={w}>{w}</div>
+                  ))}
                 </div>
               )}
             </div>
@@ -1118,7 +1498,9 @@ function FindingsTab() {
             <div className="py-8 text-sm text-muted-foreground">Select findings to preview a STIX export.</div>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setStixOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setStixOpen(false)}>
+              Cancel
+            </Button>
             <Button onClick={exportSelectedStix} disabled={!selectedIds.length || stixPreview.data?.valid === false}>
               <Download size={14} className="mr-1.5" /> Export STIX
             </Button>
@@ -1131,7 +1513,9 @@ function FindingsTab() {
       ) : findings.length === 0 ? (
         <Card className="p-12 text-center">
           <Radar className="mx-auto mb-3 text-muted-foreground" size={28} />
-          <div className="text-sm font-medium">{rawFindings.length > 0 ? "No findings in this view" : "No findings yet"}</div>
+          <div className="text-sm font-medium">
+            {rawFindings.length > 0 ? "No findings in this view" : "No findings yet"}
+          </div>
           <div className="text-xs text-muted-foreground mt-1">
             {rawFindings.length > 0
               ? "Widen the time range or filters to review the parsed threat intel already in this workspace."
@@ -1161,60 +1545,32 @@ function FindingsTab() {
                 />
               </div>
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap mb-1">
-                  <Badge className={`text-[10px] uppercase border ${severityColor(f.severity)}`}>{f.severity}</Badge>
-                  <IntelCategoryChip
-                    category={f.intelCategory ?? null}
-                    testId={`badge-intel-category-${f.id}`}
-                  />
-                  <Badge variant="outline" className="text-[10px] whitespace-nowrap">{f.sourceCategory}</Badge>
-                  <span className="text-[10px] font-mono text-muted-foreground truncate max-w-[200px]" title={f.sourceName}>{f.sourceName}</span>
-                  <span
-                    className="text-[10px] text-muted-foreground whitespace-nowrap"
-                    title={formatIntelTimestamp(f.publishedAt)}
-                    data-testid={`text-published-at-${f.id}`}
-                  >
-                    Published {publishedTimeLabel(f.publishedAt)}
-                  </span>
-                  <span className="text-[10px] text-muted-foreground/60">•</span>
-                  <span
-                    className="text-[10px] text-muted-foreground whitespace-nowrap"
-                    title={formatIntelTimestamp(f.createdAt)}
-                    data-testid={`text-ingested-at-${f.id}`}
-                  >
-                    Ingested {relativeTime(f.createdAt)}
-                  </span>
-                  {f.aiRelevanceScore != null && (
-                    <Badge variant="secondary" className="text-[10px] font-mono" data-testid={`badge-relevance-${f.id}`}>
-                      analysis {relevancePercent(f.aiRelevanceScore)}%
-                    </Badge>
-                  )}
-                  {(() => {
-                    const fresh = freshnessTier(f.publishedAt);
-                    const conf = confidenceTier(f);
-                    const count = iocCount(f.iocs);
-                    return <>
-                      <Badge variant="outline" className={`text-[10px] ${fresh.tone}`} data-testid={`badge-freshness-${f.id}`}>{fresh.label}</Badge>
-                      <Badge variant="outline" className={`text-[10px] ${conf.tone}`} data-testid={`badge-confidence-${f.id}`}>{conf.label}</Badge>
-                      {count > 0 && <Badge variant="outline" className="text-[10px] font-mono" data-testid={`badge-ioc-count-${f.id}`}>{count} IoCs</Badge>}
-                      {f.attackTechniques?.length ? <Badge variant="outline" className="text-[10px] font-mono">{f.attackTechniques.length} ATT&CK</Badge> : null}
-                    </>;
-                  })()}
+                <FindingMetaStrip finding={f} />
+                <div className="text-sm font-medium truncate" data-testid={`text-finding-title-${f.id}`}>
+                  {f.title}
                 </div>
-                <div className="text-sm font-medium truncate" data-testid={`text-finding-title-${f.id}`}>{f.title}</div>
                 {f.summary && <div className="text-xs text-muted-foreground mt-1 line-clamp-2">{f.summary}</div>}
                 {f.aiSummary && (
-                  <div className="text-xs mt-2 p-2 rounded border border-primary/20 bg-primary/5" data-testid={`text-ai-summary-${f.id}`}>
-                    <div className="text-[10px] uppercase tracking-wide text-primary mb-0.5">AI summary {f.aiProviderLabel ? `· ${f.aiProviderLabel}` : ""}</div>
+                  <div
+                    className="text-xs mt-2 p-2 rounded border border-primary/20 bg-primary/5"
+                    data-testid={`text-ai-summary-${f.id}`}
+                  >
+                    <div className="text-[10px] uppercase tracking-wide text-primary mb-0.5">
+                      AI summary {f.aiProviderLabel ? `· ${f.aiProviderLabel}` : ""}
+                    </div>
                     {f.aiSummary}
                   </div>
                 )}
                 <div className="flex flex-wrap items-center gap-1.5 mt-1.5 text-[10px] font-mono text-muted-foreground">
                   {f.cveIds.slice(0, 6).map((c) => (
-                    <Badge key={c} variant="outline" className="text-[10px]" data-testid={`badge-cve-${c}`}>{c}</Badge>
+                    <Badge key={c} variant="outline" className="text-[10px]" data-testid={`badge-cve-${c}`}>
+                      {c}
+                    </Badge>
                   ))}
                   {f.affectedTech.slice(0, 6).map((t) => (
-                    <Badge key={t} variant="secondary" className="text-[10px]" data-testid={`badge-tech-${t}`}>{t}</Badge>
+                    <Badge key={t} variant="secondary" className="text-[10px]" data-testid={`badge-tech-${t}`}>
+                      {t}
+                    </Badge>
                   ))}
                   {f.url && (
                     <a
@@ -1234,20 +1590,22 @@ function FindingsTab() {
           ))}
           <Card className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-xs text-muted-foreground">
-              Showing <span className="font-mono text-foreground">{pageStart}-{pageEnd}</span> of{" "}
-              <span className="font-mono text-foreground">{findings.length}</span> threat-intel findings
+              Showing{" "}
+              <span className="font-mono text-foreground">
+                {pageStart}-{pageEnd}
+              </span>{" "}
+              of <span className="font-mono text-foreground">{findings.length}</span> threat-intel findings
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <Select
-                value={String(findingsPageSize)}
-                onValueChange={(value) => setFindingsPageSize(Number(value))}
-              >
+              <Select value={String(findingsPageSize)} onValueChange={(value) => setFindingsPageSize(Number(value))}>
                 <SelectTrigger className="h-8 w-[118px] text-xs" data-testid="select-findings-page-size">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   {FINDINGS_PAGE_SIZE_OPTIONS.map((size) => (
-                    <SelectItem key={size} value={String(size)}>{size} per page</SelectItem>
+                    <SelectItem key={size} value={String(size)}>
+                      {size} per page
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -1263,7 +1621,10 @@ function FindingsTab() {
                 >
                   <ChevronLeft size={14} />
                 </Button>
-                <span className="flex items-center gap-1 text-xs text-muted-foreground" data-testid="text-findings-page-count">
+                <span
+                  className="flex items-center gap-1 text-xs text-muted-foreground"
+                  data-testid="text-findings-page-count"
+                >
                   Page
                   <Input
                     type="number"
@@ -1299,10 +1660,7 @@ function FindingsTab() {
         </div>
       )}
 
-      <FindingDetailSheet
-        findingId={detailId}
-        onClose={() => setDetailId(null)}
-      />
+      <FindingDetailSheet findingId={detailId} onClose={() => setDetailId(null)} />
 
       {/* v2.17 — Floating AI chat (free-form) for the BatchOne workspace.
           Triage / Deep-dive moved to the inline panel above. */}
@@ -1339,7 +1697,12 @@ function PreviewMetric({ label, value }: { label: string; value: number }) {
 
 // Per-field label with an optional action icon (pencil / plus / delete-all).
 function FieldLabel({
-  label, onAction, actionIcon = "pencil", actionAriaLabel, testId, count,
+  label,
+  onAction,
+  actionIcon = "pencil",
+  actionAriaLabel,
+  testId,
+  count,
 }: {
   label: string;
   onAction: (() => void) | null;
@@ -1374,7 +1737,14 @@ function FieldLabel({
 // reference data shipped with the build (see server/data/*.json), loaded
 // once per session and cached by React Query.
 type DictTechnology = { name: string; aliases: string[]; category: string; vendor?: string; notes?: string };
-type DictThreatActor = { name: string; aliases: string[]; category: string; country?: string; active?: boolean; notes?: string };
+type DictThreatActor = {
+  name: string;
+  aliases: string[];
+  category: string;
+  country?: string;
+  active?: boolean;
+  notes?: string;
+};
 type DictionariesResp = { technologies: DictTechnology[]; threatActors: DictThreatActor[] };
 
 function useDictionaries() {
@@ -1390,7 +1760,10 @@ function useDictionaries() {
 
 // Match a free-text input against a dictionary entry by name or any alias.
 // Returns the canonical entry name if matched, otherwise the raw trimmed input.
-function resolveAlias<T extends { name: string; aliases: string[] }>(input: string, dict: T[]): { canonical: string; matched: T | null } {
+function resolveAlias<T extends { name: string; aliases: string[] }>(
+  input: string,
+  dict: T[],
+): { canonical: string; matched: T | null } {
   const needle = input.trim().toLowerCase();
   if (!needle) return { canonical: "", matched: null };
   for (const entry of dict) {
@@ -1404,7 +1777,7 @@ function resolveAlias<T extends { name: string; aliases: string[] }>(input: stri
 
 // Score dictionary entries against a search needle for the typeahead dropdown.
 // Higher score = better match. 0 = no match.
-function scoreEntry<T extends { name: string; aliases: string[] }>(entry: T, needle: string): number {
+function scoreEntry<T extends { name: string; aliases: string[]; category: string }>(entry: T, needle: string): number {
   if (!needle) return 1; // show all on empty
   const n = needle.toLowerCase();
   const nm = entry.name.toLowerCase();
@@ -1426,9 +1799,19 @@ function scoreEntry<T extends { name: string; aliases: string[] }>(entry: T, nee
 // alias to the canonical entry name. When the input doesn't match the
 // dictionary, the user can press Enter (or click "Add custom") to commit
 // the literal string — satisfying the v2.28 "allow custom-add" requirement.
-function TypeaheadChipFieldEditor<T extends { name: string; aliases: string[] }>({
-  label, values, onChange, dict, dictLoading, placeholder, emptyLabel,
-  renderChip, testIdPrefix, listTestId, getMeta, disabled = false,
+function TypeaheadChipFieldEditor<T extends { name: string; aliases: string[]; category: string }>({
+  label,
+  values,
+  onChange,
+  dict,
+  dictLoading,
+  placeholder,
+  emptyLabel,
+  renderChip,
+  testIdPrefix,
+  listTestId,
+  getMeta,
+  disabled = false,
 }: {
   label: string;
   values: string[];
@@ -1445,8 +1828,14 @@ function TypeaheadChipFieldEditor<T extends { name: string; aliases: string[] }>
 }) {
   const [editing, setEditing] = useState(false);
   const [query, setQuery] = useState("");
-  const start = () => { setQuery(""); setEditing(true); };
-  const cancel = () => { setQuery(""); setEditing(false); };
+  const start = () => {
+    setQuery("");
+    setEditing(true);
+  };
+  const cancel = () => {
+    setQuery("");
+    setEditing(false);
+  };
 
   // Lookup metadata for a chip (when in view mode) by resolving alias → entry.
   const lookupMeta = (v: string): T | null => {
@@ -1505,7 +1894,10 @@ function TypeaheadChipFieldEditor<T extends { name: string; aliases: string[] }>
             }}
           />
           {/* Dropdown */}
-          <div className="mt-1 border rounded-md bg-popover shadow-sm max-h-[240px] overflow-y-auto" data-testid={`dropdown-${testIdPrefix}`}>
+          <div
+            className="mt-1 border rounded-md bg-popover shadow-sm max-h-[240px] overflow-y-auto"
+            data-testid={`dropdown-${testIdPrefix}`}
+          >
             {dictLoading && (
               <div className="flex items-center justify-center gap-2 py-3 text-[11px] text-muted-foreground">
                 <Loader2 size={11} className="animate-spin" />
@@ -1515,40 +1907,63 @@ function TypeaheadChipFieldEditor<T extends { name: string; aliases: string[] }>
             {!dictLoading && suggestions.length === 0 && !showCustomAdd && (
               <div className="py-3 text-center text-[11px] text-muted-foreground">No matches in dictionary.</div>
             )}
-            {!dictLoading && suggestions.map((s) => (
-              <button
-                type="button"
-                key={s.name}
-                onMouseDown={(e) => { e.preventDefault(); commitOne(s.name); }}
-                className="w-full text-left px-2.5 py-1.5 text-xs hover:bg-accent/60 border-b last:border-b-0"
-                data-testid={`suggestion-${testIdPrefix}-${s.name.replace(/\s+/g, "-").toLowerCase()}`}
-              >
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-medium">{s.name}</span>
-                  <Badge variant="outline" className="text-[9px]">{s.category}</Badge>
-                  {(s as any).vendor && <span className="text-[10px] text-muted-foreground">{(s as any).vendor}</span>}
-                  {(s as any).country && <span className="text-[10px] text-muted-foreground">{(s as any).country}</span>}
-                </div>
-                {s.aliases && s.aliases.length > 0 && (
-                  <div className="text-[10px] text-muted-foreground mt-0.5 truncate">aka {s.aliases.slice(0, 4).join(", ")}</div>
-                )}
-              </button>
-            ))}
+            {!dictLoading &&
+              suggestions.map((s) => (
+                <button
+                  type="button"
+                  key={s.name}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    commitOne(s.name);
+                  }}
+                  className="w-full text-left px-2.5 py-1.5 text-xs hover:bg-accent/60 border-b last:border-b-0"
+                  data-testid={`suggestion-${testIdPrefix}-${s.name.replace(/\s+/g, "-").toLowerCase()}`}
+                >
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-medium">{s.name}</span>
+                    <Badge variant="outline" className="text-[9px]">
+                      {s.category}
+                    </Badge>
+                    {(s as any).vendor && (
+                      <span className="text-[10px] text-muted-foreground">{(s as any).vendor}</span>
+                    )}
+                    {(s as any).country && (
+                      <span className="text-[10px] text-muted-foreground">{(s as any).country}</span>
+                    )}
+                  </div>
+                  {s.aliases && s.aliases.length > 0 && (
+                    <div className="text-[10px] text-muted-foreground mt-0.5 truncate">
+                      aka {s.aliases.slice(0, 4).join(", ")}
+                    </div>
+                  )}
+                </button>
+              ))}
             {!dictLoading && showCustomAdd && (
               <button
                 type="button"
-                onMouseDown={(e) => { e.preventDefault(); commitOne(query); }}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  commitOne(query);
+                }}
                 className="w-full text-left px-2.5 py-1.5 text-xs hover:bg-accent/60 bg-emerald-500/5 border-t border-emerald-500/30"
                 data-testid={`suggestion-custom-${testIdPrefix}`}
               >
-                <span className="text-emerald-700 dark:text-emerald-300 font-medium">+ Add custom: “{query.trim()}”</span>
+                <span className="text-emerald-700 dark:text-emerald-300 font-medium">
+                  + Add custom: “{query.trim()}”
+                </span>
                 <div className="text-[10px] text-muted-foreground mt-0.5">Not in dictionary — will be saved as-is.</div>
               </button>
             )}
           </div>
         </div>
         <div className="flex items-center gap-1.5 mt-1.5">
-          <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px]" onClick={cancel} data-testid={`button-cancel-${testIdPrefix}`}>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 px-2 text-[10px]"
+            onClick={cancel}
+            data-testid={`button-cancel-${testIdPrefix}`}
+          >
             <XIcon size={10} className="mr-1" /> Close
           </Button>
         </div>
@@ -1594,8 +2009,16 @@ function TypeaheadChipFieldEditor<T extends { name: string; aliases: string[] }>
 // either a pencil ("edit existing list") or `+` ("add first items") icon
 // that swaps the view into an inline textarea. Save commits via `onChange`.
 function ChipFieldEditor<T extends string>({
-  label, values, placeholder, emptyLabel, onChange, renderChip,
-  fontMono = false, testIdPrefix, listTestId, disabled = false,
+  label,
+  values,
+  placeholder,
+  emptyLabel,
+  onChange,
+  renderChip,
+  fontMono = false,
+  testIdPrefix,
+  listTestId,
+  disabled = false,
 }: {
   label: string;
   values: T[];
@@ -1610,8 +2033,14 @@ function ChipFieldEditor<T extends string>({
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
-  const startEdit = () => { setDraft(values.join(", ")); setEditing(true); };
-  const cancel = () => { setDraft(""); setEditing(false); };
+  const startEdit = () => {
+    setDraft(values.join(", "));
+    setEditing(true);
+  };
+  const cancel = () => {
+    setDraft("");
+    setEditing(false);
+  };
   const save = () => {
     const next = splitCommas(draft) as T[];
     onChange(next);
@@ -1628,13 +2057,22 @@ function ChipFieldEditor<T extends string>({
           autoFocus
           className={`text-xs ${fontMono ? "font-mono" : ""}`}
           data-testid={`input-detail-${testIdPrefix}`}
-          onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") cancel(); }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") save();
+            if (e.key === "Escape") cancel();
+          }}
         />
         <div className="flex items-center gap-1.5 mt-1.5">
           <Button size="sm" className="h-6 px-2 text-[10px]" onClick={save} data-testid={`button-save-${testIdPrefix}`}>
             <CheckIcon size={10} className="mr-1" /> Save
           </Button>
-          <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px]" onClick={cancel} data-testid={`button-cancel-${testIdPrefix}`}>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 px-2 text-[10px]"
+            onClick={cancel}
+            data-testid={`button-cancel-${testIdPrefix}`}
+          >
             <XIcon size={10} className="mr-1" /> Cancel
           </Button>
         </div>
@@ -1673,7 +2111,9 @@ function ChipFieldEditor<T extends string>({
 // IoC section with per-type inline editors. Each IoC group (ipv4, domain, etc.)
 // renders independently with its own pencil/add icon + per-chip delete.
 function IocSectionEditable({
-  iocs, onChangeGroup, disabled,
+  iocs,
+  onChangeGroup,
+  disabled,
 }: {
   iocs?: OsintFindingDTO["iocs"];
   onChangeGroup: (key: keyof FindingIoCs, next: string[]) => void;
@@ -1714,7 +2154,9 @@ function IocSectionEditable({
       </div>
       <div className="space-y-2">
         {populatedGroups.length === 0 && (
-          <div className="text-[11px] text-muted-foreground italic px-2 py-1">no indicators of compromise parsed yet</div>
+          <div className="text-[11px] text-muted-foreground italic px-2 py-1">
+            no indicators of compromise parsed yet
+          </div>
         )}
         {populatedGroups.map((g) => {
           const list = ((safe as any)[g.key] as string[] | undefined) || [];
@@ -1722,7 +2164,9 @@ function IocSectionEditable({
           return (
             <div key={g.key as string} className="rounded border bg-muted/20 p-2">
               <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1.5 flex items-center justify-between">
-                <span className="flex items-center gap-1.5">{g.label} <span className="font-mono normal-case">{list.length}</span></span>
+                <span className="flex items-center gap-1.5">
+                  {g.label} <span className="font-mono normal-case">{list.length}</span>
+                </span>
                 {!isOpen && (
                   <button
                     type="button"
@@ -1748,10 +2192,21 @@ function IocSectionEditable({
                     data-testid={`textarea-detail-ioc-${g.key as string}`}
                   />
                   <div className="flex items-center gap-1.5 mt-1.5">
-                    <Button size="sm" className="h-6 px-2 text-[10px]" onClick={() => save(g.key)} data-testid={`button-save-ioc-${g.key as string}`}>
+                    <Button
+                      size="sm"
+                      className="h-6 px-2 text-[10px]"
+                      onClick={() => save(g.key)}
+                      data-testid={`button-save-ioc-${g.key as string}`}
+                    >
                       <CheckIcon size={10} className="mr-1" /> Save
                     </Button>
-                    <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px]" onClick={() => setOpenKey(null)} data-testid={`button-cancel-ioc-${g.key as string}`}>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 px-2 text-[10px]"
+                      onClick={() => setOpenKey(null)}
+                      data-testid={`button-cancel-ioc-${g.key as string}`}
+                    >
                       <XIcon size={10} className="mr-1" /> Cancel
                     </Button>
                   </div>
@@ -1763,9 +2218,12 @@ function IocSectionEditable({
                       key={v}
                       type="button"
                       onClick={() => {
-                        navigator.clipboard?.writeText(v).then(() => {
-                          toast({ title: "Copied", description: v.length > 96 ? v.slice(0, 96) + "…" : v });
-                        }).catch(() => {});
+                        navigator.clipboard
+                          ?.writeText(v)
+                          .then(() => {
+                            toast({ title: "Copied", description: v.length > 96 ? v.slice(0, 96) + "…" : v });
+                          })
+                          .catch(() => {});
                       }}
                       className="font-mono text-[10px] px-1.5 py-0.5 rounded border bg-background hover:bg-primary/10 hover:border-primary/40 transition-colors block max-w-full truncate text-left"
                       title={v + " — click to copy"}
@@ -1780,11 +2238,7 @@ function IocSectionEditable({
           );
         })}
         {emptyGroups.length > 0 && (
-          <Select
-            value=""
-            onValueChange={(v) => v && startEdit(v)}
-            disabled={disabled}
-          >
+          <Select value="" onValueChange={(v) => v && startEdit(v)} disabled={disabled}>
             <SelectTrigger className="h-7 text-[11px] w-full" data-testid="select-add-ioc-type">
               <SelectValue placeholder={`+ Add IoC type (${emptyGroups.length} available)`} />
             </SelectTrigger>
@@ -1803,43 +2257,80 @@ function IocSectionEditable({
 }
 
 const STATUS_OPTIONS: Array<{ value: "new" | "triaged" | "assessed" | "dismissed" | "escalated"; label: string }> = [
-  { value: "new",       label: "new" },
-  { value: "triaged",   label: "triaged" },
-  { value: "assessed",  label: "assessed" },
+  { value: "new", label: "new" },
+  { value: "triaged", label: "triaged" },
+  { value: "assessed", label: "assessed" },
   { value: "dismissed", label: "dismissed" },
   { value: "escalated", label: "escalated" },
 ];
+type AnalystDisposition = NonNullable<OsintFindingPatch["analystDisposition"]>;
+type AnalystConfidence = NonNullable<OsintFindingPatch["analystConfidence"]>;
+type AnalystImpact = NonNullable<OsintFindingPatch["analystImpact"]>;
+
+const ANALYST_DISPOSITIONS: Array<{ value: AnalystDisposition; label: string }> = [
+  { value: "action_required", label: "Action required" },
+  { value: "monitor", label: "Monitor" },
+  { value: "informational", label: "Informational" },
+  { value: "false_positive", label: "False positive" },
+];
+const ANALYST_CONFIDENCE: Array<{ value: AnalystConfidence; label: string }> = [
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+];
+const ANALYST_IMPACT: Array<{ value: AnalystImpact; label: string }> = [
+  { value: "none", label: "None" },
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+  { value: "critical", label: "Critical" },
+];
+
+function statusForDisposition(disposition: AnalystDisposition | ""): "assessed" | "dismissed" | "escalated" {
+  if (disposition === "action_required") return "escalated";
+  if (disposition === "false_positive") return "dismissed";
+  return "assessed";
+}
 const IOC_EDIT_GROUPS: Array<{ key: keyof FindingIoCs; label: string; placeholder: string }> = [
-  { key: "ipv4",   label: "IPv4",    placeholder: "one per line" },
-  { key: "ipv6",   label: "IPv6",    placeholder: "one per line" },
-  { key: "domain", label: "Domain",  placeholder: "one per line" },
-  { key: "url",    label: "URL",     placeholder: "one per line" },
-  { key: "md5",    label: "MD5",     placeholder: "one per line" },
-  { key: "sha1",   label: "SHA-1",   placeholder: "one per line" },
+  { key: "ipv4", label: "IPv4", placeholder: "one per line" },
+  { key: "ipv6", label: "IPv6", placeholder: "one per line" },
+  { key: "domain", label: "Domain", placeholder: "one per line" },
+  { key: "url", label: "URL", placeholder: "one per line" },
+  { key: "md5", label: "MD5", placeholder: "one per line" },
+  { key: "sha1", label: "SHA-1", placeholder: "one per line" },
   { key: "sha256", label: "SHA-256", placeholder: "one per line" },
-  { key: "email",  label: "Email",   placeholder: "one per line" },
-  { key: "btc",    label: "BTC",     placeholder: "one per line" },
+  { key: "email", label: "Email", placeholder: "one per line" },
+  { key: "btc", label: "BTC", placeholder: "one per line" },
 ];
 
 function splitCommas(s: string): string[] {
-  return s.split(/[,\n]/g).map((x) => x.trim()).filter(Boolean);
+  return s
+    .split(/[,\n]/g)
+    .map((x) => x.trim())
+    .filter(Boolean);
 }
 function splitLines(s: string): string[] {
-  return s.split(/\n/g).map((x) => x.trim()).filter(Boolean);
+  return s
+    .split(/\n/g)
+    .map((x) => x.trim())
+    .filter(Boolean);
 }
 
 function isAiJobTerminal(status?: AiJobStatusResp["status"]): boolean {
-  return status === "succeeded"
-    || status === "failed"
-    || status === "completed"
-    || status === "completed_with_errors"
-    || status === "cancelled";
+  return (
+    status === "succeeded" ||
+    status === "failed" ||
+    status === "completed" ||
+    status === "completed_with_errors" ||
+    status === "cancelled"
+  );
 }
 
 function FindingDetailSheet({ findingId, onClose }: { findingId: string | null; onClose: () => void }) {
   const { toast } = useToast();
+  const { user } = useAuth();
+  const mssMode = user?.tenant.operatingMode === "mss";
   const open = !!findingId;
-  const detailReadOnly = STATIC_DEMO_MODE;
   const [analysisJobId, setAnalysisJobId] = useState<string | null>(null);
   const { data, isLoading } = useQuery<OsintFindingDTO>({
     queryKey: ["/api/v1/osint/findings", findingId],
@@ -1860,13 +2351,46 @@ function FindingDetailSheet({ findingId, onClose }: { findingId: string | null; 
       return undefined;
     },
   });
+  const integrityLocked = data?.status === "escalated";
+  const detailReadOnly = STATIC_DEMO_MODE || integrityLocked;
+  const readOnlyReason = integrityLocked
+    ? "Escalated intelligence is locked to preserve the reviewed record."
+    : "Static demo is read-only.";
+  const { data: clientProfilesData } = useQuery<ClientProfilesResp>({
+    queryKey: ["/api/v1/client-profiles"],
+    enabled: open && mssMode,
+  });
+  const [assessmentDraft, setAssessmentDraft] = useState("");
+  const [assessmentDisposition, setAssessmentDisposition] = useState<AnalystDisposition | "">("");
+  const [assessmentConfidence, setAssessmentConfidence] = useState<AnalystConfidence | "">("");
+  const [assessmentImpact, setAssessmentImpact] = useState<AnalystImpact | "">("");
+  const [assessmentNextAction, setAssessmentNextAction] = useState("");
+  const [assessmentEditing, setAssessmentEditing] = useState(false);
+  const [clientAssignmentDraft, setClientAssignmentDraft] = useState("");
 
   // v2.28 — load typeahead dictionaries (technologies + threat actors).
   const { data: dicts, isLoading: dictsLoading } = useDictionaries();
 
   useEffect(() => {
     setAnalysisJobId(null);
+    setClientAssignmentDraft("");
   }, [findingId]);
+
+  useEffect(() => {
+    setAssessmentDraft(data?.analystAssessment ?? "");
+    setAssessmentDisposition(data?.analystDisposition ?? "");
+    setAssessmentConfidence(data?.analystConfidence ?? "");
+    setAssessmentImpact(data?.analystImpact ?? "");
+    setAssessmentNextAction(data?.analystNextAction ?? "");
+    setAssessmentEditing(false);
+  }, [
+    data?.id,
+    data?.analystAssessment,
+    data?.analystDisposition,
+    data?.analystConfidence,
+    data?.analystImpact,
+    data?.analystNextAction,
+  ]);
 
   const analysisJob = useQuery<AiJobStatusResp>({
     queryKey: ["/api/v1/ai-jobs", analysisJobId],
@@ -1899,7 +2423,9 @@ function FindingDetailSheet({ findingId, onClose }: { findingId: string | null; 
       }
       toast({
         title: "AI analysis ready",
-        description: job.providerLabel ? `Re-analysed via ${job.providerLabel}. IoCs and summary refreshed.` : "Finding re-analysed. IoCs and summary refreshed.",
+        description: job.providerLabel
+          ? `Re-analysed via ${job.providerLabel}. IoCs and summary refreshed.`
+          : "Finding re-analysed. IoCs and summary refreshed.",
       });
     })();
   }, [analysisJob.data, analysisJobId, findingId, toast]);
@@ -1907,10 +2433,11 @@ function FindingDetailSheet({ findingId, onClose }: { findingId: string | null; 
   const analyzeOne = useMutation({
     mutationFn: async () => {
       if (detailReadOnly) {
-        throw new Error("Static demo is read-only.");
+        throw new Error(readOnlyReason);
       }
       const r = await apiRequest("POST", "/api/v1/osint/findings/ai-analyze", {
-        ids: [findingId], onlyUnanalyzed: false,
+        ids: [findingId],
+        onlyUnanalyzed: false,
       });
       return r.json();
     },
@@ -1922,7 +2449,8 @@ function FindingDetailSheet({ findingId, onClose }: { findingId: string | null; 
       }
       await queryClient.refetchQueries({ queryKey: ["/api/v1/osint/findings", findingId], exact: true });
     },
-    onError: (e: any) => toast({ variant: "destructive", title: "Analyze failed", description: String(e.message ?? e) }),
+    onError: (e: any) =>
+      toast({ variant: "destructive", title: "Analyze failed", description: String(e.message ?? e) }),
   });
 
   // v2.18 — single mutation that PATCHes an arbitrary subset of fields. Used
@@ -1930,7 +2458,7 @@ function FindingDetailSheet({ findingId, onClose }: { findingId: string | null; 
   const patchField = useMutation({
     mutationFn: async (patch: OsintFindingPatch) => {
       if (detailReadOnly) {
-        throw new Error("Static demo is read-only.");
+        throw new Error(readOnlyReason);
       }
       const r = await apiRequest("PATCH", `/api/v1/osint/findings/${findingId}`, patch);
       return r.json();
@@ -1939,9 +2467,26 @@ function FindingDetailSheet({ findingId, onClose }: { findingId: string | null; 
     // resolves. This keeps `isPending` true (and the panel overlay visible)
     // until the data is actually fresh, fixing the perceived latency where
     // the spinner ended but the chip list still showed stale state.
-    onSuccess: async () => {
+    onSuccess: async (_updated, variables) => {
       await queryClient.refetchQueries({ queryKey: ["/api/v1/osint/findings", findingId], exact: true });
       queryClient.invalidateQueries({ queryKey: ["/api/v1/osint/findings"] });
+      if (
+        variables.analystAssessment !== undefined ||
+        variables.analystDisposition !== undefined ||
+        variables.analystConfidence !== undefined ||
+        variables.analystImpact !== undefined ||
+        variables.analystNextAction !== undefined
+      ) {
+        setAssessmentEditing(false);
+        toast({ title: "Assessment saved", description: "The analyst decision and workflow status are now recorded." });
+      } else if (variables.severity !== undefined) {
+        toast({
+          title: "Severity updated",
+          description: "The analyst severity override is recorded in the finding audit trail.",
+        });
+      } else if (variables.clientMatchDecisions !== undefined) {
+        toast({ title: "Client recommendation reviewed" });
+      }
     },
     onError: (e: any) => toast({ variant: "destructive", title: "Save failed", description: String(e.message ?? e) }),
   });
@@ -1949,7 +2494,11 @@ function FindingDetailSheet({ findingId, onClose }: { findingId: string | null; 
   // Build the iocs patch payload for a single group key by replacing its list.
   function patchIocGroup(key: keyof FindingIoCs, list: string[]) {
     if (detailReadOnly) {
-      showStaticDemoNotice({ kind: "write", action: "Intel detail editing restricted" });
+      if (integrityLocked) {
+        toast({ title: "Escalated finding locked", description: readOnlyReason });
+      } else {
+        showStaticDemoNotice({ kind: "write", action: "Intel detail editing restricted" });
+      }
       return;
     }
     const current: any = { ...(data?.iocs || {}) };
@@ -1960,12 +2509,45 @@ function FindingDetailSheet({ findingId, onClose }: { findingId: string | null; 
 
   // v2.28 — the panel-level loading overlay also covers IoC patches so the
   // analyst sees clear feedback while their edits round-trip to the server.
-  const patchHasIocs = patchField.isPending && patchField.variables && Object.prototype.hasOwnProperty.call(patchField.variables, "iocs");
+  const patchHasIocs =
+    patchField.isPending && patchField.variables && Object.prototype.hasOwnProperty.call(patchField.variables, "iocs");
   const analysisInFlight = analyzeOne.isPending || !!analysisJobId;
-  const analysisProgress = analysisJob.data?.progressPct != null
-    ? Math.max(0, Math.min(100, Math.round(Number(analysisJob.data.progressPct))))
-    : null;
+  const clientProfiles = clientProfilesData?.profiles ?? [];
+  const clientById = new Map(clientProfiles.map((profile) => [profile.id, profile]));
+  const profileTagOptions = clientProfiles.filter((profile) => !(data?.clientTags || []).includes(profile.id));
+  const pendingClientMatches = (data?.aiClientMatches || []).filter(
+    (match) =>
+      !(data?.clientTags || []).includes(match.clientId) &&
+      !data?.clientMatchDecisions?.[match.clientId] &&
+      clientById.has(match.clientId),
+  );
+  const analysisProgress =
+    analysisJob.data?.progressPct != null
+      ? Math.max(0, Math.min(100, Math.round(Number(analysisJob.data.progressPct))))
+      : null;
   const showPanelLoading = analysisInFlight || !!patchHasIocs;
+  const assessmentDirty =
+    Boolean(data) &&
+    (assessmentDraft.trim() !== (data?.analystAssessment ?? "") ||
+      assessmentDisposition !== (data?.analystDisposition ?? "") ||
+      assessmentConfidence !== (data?.analystConfidence ?? "") ||
+      assessmentImpact !== (data?.analystImpact ?? "") ||
+      assessmentNextAction.trim() !== (data?.analystNextAction ?? ""));
+  const assessmentNeedsAction = assessmentDisposition === "action_required" || assessmentDisposition === "monitor";
+  const assessmentReady = Boolean(
+    assessmentDraft.trim() &&
+    assessmentDisposition &&
+    assessmentConfidence &&
+    assessmentImpact &&
+    (!assessmentNeedsAction || assessmentNextAction.trim()),
+  );
+  const assessmentTargetStatus = statusForDisposition(assessmentDisposition);
+  const assessmentDispositionLabel =
+    ANALYST_DISPOSITIONS.find((option) => option.value === assessmentDisposition)?.label ?? "Not recorded";
+  const assessmentConfidenceLabel =
+    ANALYST_CONFIDENCE.find((option) => option.value === assessmentConfidence)?.label ?? "Not recorded";
+  const assessmentImpactLabel =
+    ANALYST_IMPACT.find((option) => option.value === assessmentImpact)?.label ?? "Not recorded";
   const loadingMessage = analysisInFlight
     ? {
         title: data?.aiSummary ? "Re-analysing intel…" : "Running AI analysis…",
@@ -1983,358 +2565,957 @@ function FindingDetailSheet({ findingId, onClose }: { findingId: string | null; 
           and a11y title live inside an inner `relative` wrapper instead. */}
       <SheetContent side="right" className="w-full sm:max-w-xl overflow-y-auto" data-testid="sheet-finding-detail">
         <div className="relative min-h-full">
-        {/* Full-panel loading overlay shown during AI re-analyse AND IoC patches
+          {/* Full-panel loading overlay shown during AI re-analyse AND IoC patches
             so the analyst sees a clear progress indicator while data refreshes. */}
-        {showPanelLoading && (
-          <div
-            className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-background/85 backdrop-blur-sm pointer-events-auto text-center"
-            data-testid="overlay-detail-analyzing"
-            aria-live="polite"
-            role="status"
-          >
-            <div className="flex items-center justify-center gap-2 text-sm font-medium">
-              <Loader2 size={18} className="animate-spin text-primary" />
-              <span>{loadingMessage.title}</span>
-            </div>
-            <div className="text-xs text-muted-foreground max-w-[320px] text-center leading-relaxed">
-              {loadingMessage.body}
-            </div>
-          </div>
-        )}
-        {!data && isLoading && (
-          <>
-            {/* Always render a SheetTitle for Radix a11y, even while loading. */}
-            <SheetHeader>
-              <SheetTitle className="sr-only">Loading finding</SheetTitle>
-              <SheetDescription className="sr-only">Loading finding detail</SheetDescription>
-            </SheetHeader>
-            {/* Absolute-positioned overlay so the spinner is dead-centre of
-                the entire panel regardless of SheetHeader height. */}
+          {showPanelLoading && (
             <div
-              className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-muted-foreground text-center"
-              data-testid="overlay-detail-loading"
+              className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-background/85 backdrop-blur-sm pointer-events-auto text-center"
+              data-testid="overlay-detail-analyzing"
               aria-live="polite"
               role="status"
             >
-              <Loader2 size={20} className="animate-spin text-primary" />
-              <span>Loading finding…</span>
+              <div className="flex items-center justify-center gap-2 text-sm font-medium">
+                <Loader2 size={18} className="animate-spin text-primary" />
+                <span>{loadingMessage.title}</span>
+              </div>
+              <div className="text-xs text-muted-foreground max-w-[320px] text-center leading-relaxed">
+                {loadingMessage.body}
+              </div>
             </div>
-          </>
-        )}
-        {data && (
-          <>
-            <SheetHeader className="space-y-2">
-              <div className="flex items-center gap-2 flex-wrap">
-                <Badge className={`text-[10px] uppercase border ${severityColor(data.severity)}`}>{data.severity}</Badge>
-                <IntelCategoryChip
-                  category={data.intelCategory ?? null}
-                  size="md"
-                  testId="badge-detail-intel-category"
-                />
-                <Badge variant="outline" className="text-[10px]">{data.sourceCategory}</Badge>
-                <span className="text-[10px] font-mono text-muted-foreground">{data.sourceName}</span>
-                <span className="text-[10px] text-muted-foreground" title={formatIntelTimestamp(data.publishedAt)}>
-                  Published {publishedTimeLabel(data.publishedAt)}
-                </span>
-                <span className="text-[10px] text-muted-foreground" title={formatIntelTimestamp(data.createdAt)}>
-                  Ingested {relativeTime(data.createdAt)}
-                </span>
-                <Badge variant="outline" className={`text-[10px] ${freshnessTier(data.publishedAt).tone}`}>{freshnessTier(data.publishedAt).label}</Badge>
-                <Badge variant="outline" className={`text-[10px] ${confidenceTier(data).tone}`}>{confidenceTier(data).label}</Badge>
+          )}
+          {!data && isLoading && (
+            <>
+              {/* Always render a SheetTitle for Radix a11y, even while loading. */}
+              <SheetHeader>
+                <SheetTitle className="sr-only">Loading finding</SheetTitle>
+                <SheetDescription className="sr-only">Loading finding detail</SheetDescription>
+              </SheetHeader>
+              {/* Absolute-positioned overlay so the spinner is dead-centre of
+                the entire panel regardless of SheetHeader height. */}
+              <div
+                className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-muted-foreground text-center"
+                data-testid="overlay-detail-loading"
+                aria-live="polite"
+                role="status"
+              >
+                <Loader2 size={20} className="animate-spin text-primary" />
+                <span>Loading finding…</span>
               </div>
-              <SheetTitle className="text-base leading-snug" data-testid="text-detail-title">{data.title}</SheetTitle>
-              {data.summary && (
-                <SheetDescription className="text-xs leading-relaxed">{data.summary}</SheetDescription>
-              )}
-            </SheetHeader>
-
-            <div className="mt-5 space-y-4 text-sm">
-              {/* Action bar — v2.18: only Analyse stays. The old global Edit
-                  toggle is replaced by per-field pencil / add / delete icons. */}
-              <div className="flex items-center gap-2 flex-wrap">
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    if (detailReadOnly) {
-                      showStaticDemoNotice({ kind: "ai", action: "Finding analysis restricted" });
-                      return;
-                    }
-                    analyzeOne.mutate();
-                  }}
-                  disabled={analysisInFlight}
-                  data-testid="button-detail-analyze"
-                >
-                  {analysisInFlight
-                    ? <><Loader2 size={12} className="mr-1.5 animate-spin" />Analysing</>
-                    : <><Sparkles size={12} className="mr-1.5" />{data.aiSummary ? "Re-analyse" : "AI analyse"}</>}
-                </Button>
-                {data.analystEditedAt && (
-                  <span className="text-[10px] text-muted-foreground ml-auto" data-testid="text-detail-edited-by">
-                    edited {relativeTime(data.analystEditedAt)}{data.analystEditedBy ? ` by ${data.analystEditedBy}` : ""}
-                  </span>
+            </>
+          )}
+          {data && (
+            <>
+              <SheetHeader className="space-y-2">
+                <FindingMetaStrip finding={data} detail />
+                <SheetTitle className="text-base leading-snug" data-testid="text-detail-title">
+                  {data.title}
+                </SheetTitle>
+                {data.summary && (
+                  <SheetDescription className="text-xs leading-relaxed">{data.summary}</SheetDescription>
                 )}
-              </div>
+              </SheetHeader>
 
-              {/* AI summary */}
-              {data.aiSummary && (
-                <Card className="p-3 border-primary/20 bg-primary/5">
-                  <div className="text-[10px] uppercase tracking-wide text-primary mb-1">
-                    AI summary{data.aiProviderLabel ? ` · ${data.aiProviderLabel}` : ""}
-                    {data.aiRelevanceScore != null && (
-                      <span className="ml-2 font-mono">analysis {relevancePercent(data.aiRelevanceScore)}%</span>
+              <div className="mt-5 space-y-4 text-sm">
+                {/* Action bar — v2.18: only Analyse stays. The old global Edit
+                  toggle is replaced by per-field pencil / add / delete icons. */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      if (detailReadOnly) {
+                        showStaticDemoNotice({ kind: "ai", action: "Finding analysis restricted" });
+                        return;
+                      }
+                      analyzeOne.mutate();
+                    }}
+                    disabled={analysisInFlight}
+                    data-testid="button-detail-analyze"
+                  >
+                    {analysisInFlight ? (
+                      <>
+                        <Loader2 size={12} className="mr-1.5 animate-spin" />
+                        Analysing
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles size={12} className="mr-1.5" />
+                        {data.aiSummary ? "Re-analyse" : "AI analyse"}
+                      </>
+                    )}
+                  </Button>
+                  {data.analystEditedAt && (
+                    <span className="text-[10px] text-muted-foreground ml-auto" data-testid="text-detail-edited-by">
+                      edited {relativeTime(data.analystEditedAt)}
+                      {data.analystEditedBy ? ` by ${data.analystEditedBy}` : ""}
+                    </span>
+                  )}
+                </div>
+
+                {/* AI summary */}
+                {data.aiSummary && (
+                  <Card className="p-3 border-primary/20 bg-primary/5">
+                    <div className="text-[10px] uppercase tracking-wide text-primary mb-1">
+                      AI summary{data.aiProviderLabel ? ` · ${data.aiProviderLabel}` : ""}
+                      {data.aiRelevanceScore != null && (
+                        <span className="ml-2 font-mono">analysis {relevancePercent(data.aiRelevanceScore)}%</span>
+                      )}
+                    </div>
+                    <div className="text-xs whitespace-pre-wrap leading-relaxed" data-testid="text-detail-ai-summary">
+                      {data.aiSummary}
+                    </div>
+                    {data.aiRecommendation && (
+                      <div className="text-xs mt-2 pt-2 border-t border-primary/20">
+                        <span className="text-[10px] uppercase tracking-wide text-primary">Recommendation: </span>
+                        {data.aiRecommendation}
+                      </div>
+                    )}
+                  </Card>
+                )}
+
+                <Card className="p-3">
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-2">
+                    Intel scoring & lineage
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <div className="text-muted-foreground">Analysis score</div>
+                      <div className="mt-0.5">
+                        {relevancePercent(data.aiRelevanceScore) != null
+                          ? `${relevancePercent(data.aiRelevanceScore)}%`
+                          : "Not scored"}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground">Extraction density</div>
+                      <div className="mt-0.5">
+                        {iocCount(data.iocs)} IoCs · {data.cveIds.length} CVEs · {data.attackTechniques?.length ?? 0}{" "}
+                        ATT&CK
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground">Source</div>
+                      <div className="mt-0.5">
+                        {data.sourceName} · {data.sourceCategory}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground">Freshness</div>
+                      <div className="mt-0.5">{freshnessTier(data.publishedAt).label}</div>
+                    </div>
+                  </div>
+                  {data.attackTechniques?.length ? (
+                    <div className="mt-3">
+                      <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">
+                        Mapped ATT&CK techniques
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        {data.attackTechniques.slice(0, 10).map((t) => (
+                          <Badge key={t.id} variant="outline" className="font-mono text-[10px]">
+                            {t.id}
+                            {t.name ? ` · ${t.name}` : ""}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </Card>
+
+                {/* Metadata grid — Status is now editable via inline dropdown */}
+                <div className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
+                  <div>
+                    <FieldLabel
+                      label="Status"
+                      onAction={null /* status uses inline select — no add/edit icon needed */}
+                    />
+                    <Select
+                      value={data.status}
+                      onValueChange={(v) => {
+                        if (detailReadOnly) {
+                          showStaticDemoNotice({ kind: "write", action: "Intel detail editing restricted" });
+                          return;
+                        }
+                        patchField.mutate({ status: v as any });
+                      }}
+                      disabled={detailReadOnly || patchField.isPending}
+                    >
+                      <SelectTrigger className="h-8 text-xs w-full" data-testid="select-detail-status">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {STATUS_OPTIONS.map((s) => (
+                          <SelectItem key={s.value} value={s.value}>
+                            {s.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <div className="mb-1 text-[10px] text-muted-foreground">Analyst final severity</div>
+                    <Select
+                      value={data.analystFinalSeverity ?? data.severity}
+                      onValueChange={(value) =>
+                        patchField.mutate({ analystFinalSeverity: value as OsintFindingPatch["analystFinalSeverity"] })
+                      }
+                      disabled={detailReadOnly || patchField.isPending}
+                    >
+                      <SelectTrigger className="h-8 w-full text-xs" data-testid="select-detail-severity">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="critical">Critical</SelectItem>
+                        <SelectItem value="high">High</SelectItem>
+                        <SelectItem value="medium">Medium</SelectItem>
+                        <SelectItem value="low">Low</SelectItem>
+                        <SelectItem value="info">Informational</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <div className="mb-1 text-[10px] text-muted-foreground">Publisher severity</div>
+                    <div className="font-medium capitalize">{data.publisherSeverity ?? "Not supplied"}</div>
+                  </div>
+                  <div>
+                    <div className="mb-1 text-[10px] text-muted-foreground">Technical severity</div>
+                    <div className="font-medium capitalize">{data.technicalSeverity ?? data.severity}</div>
+                  </div>
+                  <div>
+                    <div className="mb-1 text-[10px] text-muted-foreground">Client impact</div>
+                    <div className="font-medium capitalize">{data.clientImpactSeverity ?? "Not assessed"}</div>
+                  </div>
+                  <div>
+                    <div className="mb-1 text-[10px] text-muted-foreground">Published</div>
+                    <div className="font-mono text-[11px]">
+                      {data.publishedAtInferred
+                        ? "Unknown (using ingest time)"
+                        : formatIntelTimestamp(data.publishedAt)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="mb-1 text-[10px] text-muted-foreground">Ingested</div>
+                    <div className="font-mono text-[11px]">{formatIntelTimestamp(data.createdAt)}</div>
+                  </div>
+                  <div className="col-span-2 sm:col-span-4">
+                    <div className="mb-1 text-[10px] text-muted-foreground">Severity rationale</div>
+                    <Input
+                      key={`${data.id}-${data.analystSeverityRationale ?? ""}`}
+                      defaultValue={data.analystSeverityRationale ?? ""}
+                      placeholder="Explain the evidence supporting the analyst final severity"
+                      disabled={detailReadOnly || patchField.isPending}
+                      onBlur={(event) => {
+                        const value = event.currentTarget.value.trim();
+                        if (value !== (data.analystSeverityRationale ?? ""))
+                          patchField.mutate({ analystSeverityRationale: value || null });
+                      }}
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                </div>
+
+                <Card className="overflow-hidden border-border bg-background shadow-none">
+                  <div className="flex flex-col gap-3 border-b border-border bg-muted/25 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <div className="text-sm font-semibold text-foreground">Analyst assessment</div>
+                        {assessmentDirty ? (
+                          <Badge className="rounded-md bg-amber-100 text-[10px] font-medium text-amber-800 hover:bg-amber-100">
+                            Unsaved
+                          </Badge>
+                        ) : data.analystAssessedAt ? (
+                          <Badge className="rounded-md bg-emerald-100 text-[10px] font-medium text-emerald-800 hover:bg-emerald-100">
+                            Recorded
+                          </Badge>
+                        ) : null}
+                      </div>
+                      <div className="mt-1 text-[11px] text-muted-foreground">
+                        {data.analystAssessedAt
+                          ? `Updated ${relativeTime(data.analystAssessedAt)}${data.analystAssessedBy ? ` by ${data.analystAssessedBy}` : ""}`
+                          : "Record a defensible decision for analyst handoff and reporting."}
+                      </div>
+                    </div>
+                    {integrityLocked ? (
+                      <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-medium text-amber-900">
+                        <ShieldAlert size={13} /> Integrity locked
+                      </div>
+                    ) : assessmentEditing ? (
+                      <div className="flex items-center gap-2">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            setAssessmentDraft(data.analystAssessment ?? "");
+                            setAssessmentDisposition(data.analystDisposition ?? "");
+                            setAssessmentConfidence(data.analystConfidence ?? "");
+                            setAssessmentImpact(data.analystImpact ?? "");
+                            setAssessmentNextAction(data.analystNextAction ?? "");
+                            setAssessmentEditing(false);
+                          }}
+                          disabled={patchField.isPending}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={() =>
+                            patchField.mutate({
+                              analystAssessment: assessmentDraft,
+                              analystDisposition: assessmentDisposition || null,
+                              analystConfidence: assessmentConfidence || null,
+                              analystImpact: assessmentImpact || null,
+                              analystNextAction: assessmentNextAction,
+                              status: assessmentTargetStatus,
+                            })
+                          }
+                          disabled={patchField.isPending || !assessmentDirty || !assessmentReady}
+                          data-testid="button-save-analyst-assessment"
+                        >
+                          {patchField.isPending ? (
+                            <Loader2 size={13} className="mr-2 animate-spin" />
+                          ) : (
+                            <CheckIcon size={13} className="mr-2" />
+                          )}
+                          Save assessment
+                        </Button>
+                      </div>
+                    ) : (
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="outline"
+                        className="h-8 w-8"
+                        onClick={() => setAssessmentEditing(true)}
+                        disabled={detailReadOnly}
+                        aria-label="Edit analyst assessment"
+                        title="Edit analyst assessment"
+                        data-testid="button-edit-analyst-assessment"
+                      >
+                        <Pencil size={13} />
+                      </Button>
                     )}
                   </div>
-                  <div className="text-xs whitespace-pre-wrap leading-relaxed" data-testid="text-detail-ai-summary">
-                    {data.aiSummary}
+
+                  <div
+                    className={`grid grid-cols-2 border-b border-border ${mssMode ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}
+                  >
+                    <div className="border-b border-r border-border px-3 py-2.5 sm:border-b-0">
+                      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">AI relevance</div>
+                      <div className="mt-1 font-mono text-xs font-semibold">
+                        {relevancePercent(data.aiRelevanceScore) ?? "—"}
+                        {relevancePercent(data.aiRelevanceScore) != null ? "%" : ""}
+                      </div>
+                    </div>
+                    <div className="border-b border-border px-3 py-2.5 sm:border-b-0 sm:border-r">
+                      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Indicators</div>
+                      <div className="mt-1 font-mono text-xs font-semibold">{iocCount(data.iocs)} IoCs</div>
+                    </div>
+                    <div className={`px-3 py-2.5 ${mssMode ? "border-r border-border" : "col-span-2 sm:col-span-1"}`}>
+                      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Vulnerabilities</div>
+                      <div className="mt-1 font-mono text-xs font-semibold">{data.cveIds.length} CVEs</div>
+                    </div>
+                    {mssMode ? (
+                      <div className="px-3 py-2.5">
+                        <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Client scope</div>
+                        <div className="mt-1 font-mono text-xs font-semibold">
+                          {data.clientTags?.length ?? 0} assigned
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
-                  {data.aiRecommendation && (
-                    <div className="text-xs mt-2 pt-2 border-t border-primary/20">
-                      <span className="text-[10px] uppercase tracking-wide text-primary">Recommendation: </span>
-                      {data.aiRecommendation}
+
+                  {mssMode ? (
+                    <div className="border-b border-border p-4" data-testid="list-detail-client-tags">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <div className="text-xs font-semibold text-foreground">Relevant clients</div>
+                          <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
+                            Link this intelligence to one or more canonical Client Profiles.
+                          </p>
+                        </div>
+                        {user?.role === "admin" && !integrityLocked ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 shrink-0 px-2 text-[11px]"
+                            onClick={() => {
+                              window.location.hash = "/client-profile";
+                            }}
+                          >
+                            <Plus size={12} className="mr-1.5" /> Manage clients
+                          </Button>
+                        ) : null}
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-1.5" aria-label="Assigned clients">
+                        {(data.clientTags || []).map((clientId) => {
+                          const aiAssigned = data.clientMatchDecisions?.[clientId] === "ai_assigned";
+                          return (
+                            <Badge
+                              key={clientId}
+                              className={`gap-1 border text-[10px] ${aiAssigned ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-700" : "border-primary/30 bg-primary/10 text-primary"}`}
+                              data-testid={`badge-detail-client-tag-${clientId}`}
+                            >
+                              {aiAssigned ? <Sparkles size={9} aria-hidden="true" /> : null}
+                              {clientById.get(clientId)?.name ?? "Legacy client tag"}
+                              {aiAssigned ? <span className="font-normal">AI</span> : null}
+                              {!detailReadOnly && (
+                                <button
+                                  type="button"
+                                  aria-label={`Remove ${clientById.get(clientId)?.name ?? "company"}`}
+                                  onClick={() =>
+                                    patchField.mutate({
+                                      clientTags: (data.clientTags || []).filter((id) => id !== clientId),
+                                      clientMatchDecisions: {
+                                        ...(data.clientMatchDecisions || {}),
+                                        [clientId]: "dismissed",
+                                      },
+                                    })
+                                  }
+                                  disabled={patchField.isPending}
+                                >
+                                  <XIcon size={10} />
+                                </button>
+                              )}
+                            </Badge>
+                          );
+                        })}
+                        {(data.clientTags || []).length === 0 ? (
+                          <span className="text-[11px] text-muted-foreground">No clients assigned.</span>
+                        ) : null}
+                      </div>
+                      {pendingClientMatches.length > 0 ? (
+                        <div className="mt-4 border-t border-border pt-3" data-testid="list-ai-client-recommendations">
+                          <div className="flex items-center gap-2">
+                            <Sparkles size={13} className="text-cyan-600" aria-hidden="true" />
+                            <div className="text-[11px] font-semibold text-foreground">
+                              AI recommendations for analyst review
+                            </div>
+                          </div>
+                          <div className="mt-2 space-y-2">
+                            {pendingClientMatches.map((match) => {
+                              const profileName = clientById.get(match.clientId)?.name ?? "Client";
+                              return (
+                                <div
+                                  key={match.clientId}
+                                  className="rounded-md border border-border bg-muted/15 px-3 py-2.5"
+                                >
+                                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                                    <div className="min-w-0">
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <span className="text-xs font-semibold text-foreground">{profileName}</span>
+                                        <Badge variant="outline" className="text-[9px] font-mono">
+                                          {relevancePercent(match.relevanceScore)}% match
+                                        </Badge>
+                                      </div>
+                                      <p className="mt-1 text-[11px] leading-4 text-muted-foreground">{match.reason}</p>
+                                    </div>
+                                    <div className="flex shrink-0 items-center gap-1.5">
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-7 px-2 text-[10px]"
+                                        onClick={() =>
+                                          patchField.mutate({
+                                            clientMatchDecisions: {
+                                              ...(data.clientMatchDecisions || {}),
+                                              [match.clientId]: "dismissed",
+                                            },
+                                          })
+                                        }
+                                        disabled={detailReadOnly || patchField.isPending}
+                                        data-testid={`button-dismiss-client-match-${match.clientId}`}
+                                      >
+                                        <XIcon size={11} className="mr-1" /> Dismiss
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        className="h-7 px-2 text-[10px]"
+                                        onClick={() =>
+                                          patchField.mutate({
+                                            clientTags: Array.from(
+                                              new Set([...(data.clientTags || []), match.clientId]),
+                                            ),
+                                            clientMatchDecisions: {
+                                              ...(data.clientMatchDecisions || {}),
+                                              [match.clientId]: "approved",
+                                            },
+                                          })
+                                        }
+                                        disabled={detailReadOnly || patchField.isPending}
+                                        data-testid={`button-approve-client-match-${match.clientId}`}
+                                      >
+                                        <CheckIcon size={11} className="mr-1" /> Accept
+                                      </Button>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ) : null}
+                      {profileTagOptions.length > 0 ? (
+                        <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+                          <Select
+                            value={clientAssignmentDraft}
+                            onValueChange={setClientAssignmentDraft}
+                            disabled={detailReadOnly || patchField.isPending}
+                          >
+                            <SelectTrigger
+                              className="h-8 w-full text-[11px] sm:w-64"
+                              data-testid="select-assign-company"
+                            >
+                              <SelectValue placeholder="Select a Client Profile" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {profileTagOptions.map((profile) => (
+                                <SelectItem key={profile.id} value={profile.id}>
+                                  {profile.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="h-8 shrink-0 text-[11px]"
+                            onClick={() => {
+                              if (!clientAssignmentDraft) return;
+                              const next = Array.from(new Set([...(data.clientTags || []), clientAssignmentDraft]));
+                              patchField.mutate(
+                                {
+                                  clientTags: next,
+                                  clientMatchDecisions: {
+                                    ...(data.clientMatchDecisions || {}),
+                                    [clientAssignmentDraft]: "approved",
+                                  },
+                                },
+                                { onSuccess: () => setClientAssignmentDraft("") },
+                              );
+                            }}
+                            disabled={detailReadOnly || patchField.isPending || !clientAssignmentDraft}
+                            data-testid="button-add-client"
+                          >
+                            {patchField.isPending ? (
+                              <Loader2 size={12} className="mr-1.5 animate-spin" />
+                            ) : (
+                              <Plus size={12} className="mr-1.5" />
+                            )}
+                            Add client
+                          </Button>
+                        </div>
+                      ) : (data.clientTags || []).length === 0 ? (
+                        <p className="mt-3 text-[11px] text-muted-foreground">
+                          No active Client Profiles are available.
+                        </p>
+                      ) : null}
+                      <div className="mt-3 flex items-start gap-2 rounded-md border border-cyan-500/25 bg-cyan-500/5 px-3 py-2 text-[11px] leading-4 text-muted-foreground">
+                        <Sparkles size={13} className="mt-0.5 shrink-0 text-cyan-600" aria-hidden="true" />
+                        <p>
+                          <span className="font-semibold text-foreground">AI-assisted mapping.</span> Matches at 70%
+                          confidence or above are provisionally tagged and marked AI. Lower-confidence matches remain
+                          recommendations. Analyst approval or removal is authoritative and recorded for later analysis.
+                        </p>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {assessmentEditing ? (
+                    <div className="space-y-4 p-4">
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                        <div>
+                          <label htmlFor="analyst-disposition" className="text-xs font-medium text-foreground">
+                            Disposition
+                          </label>
+                          <Select
+                            value={assessmentDisposition}
+                            onValueChange={(value) => setAssessmentDisposition(value as AnalystDisposition)}
+                            disabled={detailReadOnly || patchField.isPending}
+                          >
+                            <SelectTrigger
+                              id="analyst-disposition"
+                              className="mt-1.5 h-9 text-xs"
+                              data-testid="select-analyst-disposition"
+                            >
+                              <SelectValue placeholder="Select decision" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {ANALYST_DISPOSITIONS.map((option) => (
+                                <SelectItem key={option.value} value={option.value}>
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <label htmlFor="analyst-confidence" className="text-xs font-medium text-foreground">
+                            Confidence
+                          </label>
+                          <Select
+                            value={assessmentConfidence}
+                            onValueChange={(value) => setAssessmentConfidence(value as AnalystConfidence)}
+                            disabled={detailReadOnly || patchField.isPending}
+                          >
+                            <SelectTrigger
+                              id="analyst-confidence"
+                              className="mt-1.5 h-9 text-xs"
+                              data-testid="select-analyst-confidence"
+                            >
+                              <SelectValue placeholder="Select confidence" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {ANALYST_CONFIDENCE.map((option) => (
+                                <SelectItem key={option.value} value={option.value}>
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <label htmlFor="analyst-impact" className="text-xs font-medium text-foreground">
+                            Business impact
+                          </label>
+                          <Select
+                            value={assessmentImpact}
+                            onValueChange={(value) => setAssessmentImpact(value as AnalystImpact)}
+                            disabled={detailReadOnly || patchField.isPending}
+                          >
+                            <SelectTrigger
+                              id="analyst-impact"
+                              className="mt-1.5 h-9 text-xs"
+                              data-testid="select-analyst-impact"
+                            >
+                              <SelectValue placeholder="Select impact" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {ANALYST_IMPACT.map((option) => (
+                                <SelectItem key={option.value} value={option.value}>
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label htmlFor="analyst-rationale" className="text-xs font-medium text-foreground">
+                          Assessment rationale
+                        </label>
+                        <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
+                          State what is credible, why it matters to the assigned client, and the evidence supporting
+                          your judgement.
+                        </p>
+                        <Textarea
+                          id="analyst-rationale"
+                          className="mt-2 min-h-[112px] resize-y text-xs leading-5"
+                          rows={4}
+                          value={assessmentDraft}
+                          onChange={(event) => setAssessmentDraft(event.target.value)}
+                          disabled={detailReadOnly || patchField.isPending}
+                          placeholder="Summarise the validated threat, affected assets or users, and supporting evidence."
+                          data-testid="textarea-analyst-assessment"
+                        />
+                      </div>
+
+                      <div>
+                        <label htmlFor="analyst-next-action" className="text-xs font-medium text-foreground">
+                          Next action{" "}
+                          {assessmentNeedsAction ? (
+                            <span className="text-destructive">(required)</span>
+                          ) : (
+                            <span className="font-normal text-muted-foreground">(optional)</span>
+                          )}
+                        </label>
+                        <Textarea
+                          id="analyst-next-action"
+                          className="mt-1.5 min-h-[64px] resize-y text-xs leading-5"
+                          rows={2}
+                          value={assessmentNextAction}
+                          onChange={(event) => setAssessmentNextAction(event.target.value)}
+                          disabled={detailReadOnly || patchField.isPending}
+                          placeholder="Name the owner, action, and expected timeframe."
+                          data-testid="textarea-analyst-next-action"
+                        />
+                      </div>
+
+                      <div className="flex items-start gap-2 rounded-md border border-border bg-muted/30 px-3 py-2.5 text-[11px] leading-4 text-muted-foreground">
+                        <ShieldAlert size={14} className="mt-0.5 shrink-0 text-primary" />
+                        <span>
+                          Saving this decision will set workflow status to{" "}
+                          <strong className="font-semibold text-foreground">{assessmentTargetStatus}</strong>.
+                          {assessmentDisposition === "action_required"
+                            ? " Use Action required only when an operational owner should respond."
+                            : " You can change status later if the investigation evolves."}
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-4">
+                      {data.analystAssessedAt ? (
+                        <div className="space-y-4">
+                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                            <div className="border-b border-border pb-2 sm:border-b-0 sm:border-r sm:pb-0">
+                              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                                Disposition
+                              </div>
+                              <div className="mt-1 text-xs font-semibold text-foreground">
+                                {assessmentDispositionLabel}
+                              </div>
+                            </div>
+                            <div className="border-b border-border pb-2 sm:border-b-0 sm:border-r sm:pb-0">
+                              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                                Confidence
+                              </div>
+                              <div className="mt-1 text-xs font-semibold text-foreground">
+                                {assessmentConfidenceLabel}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                                Business impact
+                              </div>
+                              <div className="mt-1 text-xs font-semibold text-foreground">{assessmentImpactLabel}</div>
+                            </div>
+                          </div>
+                          <div className="border-t border-border pt-3">
+                            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                              Assessment rationale
+                            </div>
+                            <p className="mt-1.5 whitespace-pre-wrap text-xs leading-5 text-foreground">
+                              {assessmentDraft || "No rationale recorded."}
+                            </p>
+                          </div>
+                          {assessmentNextAction ? (
+                            <div className="border-t border-border pt-3">
+                              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                                Next action
+                              </div>
+                              <p className="mt-1.5 whitespace-pre-wrap text-xs leading-5 text-foreground">
+                                {assessmentNextAction}
+                              </p>
+                            </div>
+                          ) : null}
+                          {integrityLocked ? (
+                            <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 text-[11px] leading-4 text-amber-900">
+                              <ShieldAlert size={14} className="mt-0.5 shrink-0" />
+                              <span>
+                                This escalated record is immutable. Corrections require a separately authorised and
+                                audited reopen workflow.
+                              </span>
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <div className="py-4 text-center">
+                          <FileText size={18} className="mx-auto text-muted-foreground" />
+                          <div className="mt-2 text-xs font-medium text-foreground">No analyst assessment recorded</div>
+                          <p className="mt-1 text-[11px] text-muted-foreground">
+                            Use the pencil button to record a decision.
+                          </p>
+                        </div>
+                      )}
                     </div>
                   )}
                 </Card>
-              )}
 
-              <Card className="p-3">
-                <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-2">Intel scoring & lineage</div>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div>
-                    <div className="text-muted-foreground">Analysis score</div>
-                    <div className="mt-0.5">
-                      {relevancePercent(data.aiRelevanceScore) != null
-                        ? `${relevancePercent(data.aiRelevanceScore)}%`
-                        : "Not scored"}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-muted-foreground">Extraction density</div>
-                    <div className="mt-0.5">{iocCount(data.iocs)} IoCs · {data.cveIds.length} CVEs · {data.attackTechniques?.length ?? 0} ATT&CK</div>
-                  </div>
-                  <div>
-                    <div className="text-muted-foreground">Source</div>
-                    <div className="mt-0.5">{data.sourceName} · {data.sourceCategory}</div>
-                  </div>
-                  <div>
-                    <div className="text-muted-foreground">Freshness</div>
-                    <div className="mt-0.5">{freshnessTier(data.publishedAt).label}</div>
-                  </div>
-                </div>
-                {data.attackTechniques?.length ? (
-                  <div className="mt-3">
-                    <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Mapped ATT&CK techniques</div>
-                    <div className="flex flex-wrap gap-1">
-                      {data.attackTechniques.slice(0, 10).map((t) => (
-                        <Badge key={t.id} variant="outline" className="font-mono text-[10px]">{t.id}{t.name ? ` · ${t.name}` : ""}</Badge>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-              </Card>
+                {/* CVEs — chip list with per-chip delete + add-icon editor */}
+                <ChipFieldEditor
+                  label="CVE references"
+                  values={data.cveIds || []}
+                  placeholder="CVE-2024-1234, CVE-2024-5678"
+                  emptyLabel="no CVE references parsed"
+                  fontMono
+                  onChange={(next) => patchField.mutate({ cveIds: next })}
+                  disabled={detailReadOnly || patchField.isPending}
+                  renderChip={(c) => (
+                    <a
+                      href={`https://nvd.nist.gov/vuln/detail/${c}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-block"
+                    >
+                      <Badge
+                        variant="outline"
+                        className="text-[10px] font-mono hover:border-primary cursor-pointer"
+                        data-testid={`badge-detail-cve-${c}`}
+                      >
+                        {c} <ExternalLink size={9} className="ml-1" />
+                      </Badge>
+                    </a>
+                  )}
+                  testIdPrefix="cves"
+                />
 
-              {/* Metadata grid — Status is now editable via inline dropdown */}
-              <div className="grid grid-cols-2 gap-3 text-xs">
-                <div>
-                  <FieldLabel
-                    label="Status"
-                    onAction={null /* status uses inline select — no add/edit icon needed */}
-                  />
-                  <Select
-                    value={data.status}
-                    onValueChange={(v) => {
-                      if (detailReadOnly) {
-                        showStaticDemoNotice({ kind: "write", action: "Intel detail editing restricted" });
-                        return;
-                      }
-                      patchField.mutate({ status: v as any });
-                    }}
-                    disabled={detailReadOnly || patchField.isPending}
-                  >
-                    <SelectTrigger className="h-8 text-xs w-full" data-testid="select-detail-status">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {STATUS_OPTIONS.map((s) => (
-                        <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Published</div>
-                  <div className="font-mono text-[11px]">{formatIntelTimestamp(data.publishedAt)}</div>
-                </div>
-                <div>
-                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Ingested</div>
-                  <div className="font-mono text-[11px]">{formatIntelTimestamp(data.createdAt)}</div>
-                </div>
-              </div>
+                {/* Indicators of Compromise — per-type chips with delete + add */}
+                <IocSectionEditable
+                  iocs={data.iocs}
+                  onChangeGroup={patchIocGroup}
+                  disabled={detailReadOnly || patchField.isPending}
+                />
 
-              {/* CVEs — chip list with per-chip delete + add-icon editor */}
-              <ChipFieldEditor
-                label="CVE references"
-                values={data.cveIds || []}
-                placeholder="CVE-2024-1234, CVE-2024-5678"
-                emptyLabel="no CVE references parsed"
-                fontMono
-                onChange={(next) => patchField.mutate({ cveIds: next })}
-                disabled={detailReadOnly || patchField.isPending}
-                renderChip={(c) => (
-                  <a
-                    href={`https://nvd.nist.gov/vuln/detail/${c}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-block"
-                  >
-                    <Badge variant="outline" className="text-[10px] font-mono hover:border-primary cursor-pointer" data-testid={`badge-detail-cve-${c}`}>
-                      {c} <ExternalLink size={9} className="ml-1" />
-                    </Badge>
-                  </a>
-                )}
-                testIdPrefix="cves"
-              />
-
-              {/* Indicators of Compromise — per-type chips with delete + add */}
-              <IocSectionEditable
-                iocs={data.iocs}
-                onChangeGroup={patchIocGroup}
-                disabled={detailReadOnly || patchField.isPending}
-              />
-
-              {/* Tag groups (Affected tech / Threat actors / Analyst tags)
+                {/* Tag groups (Affected tech / Threat actors / Analyst tags)
                   v2.28 — Affected tech + Threat actors are dictionary-backed
                   typeahead inputs with custom-add support. Analyst tags remain
                   free-form. */}
-              <div className="space-y-3">
-                <TypeaheadChipFieldEditor<DictTechnology>
-                  label="Affected technology"
-                  values={data.affectedTech || []}
-                  onChange={(next) => patchField.mutate({ affectedTech: next })}
-                  disabled={detailReadOnly || patchField.isPending}
-                  dict={dicts?.technologies || []}
-                  dictLoading={dictsLoading}
-                  placeholder="Type to search 100+ tracked technologies…"
-                  emptyLabel="none"
-                  renderChip={(t, meta) => (
-                    <Badge
-                      variant="secondary"
-                      className="text-[10px] font-mono"
-                      title={meta ? `${meta.category}${meta.vendor ? " · " + meta.vendor : ""}` : "Custom entry (not in dictionary)"}
-                      data-testid={`badge-detail-tech-${t}`}
-                    >
-                      {t}
-                    </Badge>
-                  )}
-                  testIdPrefix="tech"
-                />
-                <TypeaheadChipFieldEditor<DictThreatActor>
-                  label="Threat actors"
-                  values={data.threatActors || []}
-                  onChange={(next) => patchField.mutate({ threatActors: next })}
-                  disabled={detailReadOnly || patchField.isPending}
-                  dict={dicts?.threatActors || []}
-                  dictLoading={dictsLoading}
-                  placeholder="Type to search 100+ tracked threat actors…"
-                  emptyLabel="none"
-                  renderChip={(a, meta) => (
-                    <span className="inline-flex items-center gap-0.5">
+                <div className="space-y-3">
+                  <TypeaheadChipFieldEditor<DictTechnology>
+                    label="Affected technology"
+                    values={data.affectedTech || []}
+                    onChange={(next) => patchField.mutate({ affectedTech: next })}
+                    disabled={detailReadOnly || patchField.isPending}
+                    dict={dicts?.technologies || []}
+                    dictLoading={dictsLoading}
+                    placeholder="Type to search 100+ tracked technologies…"
+                    emptyLabel="none"
+                    renderChip={(t, meta) => (
                       <Badge
-                        className="text-[10px] bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/30"
-                        title={meta ? `${meta.category}${meta.country ? " · " + meta.country : ""}${meta.active === false ? " · inactive" : ""}` : "Custom entry (not in dictionary)"}
-                        data-testid={`badge-detail-actor-${a.replace(/\s+/g, "-").toLowerCase()}`}
+                        variant="secondary"
+                        className="text-[10px] font-mono"
+                        title={
+                          meta
+                            ? `${meta.category}${meta.vendor ? " · " + meta.vendor : ""}`
+                            : "Custom entry (not in dictionary)"
+                        }
+                        data-testid={`badge-detail-tech-${t}`}
                       >
-                        {a}
+                        {t}
                       </Badge>
+                    )}
+                    testIdPrefix="tech"
+                  />
+                  <TypeaheadChipFieldEditor<DictThreatActor>
+                    label="Threat actors"
+                    values={data.threatActors || []}
+                    onChange={(next) => patchField.mutate({ threatActors: next })}
+                    disabled={detailReadOnly || patchField.isPending}
+                    dict={dicts?.threatActors || []}
+                    dictLoading={dictsLoading}
+                    placeholder="Type to search 100+ tracked threat actors…"
+                    emptyLabel="none"
+                    renderChip={(a, meta) => (
+                      <span className="inline-flex items-center gap-0.5">
+                        <Badge
+                          className="text-[10px] bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/30"
+                          title={
+                            meta
+                              ? `${meta.category}${meta.country ? " · " + meta.country : ""}${meta.active === false ? " · inactive" : ""}`
+                              : "Custom entry (not in dictionary)"
+                          }
+                          data-testid={`badge-detail-actor-${a.replace(/\s+/g, "-").toLowerCase()}`}
+                        >
+                          {a}
+                        </Badge>
+                        <button
+                          type="button"
+                          title={`Open Threat Actor Profile for ${a}`}
+                          onClick={() => {
+                            (window as any).__pendingTapFocusName = a;
+                            window.location.hash = `#/threat-actors`;
+                            window.dispatchEvent(new Event("tap:focus"));
+                          }}
+                          className="text-[10px] px-1 py-0.5 rounded border border-rose-500/30 text-rose-700 dark:text-rose-300 hover:bg-rose-500/15 leading-none"
+                          data-testid={`button-pivot-tap-${a.replace(/\s+/g, "-").toLowerCase()}`}
+                        >
+                          ↗ TAP
+                        </button>
+                      </span>
+                    )}
+                    testIdPrefix="actors"
+                  />
+                  <ChipFieldEditor
+                    label="Analyst tags"
+                    values={data.analystTags || []}
+                    placeholder="comma-separated, e.g. payment-fraud, watchlist"
+                    emptyLabel="no analyst tags yet"
+                    onChange={(next) => patchField.mutate({ analystTags: next })}
+                    disabled={detailReadOnly || patchField.isPending}
+                    renderChip={(t) => (
+                      <Badge
+                        className="text-[10px] bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 border"
+                        data-testid={`badge-detail-analyst-tag-${t}`}
+                      >
+                        {t}
+                      </Badge>
+                    )}
+                    testIdPrefix="analyst-tags"
+                    listTestId="list-detail-analyst-tags"
+                  />
+                </div>
+
+                {/* Raw snippet */}
+                {data.rawSnippet && (
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1.5">
+                      Raw intel snippet
+                    </div>
+                    <div
+                      className="text-xs font-mono whitespace-pre-wrap bg-muted/40 border rounded p-3 max-h-[260px] overflow-y-auto"
+                      data-testid="text-detail-raw"
+                    >
+                      {data.rawSnippet}
+                    </div>
+                  </div>
+                )}
+
+                {/* v2.17 — Original source card MOVED to BOTTOM (analyst requested). */}
+                {data.url && (
+                  <Card className="p-3 border-primary/30 bg-primary/5" data-testid="card-detail-source">
+                    <div className="text-[10px] uppercase tracking-wide text-primary mb-2 flex items-center justify-between">
+                      <span>Original source</span>
                       <button
                         type="button"
-                        title={`Open Threat Actor Profile for ${a}`}
+                        className="text-[10px] text-muted-foreground hover:text-primary inline-flex items-center gap-1"
                         onClick={() => {
-                          (window as any).__pendingTapFocusName = a;
-                          window.location.hash = `#/threat-actors`;
-                          window.dispatchEvent(new Event("tap:focus"));
+                          navigator.clipboard
+                            ?.writeText(data.url!)
+                            .then(() => {
+                              toast({ title: "Link copied", description: data.url! });
+                            })
+                            .catch(() => {});
                         }}
-                        className="text-[10px] px-1 py-0.5 rounded border border-rose-500/30 text-rose-700 dark:text-rose-300 hover:bg-rose-500/15 leading-none"
-                        data-testid={`button-pivot-tap-${a.replace(/\s+/g, "-").toLowerCase()}`}
+                        data-testid="button-detail-copy-url"
                       >
-                        ↗ TAP
+                        <Copy size={10} /> copy link
                       </button>
-                    </span>
-                  )}
-                  testIdPrefix="actors"
-                />
-                <ChipFieldEditor
-                  label="Analyst tags"
-                  values={data.analystTags || []}
-                  placeholder="comma-separated, e.g. payment-fraud, watchlist"
-                  emptyLabel="no analyst tags yet"
-                  onChange={(next) => patchField.mutate({ analystTags: next })}
-                  disabled={detailReadOnly || patchField.isPending}
-                  renderChip={(t) => (
-                    <Badge className="text-[10px] bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 border" data-testid={`badge-detail-analyst-tag-${t}`}>
-                      {t}
-                    </Badge>
-                  )}
-                  testIdPrefix="analyst-tags"
-                  listTestId="list-detail-analyst-tags"
-                />
-              </div>
-
-              {/* Raw snippet */}
-              {data.rawSnippet && (
-                <div>
-                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1.5">Raw intel snippet</div>
-                  <div className="text-xs font-mono whitespace-pre-wrap bg-muted/40 border rounded p-3 max-h-[260px] overflow-y-auto" data-testid="text-detail-raw">
-                    {data.rawSnippet}
-                  </div>
-                </div>
-              )}
-
-              {/* v2.17 — Original source card MOVED to BOTTOM (analyst requested). */}
-              {data.url && (
-                <Card className="p-3 border-primary/30 bg-primary/5" data-testid="card-detail-source">
-                  <div className="text-[10px] uppercase tracking-wide text-primary mb-2 flex items-center justify-between">
-                    <span>Original source</span>
-                    <button
-                      type="button"
-                      className="text-[10px] text-muted-foreground hover:text-primary inline-flex items-center gap-1"
-                      onClick={() => {
-                        navigator.clipboard?.writeText(data.url!).then(() => {
-                          toast({ title: "Link copied", description: data.url! });
-                        }).catch(() => {});
-                      }}
-                      data-testid="button-detail-copy-url"
+                    </div>
+                    <a
+                      href={data.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block"
+                      data-testid="link-detail-source"
                     >
-                      <Copy size={10} /> copy link
-                    </button>
-                  </div>
-                  <a
-                    href={data.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="block"
-                    data-testid="link-detail-source"
-                  >
-                    <Button size="sm" className="w-full justify-start" data-testid="button-detail-open-source">
-                      <ExternalLink size={12} className="mr-1.5" /> Open source
-                    </Button>
-                  </a>
-                  <div className="mt-2 font-mono text-[10px] text-muted-foreground break-all leading-relaxed" data-testid="text-detail-source-url">
-                    {data.url}
-                  </div>
-                </Card>
-              )}
-            </div>
-          </>
-        )}
+                      <Button size="sm" className="w-full justify-start" data-testid="button-detail-open-source">
+                        <ExternalLink size={12} className="mr-1.5" /> Open source
+                      </Button>
+                    </a>
+                    <div
+                      className="mt-2 font-mono text-[10px] text-muted-foreground break-all leading-relaxed"
+                      data-testid="text-detail-source-url"
+                    >
+                      {data.url}
+                    </div>
+                  </Card>
+                )}
+              </div>
+            </>
+          )}
         </div>
       </SheetContent>
     </Sheet>
   );
 }
 
-// ---- Hunt-query dialog -----------------------------------------------------
-function HuntQueryDialog({
-  findingIds, languages, onClose, onCreated,
+// ---- Detection-rule generation dialog -------------------------------------
+function DetectionRuleGenerationDialog({
+  findingIds,
+  languages,
+  onClose,
+  onCreated,
 }: {
   findingIds: string[];
   languages: { id: string; label: string }[];
@@ -2345,8 +3526,6 @@ function HuntQueryDialog({
   const aiAvailability = useAiAvailability();
   const aiDisabled = !aiAvailability.hasUsableProvider;
   const [picked, setPicked] = useState<string[]>(["splunk", "kql_elk", "sigma"]);
-  const [activeLang, setActiveLang] = useState<string>("splunk");
-  const [generated, setGenerated] = useState<HuntQueryDTO | null>(null);
   const [title, setTitle] = useState("");
 
   function toggleLang(id: string) {
@@ -2354,37 +3533,37 @@ function HuntQueryDialog({
   }
 
   const create = useMutation({
-    mutationFn: async () => startBackgroundJob("/api/v1/osint/hunt-queries", {
-      findingIds, languages: picked, title: title || undefined,
-    }),
+    mutationFn: async () =>
+      startBackgroundJob("/api/v1/detection-rules/generate", {
+        findingIds,
+        languages: picked,
+        title: title || undefined,
+      }),
     onSuccess: (q: any) => {
-      setGenerated(null);
-      toast({ title: "Hunt query job queued", description: q.targetLabel ?? "The background jobs tray will show progress and completion." });
+      toast({
+        title: "Detection rule generation queued",
+        description: q.targetLabel ?? "The background jobs tray will show progress and completion.",
+      });
       onCreated();
     },
     onError: (e: any) => toast({ variant: "destructive", title: "Failed", description: String(e.message ?? e) }),
   });
 
-  const copyText = (txt: string) => {
-    navigator.clipboard?.writeText(txt).then(
-      () => toast({ title: "Copied to clipboard" }),
-      () => toast({ variant: "destructive", title: "Copy failed" }),
-    );
-  };
-
   return (
-    <DialogContent className="w-[min(1100px,94vw)] max-w-none max-h-[90vh] flex flex-col overflow-hidden">
+    <DialogContent className="w-[min(720px,94vw)] max-w-none max-h-[90vh] flex flex-col overflow-hidden">
       <DialogHeader className="shrink-0">
-        <DialogTitle className="text-base">Generate threat-hunt queries</DialogTitle>
+        <DialogTitle className="text-base">Generate detection rule</DialogTitle>
         <DialogDescription className="text-xs">
-          {findingIds.length} OSINT finding{findingIds.length === 1 ? "" : "s"} selected. AI generates a query per language for your SIEM/EDR.
+          {findingIds.length} OSINT finding{findingIds.length === 1 ? "" : "s"} selected. AI creates a draft rule with
+          Sigma and the selected platform queries in Detection Rules.
         </DialogDescription>
       </DialogHeader>
 
       <div className="min-h-0 flex-1 overflow-y-auto pr-1 space-y-3">
         <div>
           <Input
-            value={title} onChange={(e) => setTitle(e.target.value)}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
             placeholder="Optional title (defaults to top finding title)"
             data-testid="input-hunt-title"
           />
@@ -2396,10 +3575,14 @@ function HuntQueryDialog({
               const on = picked.includes(l.id);
               return (
                 <button
-                  key={l.id} type="button" onClick={() => toggleLang(l.id)}
+                  key={l.id}
+                  type="button"
+                  onClick={() => toggleLang(l.id)}
                   data-testid={`chip-lang-${l.id}`}
                   className={`px-2.5 py-1 rounded-full text-[11px] border ${
-                    on ? "bg-primary text-primary-foreground border-primary" : "bg-background hover:bg-muted border-border"
+                    on
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "bg-background hover:bg-muted border-border"
                   }`}
                 >
                   {l.label}
@@ -2409,169 +3592,36 @@ function HuntQueryDialog({
           </div>
         </div>
 
-        {generated && (
-          <Card className="p-2 min-w-0">
-            <Tabs value={activeLang} onValueChange={setActiveLang} className="min-w-0">
-              <TabsList className="flex flex-wrap h-auto gap-1 max-w-full" data-testid="tabs-hunt-langs">
-                {Object.keys(generated.queries).map((lid) => {
-                  const meta = languages.find((x) => x.id === lid);
-                  return (
-                    <TabsTrigger key={lid} value={lid} className="text-[10px] h-7 max-w-full" data-testid={`tab-lang-${lid}`}>
-                      {meta?.label ?? lid}
-                    </TabsTrigger>
-                  );
-                })}
-              </TabsList>
-              {Object.entries(generated.queries).map(([lid, txt]) => {
-                const arr: string[] = Array.isArray(txt) ? txt : [txt];
-                const joined = arr.join("\n\n");
-                return (
-                <TabsContent key={lid} value={lid} className="mt-2 space-y-2 min-w-0">
-                  {arr.length > 1 && (
-                    <div className="flex justify-between items-center gap-2">
-                      <div className="text-[10px] text-muted-foreground px-1">{arr.length} distinct queries</div>
-                      <Button size="sm" variant="outline" onClick={() => copyText(joined)} data-testid={`button-copy-all-${lid}`}>
-                        <Copy size={11} className="mr-1" /> Copy all
-                      </Button>
-                    </div>
-                  )}
-                  {arr.map((q, i) => (
-                    <div key={i} className="space-y-1">
-                      <div className="flex justify-between items-center gap-2">
-                        <div className="text-[10px] font-medium text-muted-foreground px-1">
-                          {arr.length > 1 ? `Query ${i + 1} of ${arr.length}` : "Query"}
-                        </div>
-                        <Button size="sm" variant="outline" onClick={() => copyText(q)} data-testid={`button-copy-${lid}-${i}`}>
-                          <Copy size={11} className="mr-1" /> Copy{arr.length > 1 ? ` ${i + 1}` : ""}
-                        </Button>
-                      </div>
-                      <pre className="text-[11px] font-mono p-3 bg-muted/30 border rounded max-h-[280px] max-w-full overflow-auto whitespace-pre-wrap break-words" data-testid={`pre-query-${lid}-${i}`}>
-                        {q}
-                      </pre>
-                    </div>
-                  ))}
-                </TabsContent>
-                );
-              })}
-            </Tabs>
-            <div className="text-[10px] text-muted-foreground mt-1.5 px-1">
-              Generated by {generated.aiProviderLabel ?? "AI"} · {Object.keys(generated.queries).length} languages · {Object.values(generated.queries).reduce((n, v) => n + (Array.isArray(v) ? v.length : 1), 0)} queries
-            </div>
-          </Card>
-        )}
+        <div className="rounded-md border border-border bg-muted/20 px-3 py-2.5 text-[11px] leading-5 text-muted-foreground">
+          The completed rule opens in Detection Rules, where analysts can review queries, record tuning notes, progress
+          lifecycle status, and track deployment.
+        </div>
       </div>
 
       <DialogFooter className="shrink-0 border-t pt-3">
-        <Button variant="ghost" onClick={onClose}>Close</Button>
+        <Button variant="ghost" onClick={onClose}>
+          Close
+        </Button>
         <Button
           onClick={() => create.mutate()}
           disabled={create.isPending || picked.length === 0 || findingIds.length === 0 || aiDisabled}
           title={aiAvailability.disabledReason}
-          data-testid="button-generate-hunt"
+          data-testid="button-generate-detection-rule"
         >
-          {create.isPending ? <><Loader2 size={14} className="mr-1.5 animate-spin" />Generating</> : <><Sparkles size={14} className="mr-1.5" />Generate</>}
+          {create.isPending ? (
+            <>
+              <Loader2 size={14} className="mr-1.5 animate-spin" />
+              Queuing
+            </>
+          ) : (
+            <>
+              <ShieldAlert size={14} className="mr-1.5" />
+              Generate rule
+            </>
+          )}
         </Button>
-        {generated && (
-          <Button variant="secondary" onClick={onCreated} data-testid="button-done-hunt">Done</Button>
-        )}
       </DialogFooter>
     </DialogContent>
-  );
-}
-
-// ---- Hunt queries tab -------------------------------------------------------
-function HuntQueriesTab() {
-  const { toast } = useToast();
-  const [focusedHuntId, setFocusedHuntId] = useState<string | null>(null);
-  const { data: tax } = useQuery<TaxonomiesResp>({ queryKey: ["/api/v1/taxonomies"] });
-  useEffect(() => {
-    const syncDeepLink = () => {
-      const raw = window.location.hash || "";
-      const qix = raw.indexOf("?");
-      if (qix < 0) return;
-      const qs = new URLSearchParams(raw.slice(qix + 1));
-      setFocusedHuntId(qs.get("hunt"));
-    };
-    syncDeepLink();
-    window.addEventListener("hashchange", syncDeepLink);
-    window.addEventListener("optrasight:ai-job-open", syncDeepLink as EventListener);
-    return () => {
-      window.removeEventListener("hashchange", syncDeepLink);
-      window.removeEventListener("optrasight:ai-job-open", syncDeepLink as EventListener);
-    };
-  }, []);
-
-  const { data: hq } = useQuery<HuntQueriesResp>({
-    queryKey: ["/api/v1/osint/hunt-queries"],
-  });
-  const huntQueries = hq?.queries || [];
-
-  const copy = (txt: string) =>
-    navigator.clipboard?.writeText(txt).then(
-      () => toast({ title: "Copied" }),
-      () => toast({ variant: "destructive", title: "Copy failed" }),
-    );
-
-  return (
-    <div className="space-y-4">
-      <section>
-        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
-          Hunting queries ({huntQueries.length})
-        </div>
-        {huntQueries.length === 0 ? (
-          <Card className="p-8 text-center text-sm text-muted-foreground">
-            No hunt queries yet. Select findings and click "Hunt query".
-          </Card>
-        ) : (
-          <div className="space-y-2">
-            {huntQueries.map((q) => {
-              const focused = focusedHuntId === q.id;
-              return (
-              <Card
-                key={q.id}
-                className={cn("p-3", focused && "border-primary/70 ring-2 ring-primary/20")}
-                data-testid={`card-hunt-${q.id}`}
-              >
-	                <div className="flex items-center gap-2 mb-1">
-	                  <Code2 size={12} className="text-primary" />
-	                  <span className="text-xs font-medium truncate">{q.title}</span>
-	                  <span className="text-[10px] text-muted-foreground ml-auto">{relativeTime(q.createdAt)}</span>
-                </div>
-                <div className="flex flex-wrap gap-1 mb-1.5">
-                  {Object.keys(q.queries).map((lid) => {
-                    const meta = tax?.huntLanguages.find((x) => x.id === lid);
-                    return (
-                      <Badge key={lid} variant="secondary" className="text-[10px]">{meta?.label ?? lid}</Badge>
-                    );
-                  })}
-                </div>
-                <details open={focused || undefined}>
-                  <summary className="text-[11px] cursor-pointer text-muted-foreground">Show {Object.keys(q.queries).length} queries</summary>
-                  <div className="mt-2 space-y-2">
-                    {Object.entries(q.queries).map(([lid, txt]) => {
-                      const meta = tax?.huntLanguages.find((x) => x.id === lid);
-                      return (
-                        <div key={lid}>
-                          <div className="flex items-center justify-between gap-2 mb-1">
-                            <span className="text-[10px] font-mono uppercase text-muted-foreground">{meta?.label ?? lid}</span>
-                            <Button size="sm" variant="outline" onClick={() => copy(txt)} data-testid={`button-copy-history-${q.id}-${lid}`}>
-                              <Copy size={11} className="mr-1" /> Copy
-                            </Button>
-                          </div>
-                          <pre className="text-[10px] font-mono p-2 bg-muted/30 border rounded whitespace-pre-wrap max-h-48 overflow-auto">
-                            {txt}
-                          </pre>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </details>
-              </Card>
-            );})}
-          </div>
-        )}
-      </section>
-    </div>
   );
 }
 
@@ -2588,7 +3638,11 @@ export default function OsintMonitoring() {
       }
       const qs = new URLSearchParams(raw.slice(qix + 1));
       const tab = qs.get("tab");
-      if (tab === "sources" || tab === "hunt-queries" || tab === "automation" || tab === "findings") {
+      if (tab === "hunt-queries" || tab === "hunt") {
+        window.location.hash = "/detection-rules";
+        return;
+      }
+      if (tab === "sources" || tab === "automation" || tab === "findings") {
         setActiveTab(tab);
       } else if (qs.get("finding")) {
         setActiveTab("findings");
@@ -2611,19 +3665,21 @@ export default function OsintMonitoring() {
         />
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
           <TabsList data-testid="tabs-osint">
-            <TabsTrigger value="findings" data-testid="tab-osint-findings">Findings</TabsTrigger>
-            <TabsTrigger value="sources" data-testid="tab-osint-sources">Sources</TabsTrigger>
-            <TabsTrigger value="hunt-queries" data-testid="tab-osint-hunt-queries">Hunting queries</TabsTrigger>
-            <TabsTrigger value="automation" data-testid="tab-osint-automation">Automation</TabsTrigger>
+            <TabsTrigger value="findings" data-testid="tab-osint-findings">
+              Findings
+            </TabsTrigger>
+            <TabsTrigger value="sources" data-testid="tab-osint-sources">
+              Sources
+            </TabsTrigger>
+            <TabsTrigger value="automation" data-testid="tab-osint-automation">
+              Automation
+            </TabsTrigger>
           </TabsList>
           <TabsContent value="findings" className="mt-0">
             <FindingsTab />
           </TabsContent>
           <TabsContent value="sources" className="mt-0">
             <SourcesTab />
-          </TabsContent>
-          <TabsContent value="hunt-queries" className="mt-0">
-            <HuntQueriesTab />
           </TabsContent>
           <TabsContent value="automation" className="mt-0">
             <OsintAutomationCard />

@@ -2,7 +2,6 @@ import { QueryClient, QueryFunction } from "@tanstack/react-query";
 import { STATIC_DEMO_MODE, staticDemoRequest } from "./staticDemoApi";
 
 const API_BASE = "__PORT_5000__".startsWith("__") ? "" : "__PORT_5000__";
-const API_PATH_RE = /^\/api\/v1\/[A-Za-z0-9/_:?.=&%+#@-]*$/;
 
 /** Resolve a server-rooted asset URL (e.g. "/portraits/<id>.png") to a URL
  *  that works both locally (relative) and after deployment (proxied through
@@ -21,6 +20,23 @@ export function resolveAssetUrl(path: string | null | undefined): string | null 
 // Auth context updates it via setAuthToken / setOnUnauthorized.
 let authToken: string | null = null;
 let onUnauthorized: (() => void) | null = null;
+
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+    readonly retryable = false,
+    readonly retryAfterSeconds?: number,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+export function isMfaChallengeError(error: unknown): boolean {
+  return error instanceof ApiError && error.code === "MFA_REQUIRED";
+}
 export function setAuthToken(t: string | null) {
   authToken = t;
 }
@@ -42,12 +58,28 @@ async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     if (res.status === 401 && onUnauthorized) onUnauthorized();
     const text = (await res.text()) || res.statusText;
-    throw new Error(`${res.status}: ${text}`);
+    try {
+      const body = JSON.parse(text) as {
+        detail?: string;
+        code?: string;
+        retryable?: boolean;
+        retryAfterSeconds?: number;
+      };
+      throw new ApiError(
+        body.detail || res.statusText,
+        res.status,
+        body.code,
+        body.retryable === true,
+        body.retryAfterSeconds,
+      );
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(text, res.status);
+    }
   }
 }
 
 export async function apiRequest(method: string, url: string, data?: unknown | undefined): Promise<Response> {
-  if (!API_PATH_RE.test(url)) throw new Error("Invalid API path");
   if (STATIC_DEMO_MODE) {
     const demo = staticDemoRequest(method, url, data);
     if (demo) {
@@ -56,8 +88,7 @@ export async function apiRequest(method: string, url: string, data?: unknown | u
     }
   }
 
-  const requestUrl = `${API_BASE}${url}`;
-  const res = await fetch(requestUrl, {
+  const res = await fetch(`${API_BASE}${url}`, {
     method,
     headers: authHeaders(data ? { "Content-Type": "application/json" } : {}),
     body: data ? JSON.stringify(data) : undefined,
@@ -72,7 +103,6 @@ export const getQueryFn: <T>(options: { on401: UnauthorizedBehavior }) => QueryF
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
     const path = queryKey.filter((s) => s !== undefined && s !== null && s !== "").join("/");
-    if (!API_PATH_RE.test(path)) throw new Error("Invalid API path");
     if (STATIC_DEMO_MODE) {
       const demo = staticDemoRequest("GET", path);
       if (demo) {
@@ -81,8 +111,7 @@ export const getQueryFn: <T>(options: { on401: UnauthorizedBehavior }) => QueryF
         return await demo.json();
       }
     }
-    const requestUrl = `${API_BASE}${path}`;
-    const res = await fetch(requestUrl, { headers: authHeaders() });
+    const res = await fetch(`${API_BASE}${path}`, { headers: authHeaders() });
 
     if (unauthorizedBehavior === "returnNull" && res.status === 401) return null;
     if (res.status === 401 && onUnauthorized) onUnauthorized();

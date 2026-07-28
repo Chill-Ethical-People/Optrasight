@@ -70,7 +70,7 @@ async function prefetchIfCold<T>(
   onData?: (data: T) => void,
 ) {
   if (hasFreshCache(queryKey)) return;
-  const data = await queryClient.prefetchQuery({
+  const data = await queryClient.fetchQuery({
     queryKey,
     queryFn,
     staleTime: WARM_STALE_MS,

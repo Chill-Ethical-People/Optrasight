@@ -48,6 +48,7 @@ export interface OsintSourceSeed {
   language?: string;
   region?: string | null;
   reliability?: "A" | "B" | "C";
+  enabled?: boolean;
 }
 
 export const REMOVED_OSINT_SOURCE_IDS = [
@@ -58,9 +59,6 @@ export const REMOVED_OSINT_SOURCE_IDS = [
   "osrc-0280", // Mandiant FeedBurner URL: current feed returned zero parsed items in BatchOne ingest.
   "osrc-0315", // Sophos category feed: current URL returned zero parsed items in BatchOne ingest.
   "osrc-0338", // Troy Hunt personal RSS: current feed returned zero parsed BatchOne intel items.
-  "osrc-1040", // MalwareBazaar API: auth-gated, not a public BatchOne feed.
-  "osrc-1041", // ThreatFox API: auth-gated, not a public BatchOne feed.
-  "osrc-1042", // URLhaus API: auth-gated, not a public BatchOne feed.
   "osrc-1043", // Feodo text blocklist: not handled by the BatchOne source parser.
   "osrc-1048", // DShield top-IP JSON: not handled by the BatchOne source parser.
   "osrc-1049", // Spamhaus DROP text list: not handled by the BatchOne source parser.
@@ -159,8 +157,11 @@ export const OSINT_SOURCES: OsintSourceSeed[] = ([
   { id: "osrc-0345", category: "SECURITY_NEWS", name: "The Citizen Lab", url: "https://citizenlab.ca/feed/", reliability: "B" },
   { id: "osrc-0347", category: "SECURITY_NEWS", name: "EFF Deeplinks", url: "https://www.eff.org/rss/updates.xml", reliability: "B" },
 
-  // ============== 5. Threat Intelligence Feeds (12) ==============
+  // ============== 5. Threat Intelligence Feeds (13) ==============
   // abuse.ch ecosystem — requires free ABUSECH_AUTH_KEY env var
+  { id: "osrc-1040", category: "THREAT_INTEL", name: "abuse.ch — MalwareBazaar", url: "https://bazaar.abuse.ch/", reliability: "A", enabled: false },
+  { id: "osrc-1041", category: "THREAT_INTEL", name: "abuse.ch — ThreatFox", url: "https://threatfox.abuse.ch/", reliability: "A", enabled: false },
+  { id: "osrc-1042", category: "THREAT_INTEL", name: "abuse.ch — URLhaus", url: "https://urlhaus.abuse.ch/", reliability: "A", enabled: false },
   { id: "osrc-1043", category: "THREAT_INTEL", name: "abuse.ch — Feodo Tracker C2 IPs", url: "https://feodotracker.abuse.ch/downloads/ipblocklist_recommended.txt", reliability: "A" },
   // IP reputation / blocklists — no auth required
   { id: "osrc-1048", category: "THREAT_INTEL", name: "DShield — SANS Top Attackers", url: "https://isc.sans.edu/api/topips/records/100?json", reliability: "A" },
@@ -173,9 +174,13 @@ export const OSINT_SOURCES: OsintSourceSeed[] = ([
   { id: "osrc-1057", category: "THREAT_INTEL", name: "C2IntelFeeds — Active C2 Servers", url: "https://raw.githubusercontent.com/drb-ra/C2IntelFeeds/master/feeds/IPC2s-30day.csv", reliability: "B" },
   // MITRE ATT&CK blog (RSS — handled by RICH_RSS in fetcher)
   { id: "osrc-1056", category: "THREAT_INTEL", name: "MITRE ATT&CK — Updates Blog", url: "https://medium.com/feed/mitre-attack", reliability: "A" },
+  { id: "osrc-1058", category: "THREAT_INTEL", name: "KELA — Technical Intelligence STIX", url: "https://www.kelacyber.com/technical-intelligence/", reliability: "B", enabled: false },
+  { id: "osrc-1062", category: "THREAT_INTEL", name: "TAXII 2.1 — configured collection", url: "https://www.oasis-open.org/standard/taxii2-1/", reliability: "B", enabled: false },
+  { id: "osrc-1063", category: "THREAT_INTEL", name: "MISP — configured community", url: "https://www.misp-project.org/", reliability: "B", enabled: false },
 
-  // ============== 6. Ransomware & Data-Leak Feeds (3) ==============
+  // ============== 6. Ransomware & Data-Leak Feeds (4) ==============
   { id: "osrc-0258", category: "RANSOMWARE_LEAK", name: "Ransomware.live — feed", url: "https://api.ransomware.live/v2/recentvictims", reliability: "B" },
   { id: "osrc-0260", category: "RANSOMWARE_LEAK", name: "DarkFeed — aggregated CTI", url: "https://darkfeed.io/feed/", reliability: "B" },
   { id: "osrc-0261", category: "RANSOMWARE_LEAK", name: "DataBreaches.net", url: "http://feeds.feedburner.com/OfficeOfInadequateSecurity", reliability: "B" },
+  { id: "osrc-1050", category: "RANSOMWARE_LEAK", name: "FalconFeeds.io — X ransomware alerts", url: "https://x.com/FalconFeedsio", reliability: "B", enabled: false },
 ] as OsintSourceSeed[]).filter((source) => !REMOVED_OSINT_SOURCE_ID_SET.has(source.id));

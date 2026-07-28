@@ -1,4 +1,6 @@
 node_modules/
+node_modules.*/
+.pnpm-store/
 dist/
 .vite/
 
@@ -11,6 +13,7 @@ data*.db
 data*.db-shm
 data*.db-wal
 data*.db-journal
+data.db.*
 *.db.backup*
 
 # Portrait uploads + any other runtime data
@@ -41,6 +44,8 @@ data/public/*.db-journal
 .eslintcache
 *.tsbuildinfo
 coverage/
+.tmp-*
+deliverables/
 
 # Test / browser-automation output
 playwright-report/

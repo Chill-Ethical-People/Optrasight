@@ -11,7 +11,7 @@ export const STATIC_DEMO_USER = {
   id: "demo-admin",
   email: "admin@cep.com",
   role: "admin",
-  tenant: { id: "batchone", name: "BatchOne", slug: "batchone", plan: "public-demo" },
+  tenant: { id: "batchone", name: "BatchOne", slug: "batchone", plan: "public-demo", operatingMode: "mss" as const },
   passwordMustChange: false,
   mfaEnabled: true,
   mfaVerifiedAt: iso(-24),
@@ -336,8 +336,8 @@ function attackName(id: string) {
 }
 
 const providers = [
-  provider("provider-deepseek", "deepseek", "DeepSeek", "deepseek-chat", true),
-  provider("provider-gemini", "gemini", "Google Gemini", "gemini-flash-latest", false),
+  provider("provider-deepseek", "deepseek", "DeepSeek", "deepseek-v4-flash", true),
+  provider("provider-gemini", "gemini", "Google Gemini", "gemini-3.6-flash", false),
   provider("provider-openai", "openai", "OpenAI", "gpt-4.1-mini", false),
 ];
 
@@ -726,11 +726,11 @@ const aiJobs = [
   ),
   job(
     "job-hunt-001",
-    "hunt_query_generation",
+    "detection_rule_generation",
     "completed",
     100,
-    "Hunt query - DFIR EtherRAT to The Gentlemen ransomware",
-    "#/osint?tab=hunt&hunt=hq-006",
+    "Detection rule - DFIR EtherRAT to The Gentlemen ransomware",
+    "#/detection-rules",
     -3,
   ),
   job(
@@ -952,6 +952,81 @@ function fullJob(id: string) {
     "",
     `Recommended deep-dive candidate: select "${dfirFinding.title}" and generate the multi-platform hunt query pack after review.`,
   ].join("\n");
+  const _deepHtml = [
+    "<!doctype html>",
+    '<html><head><meta charset="utf-8"><title>OptraSight CIRT deep-dive - EtherRAT/TukTuk to The Gentlemen ransomware</title>',
+    "<style>",
+    ":root{color-scheme:light;--ink:#101124;--muted:#5f617b;--line:#dfe3f1;--brand:#4f46e5;--signal:#22d3ee;--panel:#fff;--soft:#f6f7fd;--danger:#e11d48;--warn:#f97316;--ok:#059669}",
+    "body{margin:0;background:#f8fafc;color:var(--ink);font:14px/1.55 Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}",
+    ".wrap{max-width:1180px;margin:0 auto;padding:28px}",
+    ".hero{border:1px solid var(--line);border-left:5px solid var(--brand);background:var(--panel);border-radius:16px;padding:22px 24px;box-shadow:0 14px 36px rgba(15,23,42,.08)}",
+    ".eyebrow{color:var(--brand);font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}",
+    "h1{font-size:30px;line-height:1.15;margin:8px 0 10px}h2{font-size:20px;margin:0 0 10px}h3{font-size:15px;margin:0 0 8px}.muted{color:var(--muted)}",
+    ".grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:18px}.metric{border:1px solid var(--line);border-radius:12px;background:var(--soft);padding:12px}.metric b{display:block;font-size:18px}.metric span{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}",
+    ".section{margin-top:18px;border:1px solid var(--line);border-radius:16px;background:var(--panel);padding:18px 20px}.callout{border:1px solid #c7d2fe;border-left:4px solid var(--signal);border-radius:12px;background:#f7f7ff;padding:12px 14px}",
+    "table{width:100%;border-collapse:separate;border-spacing:0;margin-top:10px;border:1px solid var(--line);border-radius:12px;overflow:hidden}th,td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}th{background:#f1f5f9;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}tr:last-child td{border-bottom:0}",
+    ".pill{display:inline-block;border-radius:999px;padding:3px 8px;font-size:11px;font-weight:800;border:1px solid transparent}.critical{background:#ffe4e6;color:#9f1239;border-color:#fecdd3}.high{background:#ffedd5;color:#9a3412;border-color:#fed7aa}.amber{background:#fef3c7;color:#92400e;border-color:#fde68a}.info{background:#e0f2fe;color:#075985;border-color:#bae6fd}.ok{background:#dcfce7;color:#166534;border-color:#bbf7d0}",
+    "ol,ul{padding-left:20px}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,'Liberation Mono',monospace}.sources li{margin-bottom:6px}",
+    "@media(max-width:900px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.wrap{padding:16px}}",
+    '</style></head><body><main class="wrap">',
+    '<section class="hero">',
+    '<div class="eyebrow">CIRT Deep Dive</div>',
+    "<h1>EtherRAT/TukTuk C2 leading to The Gentlemen ransomware</h1>",
+    '<p class="muted">Static demo AI result based on the provided DFIR Report source. The report is English-only and mirrors the BatchOne deep-dive structure: source context, evidence chain, ATT&CK mapping, hunt signals, and analyst action.</p>',
+    '<div class="grid">',
+    '<div class="metric"><span>Priority</span><b>Tier 1</b><small>Active intrusion chain</small></div>',
+    '<div class="metric"><span>Severity</span><b>Critical</b><small>C2, credential theft, exfiltration, ransomware</small></div>',
+    '<div class="metric"><span>TLP</span><b>Amber</b><small>Defensive use</small></div>',
+    '<div class="metric"><span>Source</span><b>The DFIR Report</b><small>May 11, 2026 flash alert</small></div>',
+    "</div>",
+    "</section>",
+    '<section class="section"><h2>Executive assessment</h2>',
+    '<div class="callout"><strong>Bottom line:</strong> This finding should be handled as a high-confidence ransomware intrusion chain. The valuable signal is the sequence: initial execution, EtherRAT/TukTuk command and control, remote access, Active Directory credential access, rclone-to-Wasabi exfiltration, and impact preparation.</div>',
+    "<p>The DFIR source describes a traceable operator path that gives defenders multiple detection points before encryption. BatchOne should convert this item into a focused hunt pack and use the result to enrich TAP tradecraft for ransomware-as-a-service activity.</p>",
+    "</section>",
+    '<section class="section"><h2>Observed intrusion chain</h2>',
+    "<table><thead><tr><th>Phase</th><th>Observed behavior</th><th>Primary evidence to review</th><th>Priority</th></tr></thead><tbody>",
+    '<tr><td>Initial execution</td><td>Installer and user-execution style activity consistent with operator foothold preparation.</td><td>Process creation, MSI execution, parent-child command lines, signed binary abuse, first-seen host artifacts.</td><td><span class="pill high">High</span></td></tr>',
+    '<tr><td>C2 relay</td><td>EtherRAT and TukTuk C2 activity with relay or staging infrastructure.</td><td>DNS and proxy logs for TryCloudflare-style relay use, 1rpc.io references, unusual outbound beacon patterns, newly observed domains.</td><td><span class="pill critical">Critical</span></td></tr>',
+    '<tr><td>Remote access</td><td>Interactive remote-support tooling appears in the operator workflow.</td><td>GoTo Resolve or comparable remote-access installation, service creation, user logon pairing, process ancestry.</td><td><span class="pill high">High</span></td></tr>',
+    '<tr><td>Credential access</td><td>Active Directory and endpoint credential-theft behavior appears before exfiltration and impact.</td><td>NetExec/NXC, Mimikatz, LSASS access, NTDS access, Kerberoasting indicators, unusual LDAP enumeration.</td><td><span class="pill critical">Critical</span></td></tr>',
+    '<tr><td>Collection and exfiltration</td><td>Data staging and transfer align with rclone movement to cloud object storage.</td><td>Rclone command lines, Wasabi endpoints, large outbound transfers, archive creation, staging directory growth.</td><td><span class="pill critical">Critical</span></td></tr>',
+    '<tr><td>Impact preparation</td><td>Defender tampering, shadow copy deletion, log clearing, and ransomware deployment readiness.</td><td>Security tool disablement, vssadmin/wmic shadow-copy deletion, wevtutil clearing, GPO/script fan-out.</td><td><span class="pill critical">Critical</span></td></tr>',
+    "</tbody></table></section>",
+    '<section class="section"><h2>ATT&CK mapping and hunt anchors</h2>',
+    "<table><thead><tr><th>Technique</th><th>Why it matters</th><th>Example hunt anchor</th></tr></thead><tbody>",
+    '<tr><td class="mono">T1059 Command and Scripting Interpreter</td><td>Operators rely on shell execution to stage tooling and run follow-on commands.</td><td>Suspicious PowerShell, cmd, or script hosts spawned by installer, browser, archive, or remote-support parents.</td></tr>',
+    '<tr><td class="mono">T1219 Remote Access Software</td><td>Remote-support tooling can create interactive operator access under a legitimate product name.</td><td>First-seen remote-access binaries paired with uncommon users, new services, or outbound management sessions.</td></tr>',
+    '<tr><td class="mono">T1003 OS Credential Dumping</td><td>Credential theft expands blast radius and supports lateral movement.</td><td>LSASS handle access, credential-dumping tools, NTDS extraction, and suspicious privilege escalation before encryption.</td></tr>',
+    '<tr><td class="mono">T1558 Steal or Forge Kerberos Tickets</td><td>Kerberos abuse can reveal AD compromise and service-account targeting.</td><td>Kerberoasting patterns, high-volume TGS requests, unusual SPN access, and tool strings linked to NetExec/NXC.</td></tr>',
+    '<tr><td class="mono">T1074 Data Staged</td><td>Ransomware operators usually collect and compress data before exfiltration.</td><td>New archive creation, large staging folders, sensitive file discovery, and compression utilities run from admin contexts.</td></tr>',
+    '<tr><td class="mono">T1041 Exfiltration Over C2 Channel</td><td>Cloud or relay-based exfiltration can blend into normal HTTPS egress.</td><td>Rclone execution, Wasabi destinations, high-byte transfers, and unusual cloud-storage paths from servers.</td></tr>',
+    '<tr><td class="mono">T1486 Data Encrypted for Impact</td><td>Impact preparation marks the final window before business disruption.</td><td>Shadow-copy deletion, event-log clearing, security product tampering, and script/GPO fan-out.</td></tr>',
+    "</tbody></table></section>",
+    '<section class="section"><h2>Indicators and trace terms</h2>',
+    "<table><thead><tr><th>Category</th><th>Trace terms</th><th>Use</th></tr></thead><tbody>",
+    '<tr><td>C2 and relay</td><td class="mono">EtherRAT, TukTuk, TryCloudflare, 1rpc.io</td><td>Search DNS, proxy, EDR network events, and URL telemetry.</td></tr>',
+    '<tr><td>Remote access</td><td class="mono">GoTo Resolve, remote-support install paths, new services</td><td>Pair process and logon telemetry to confirm interactive operator activity.</td></tr>',
+    '<tr><td>Credential access</td><td class="mono">NetExec, NXC, Mimikatz, lsass, ntds.dit, Kerberoast</td><td>Review endpoint alerts, command-line logs, and domain-controller security events.</td></tr>',
+    '<tr><td>Exfiltration</td><td class="mono">rclone, Wasabi, archive staging, high outbound bytes</td><td>Correlate process execution with proxy/firewall byte counts and cloud-storage domains.</td></tr>',
+    '<tr><td>Impact</td><td class="mono">vssadmin delete shadows, wmic shadowcopy delete, wevtutil cl</td><td>Escalate immediately if seen near C2, credential, or exfiltration evidence.</td></tr>',
+    "</tbody></table></section>",
+    '<section class="section"><h2>Recommended analyst actions</h2>',
+    "<ol>",
+    "<li><strong>Containment check:</strong> Query the last 14 days for EtherRAT/TukTuk terms, relay infrastructure, remote-support installations, credential tooling, and rclone-to-Wasabi transfer paths.</li>",
+    "<li><strong>Identity review:</strong> Inspect domain-controller events for abnormal Kerberos requests, service-account targeting, and privileged logons from hosts with new remote-access tools.</li>",
+    "<li><strong>Endpoint review:</strong> Prioritize servers or user workstations showing both command execution and outbound relay/cloud-storage traffic.</li>",
+    "<li><strong>Network review:</strong> Correlate DNS, proxy, and firewall telemetry for first-seen destinations, high-byte HTTPS transfers, and suspicious cloud-tunnel patterns.</li>",
+    "<li><strong>Detection engineering:</strong> Generate and validate the DFIR EtherRAT-to-The-Gentlemen hunt pack across Splunk, Microsoft KQL, Sigma, Chronicle, Cortex XDR, CrowdStrike, SentinelOne, and Defender.</li>",
+    "</ol></section>",
+    '<section class="section"><h2>Aggregated source context</h2>',
+    '<ul class="sources">',
+    '<li><strong>The DFIR Report:</strong> primary incident-chain source for EtherRAT/TukTuk C2 and The Gentlemen ransomware. Reference: <span class="mono">https://thedfirreport.com/2026/05/11/flash-alert-etherrat-and-tuktuk-c2-end-in-the-gentleman-ransomware/</span></li>',
+    "<li><strong>BatchOne OSINT queue:</strong> related ransomware, remote-support abuse, supply-chain compromise, infostealer, and public-facing RCE items provide adjacent hunts but do not supersede the DFIR report as the deep-dive anchor.</li>",
+    "<li><strong>Advertisement-class items:</strong> remain filtered from the review queue unless linked to concrete indicators, exploited technology, or verified actor tradecraft.</li>",
+    "</ul></section>",
+    "</main></body></html>",
+  ].join("");
   const platformDeepHtml = `<!doctype html>
 <html lang="en">
 <head>
@@ -1091,8 +1166,30 @@ wevtutil cl</pre>
               "High-priority deep-dive candidate because the DFIR source links EtherRAT/TukTuk C2, credential access, staged exfiltration, and The Gentlemen ransomware impact in one timeline.",
             detailedAnalysis:
               "The activity is actionable because it gives defenders multiple telemetry pivots before encryption: suspicious installer or user-execution behavior, EtherRAT/TukTuk C2, relay infrastructure, remote-support tooling, credential-access utilities, and cloud-storage exfiltration. The strongest signal is not a single IoC; it is the ordered sequence across endpoint, identity, network, and storage logs. Prioritize timelines where remote access, credential access, rclone transfer, and impact-preparation commands converge.",
-            mitreTtps: ["T1059 — Command and Scripting Interpreter", "T1219 — Remote Access Software", "T1003 — OS Credential Dumping", "T1558 — Steal or Forge Kerberos Tickets", "T1074 — Data Staged", "T1041 — Exfiltration Over C2 Channel", "T1486 — Data Encrypted for Impact"],
-            iocs: ["EtherRAT", "TukTuk", "TryCloudflare", "1rpc.io", "GoTo Resolve", "NetExec / NXC", "Mimikatz", "ntds.dit", "rclone", "Wasabi", "vssadmin delete shadows", "wmic shadowcopy delete", "wevtutil cl"],
+            mitreTtps: [
+              "T1059 — Command and Scripting Interpreter",
+              "T1219 — Remote Access Software",
+              "T1003 — OS Credential Dumping",
+              "T1558 — Steal or Forge Kerberos Tickets",
+              "T1074 — Data Staged",
+              "T1041 — Exfiltration Over C2 Channel",
+              "T1486 — Data Encrypted for Impact",
+            ],
+            iocs: [
+              "EtherRAT",
+              "TukTuk",
+              "TryCloudflare",
+              "1rpc.io",
+              "GoTo Resolve",
+              "NetExec / NXC",
+              "Mimikatz",
+              "ntds.dit",
+              "rclone",
+              "Wasabi",
+              "vssadmin delete shadows",
+              "wmic shadowcopy delete",
+              "wevtutil cl",
+            ],
             detectionActions: [
               "Search the last 14 days for EtherRAT, TukTuk, TryCloudflare, 1rpc.io, remote-support installs, and first-seen relay destinations.",
               "Correlate remote-access process ancestry with unusual logons, new services, and administrative command execution.",
@@ -1137,6 +1234,23 @@ export function staticDemoRequest(method: string, url: string, data?: unknown): 
   if (path === "/api/v1/me") return json(STATIC_DEMO_USER);
   if (path === "/api/v1/auth/login") return json({ access_token: "static-demo-token" });
   if (path === "/api/v1/auth/logout") return json({ ok: true });
+
+  if (path === "/api/v1/email-delivery/settings") {
+    if (method.toUpperCase() !== "GET")
+      return json({ detail: "Email delivery settings are read-only in the public preview." }, 403);
+    return json({
+      enabled: false,
+      host: "",
+      port: 587,
+      secure: false,
+      username: "",
+      fromName: "OptraSight Threat Intelligence",
+      fromAddress: "",
+      replyTo: "",
+      hasPassword: false,
+      configured: false,
+    });
+  }
 
   if (path === "/api/v1/taxonomies") {
     return json({
@@ -1229,7 +1343,10 @@ export function staticDemoRequest(method: string, url: string, data?: unknown): 
       targetLabel: created.targetLabel,
     });
   }
-  if (path === "/api/v1/osint/hunt-queries" && method.toUpperCase() === "POST") {
+  if (
+    (path === "/api/v1/detection-rules/generate" || path === "/api/v1/osint/hunt-queries") &&
+    method.toUpperCase() === "POST"
+  ) {
     const body = (data ?? {}) as { findingIds?: string[]; languages?: string[]; title?: string };
     const findingIds = Array.isArray(body.findingIds) && body.findingIds.length > 0 ? body.findingIds : ["f-011"];
     const selected =
@@ -1270,11 +1387,11 @@ export function staticDemoRequest(method: string, url: string, data?: unknown): 
     const jobId = `job-hunt-${Date.now()}`;
     const created = job(
       jobId,
-      "hunt_query_generation",
+      "detection_rule_generation",
       "completed",
       100,
-      `Hunt query - ${generated.title}`,
-      `#/osint?tab=hunt&hunt=${generatedId}`,
+      `Detection rule - ${generated.title}`,
+      "#/detection-rules",
       -0.01,
     );
     aiJobs.unshift(created);
@@ -1283,7 +1400,7 @@ export function staticDemoRequest(method: string, url: string, data?: unknown): 
       id: generatedId,
       query: generated,
       status: "queued",
-      kind: "hunt_query_generation",
+      kind: "detection_rule_generation",
       targetUrl: created.targetUrl,
       targetLabel: created.targetLabel,
     });
@@ -1295,8 +1412,6 @@ export function staticDemoRequest(method: string, url: string, data?: unknown): 
       statuses: ["new", "triaged", "assessed", "dismissed"],
       tags: ["hunt-candidate", "actor-linked", "watch"],
     });
-  if (path === "/api/v1/osint/scan")
-    return json({ count: 0, mode: "static_demo", feedsOk: sources.length, feedsTried: sources.length });
   if (path === "/api/v1/exchange/stix/preview")
     return json({ bundle: { type: "bundle", id: "bundle--static-demo", objects: [] }, objects: [] });
   if (path === "/api/v1/osint/ai-jobs/history")
