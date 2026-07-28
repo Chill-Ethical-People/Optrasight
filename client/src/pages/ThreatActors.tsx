@@ -2849,9 +2849,9 @@ function EText({
         placeholder={placeholder}
         onChange={(e) => {
           const raw = e.target.value;
-          let next: any = raw;
-          if (type === "number") next = raw.trim() === "" ? null : Number(raw);
-          else next = raw === "" ? null : raw;
+          const next = type === "number"
+            ? raw.trim() === "" ? null : Number(raw)
+            : raw === "" ? null : raw;
           ctx.set({ [k]: next } as EditDraft);
         }}
         data-testid={`edit-${String(k)}`}
@@ -3910,11 +3910,11 @@ function CoverageBadge({ coverage }: { coverage?: TtpCoverage }) {
 
 function DiamondTab({ a }: { a: ThreatActorFullDTO }) {
   const { editMode } = useEditCtx();
-  const cells: Array<{ title: string; icon: React.ReactNode; k: keyof ThreatActorFullDTO; data: any }> = [
-    { title: "Adversary", icon: <Skull size={14} className="text-red-500" />, k: "diamondAdversary", data: a.diamondAdversary },
-    { title: "Capability", icon: <Sparkles size={14} className="text-amber-500" />, k: "diamondCapability", data: a.diamondCapability },
-    { title: "Infrastructure", icon: <Network size={14} className="text-blue-500" />, k: "diamondInfrastructure", data: a.diamondInfrastructure },
-    { title: "Victim", icon: <Target size={14} className="text-emerald-500" />, k: "diamondVictim", data: a.diamondVictim },
+  const cells: Array<{ title: string; icon: React.ReactNode; k: keyof ThreatActorFullDTO }> = [
+    { title: "Adversary", icon: <Skull size={14} className="text-red-500" />, k: "diamondAdversary" },
+    { title: "Capability", icon: <Sparkles size={14} className="text-amber-500" />, k: "diamondCapability" },
+    { title: "Infrastructure", icon: <Network size={14} className="text-blue-500" />, k: "diamondInfrastructure" },
+    { title: "Victim", icon: <Target size={14} className="text-emerald-500" />, k: "diamondVictim" },
   ];
   if (!editMode) {
     return (
@@ -3998,24 +3998,20 @@ function DiamondTab({ a }: { a: ThreatActorFullDTO }) {
       {cells.map((c) => (
         <Card key={c.title} className="p-4">
           <div className="text-sm font-semibold mb-2 inline-flex items-center gap-1.5">{c.icon}{c.title}</div>
-          {editMode
-            ? <EJson a={a} k={c.k} emptyText="—" />
-            : <div className="text-xs whitespace-pre-wrap">{renderAny(c.data)}</div>}
+          <EJson a={a} k={c.k} emptyText="—" />
         </Card>
       ))}
-      <Card className={cn("p-4 md:col-span-2", !editMode && Object.keys(a.diamondMeta ?? {}).length === 0 && "hidden")}>
+      <Card className="p-4 md:col-span-2">
         <div className="text-sm font-semibold mb-2">Meta-features</div>
-        {editMode ? (
-          <div className="space-y-3">
-            <div className="grid gap-3 md:grid-cols-4">
-              <EObjectValue a={a} k="diamondMeta" field="confidence" label="Confidence" kind="select" options={WEP_CONFIDENCE} />
-              <EObjectValue a={a} k="diamondMeta" field="rank" label="Rank" kind="select" options={["Priority", "Elevated", "Monitor", "Low", "Unknown"]} />
-              <EObjectValue a={a} k="diamondMeta" field="cutoff" label="Cutoff" kind="datetime" />
-              <EObjectValue a={a} k="diamondMeta" field="sourceCount" label="Source count" kind="number" />
-            </div>
-            <EJson a={a} k="diamondMeta" label="Advanced JSON" emptyText="—" buttonOnly />
+        <div className="space-y-3">
+          <div className="grid gap-3 md:grid-cols-4">
+            <EObjectValue a={a} k="diamondMeta" field="confidence" label="Confidence" kind="select" options={WEP_CONFIDENCE} />
+            <EObjectValue a={a} k="diamondMeta" field="rank" label="Rank" kind="select" options={["Priority", "Elevated", "Monitor", "Low", "Unknown"]} />
+            <EObjectValue a={a} k="diamondMeta" field="cutoff" label="Cutoff" kind="datetime" />
+            <EObjectValue a={a} k="diamondMeta" field="sourceCount" label="Source count" kind="number" />
           </div>
-        ) : <div className="text-xs whitespace-pre-wrap">{renderAny(a.diamondMeta)}</div>}
+          <EJson a={a} k="diamondMeta" label="Advanced JSON" emptyText="—" buttonOnly />
+        </div>
       </Card>
     </div>
   );
@@ -4651,7 +4647,7 @@ function buildStix(a: ThreatActorFullDTO) {
 }
 
 function stixPatternFor(i: ThreatActorIocDTO): string {
-  const v = i.value.replace(/'/g, "\\'");
+  const v = i.value.replaceAll("\\", "\\\\").replaceAll("'", "\\'");
   switch (i.iocType) {
     case "ipv4":   return `[ipv4-addr:value = '${v}']`;
     case "ipv6":   return `[ipv6-addr:value = '${v}']`;

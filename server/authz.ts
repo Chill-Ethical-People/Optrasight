@@ -19,11 +19,10 @@ export interface AuthedRequest extends Request {
 }
 
 export function requireAuth(req: AuthedRequest, res: Response, next: NextFunction) {
-  const auth = req.header("authorization") || "";
-  const m = /^Bearer\s+(.+)$/i.exec(auth);
-  if (!m) return res.status(401).json({ detail: "missing bearer token" });
+  const token = bearerToken(req.header("authorization"));
+  if (!token) return res.status(401).json({ detail: "missing bearer token" });
 
-  const u = storage.getUser(m[1]);
+  const u = storage.getUser(token);
   if (!u) return res.status(401).json({ detail: "invalid token" });
 
   req.accessMode = u.accessMode ?? "credentialed";
@@ -49,6 +48,13 @@ export function requireAuth(req: AuthedRequest, res: Response, next: NextFunctio
   req.effectiveTenantId = u.tenantId;
 
   next();
+}
+
+function bearerToken(authHeader: string | undefined): string | null {
+  const value = (authHeader ?? "").trim();
+  if (!value.toLowerCase().startsWith("bearer ")) return null;
+  const token = value.slice(7).trim();
+  return token.length > 0 ? token : null;
 }
 
 export function authPayload(u: User & { accessToken: string; accessMode: AccessMode }) {

@@ -2,6 +2,7 @@ import { QueryClient, QueryFunction } from "@tanstack/react-query";
 import { STATIC_DEMO_MODE, staticDemoRequest } from "./staticDemoApi";
 
 const API_BASE = "__PORT_5000__".startsWith("__") ? "" : "__PORT_5000__";
+const API_PATH_RE = /^\/api\/v1\/[A-Za-z0-9/_:?.=&%+#@-]*$/;
 
 /** Resolve a server-rooted asset URL (e.g. "/portraits/<id>.png") to a URL
  *  that works both locally (relative) and after deployment (proxied through
@@ -80,6 +81,7 @@ async function throwIfResNotOk(res: Response) {
 }
 
 export async function apiRequest(method: string, url: string, data?: unknown | undefined): Promise<Response> {
+  if (!API_PATH_RE.test(url)) throw new Error("Invalid API path");
   if (STATIC_DEMO_MODE) {
     const demo = staticDemoRequest(method, url, data);
     if (demo) {
@@ -88,7 +90,8 @@ export async function apiRequest(method: string, url: string, data?: unknown | u
     }
   }
 
-  const res = await fetch(`${API_BASE}${url}`, {
+  const requestUrl = `${API_BASE}${url}`;
+  const res = await fetch(requestUrl, {
     method,
     headers: authHeaders(data ? { "Content-Type": "application/json" } : {}),
     body: data ? JSON.stringify(data) : undefined,
@@ -103,6 +106,7 @@ export const getQueryFn: <T>(options: { on401: UnauthorizedBehavior }) => QueryF
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
     const path = queryKey.filter((s) => s !== undefined && s !== null && s !== "").join("/");
+    if (!API_PATH_RE.test(path)) throw new Error("Invalid API path");
     if (STATIC_DEMO_MODE) {
       const demo = staticDemoRequest("GET", path);
       if (demo) {
@@ -111,7 +115,8 @@ export const getQueryFn: <T>(options: { on401: UnauthorizedBehavior }) => QueryF
         return await demo.json();
       }
     }
-    const res = await fetch(`${API_BASE}${path}`, { headers: authHeaders() });
+    const requestUrl = `${API_BASE}${path}`;
+    const res = await fetch(requestUrl, { headers: authHeaders() });
 
     if (unauthorizedBehavior === "returnNull" && res.status === 401) return null;
     if (res.status === 401 && onUnauthorized) onUnauthorized();

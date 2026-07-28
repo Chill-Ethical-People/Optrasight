@@ -279,7 +279,7 @@ export interface YoungDomainAiOutput {
 function _youngDomainMock(input: YoungDomainAiInput, provider: AiProvider): YoungDomainAiOutput {
   const seed = djb2(`${provider.id}:${input.domain}`);
   // Heuristic: high similarity + MX + young age → phishing
-  let verdict: YoungDomainAiOutput["verdict"] = "inconclusive";
+  let verdict: YoungDomainAiOutput["verdict"];
   const status = input.siteEvidence?.status;
   const login = !!input.siteEvidence?.loginFormDetected;
   const cf = !!input.siteEvidence?.cloudflareBlocked;
