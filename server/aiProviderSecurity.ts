@@ -1,5 +1,5 @@
 import { X509Certificate } from "node:crypto";
-import { readFileSync, statSync } from "node:fs";
+import { closeSync, openSync, readSync } from "node:fs";
 import { isIP } from "node:net";
 import { isAbsolute } from "node:path";
 import { isPrivateOrReservedAddress, isSafeSourceFetchUrl } from "./sourceFetch";
@@ -95,12 +95,15 @@ export function resolveLocalAiTlsConfig(
   if (!isAbsolute(configuredPath)) {
     return { error: "OPTRASIGHT_LOCAL_AI_CA_CERT must be an absolute path to a PEM certificate bundle." };
   }
+  let descriptor: number | null = null;
   try {
-    const metadata = statSync(configuredPath);
-    if (!metadata.isFile() || metadata.size < 1 || metadata.size > LOCAL_AI_CA_MAX_BYTES) {
+    descriptor = openSync(configuredPath, "r");
+    const bounded = Buffer.alloc(LOCAL_AI_CA_MAX_BYTES + 1);
+    const bytesRead = readSync(descriptor, bounded, 0, bounded.length, 0);
+    if (bytesRead < 1 || bytesRead > LOCAL_AI_CA_MAX_BYTES) {
       return { error: "OPTRASIGHT_LOCAL_AI_CA_CERT must reference a PEM file no larger than 1 MB." };
     }
-    const pem = readFileSync(configuredPath, "utf8");
+    const pem = bounded.subarray(0, bytesRead).toString("utf8");
     const certificates = parsePemCertificates(pem);
     if (!certificates) {
       return { error: "OPTRASIGHT_LOCAL_AI_CA_CERT must contain only PEM-encoded certificates." };
@@ -112,6 +115,8 @@ export function resolveLocalAiTlsConfig(
     }
   } catch {
     return { error: "OPTRASIGHT_LOCAL_AI_CA_CERT could not be read by the OptraSight service." };
+  } finally {
+    if (descriptor !== null) closeSync(descriptor);
   }
   return { caCertPath: configuredPath };
 }
