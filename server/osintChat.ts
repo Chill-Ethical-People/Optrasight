@@ -25,6 +25,7 @@ import {
 } from "./aiClient";
 import type { LiveChatDiagnostic } from "./aiLive";
 import { resolveAiPrompt } from "./promptRegistry";
+import { createClientIdentityBoundary, type ClientIdentityBoundary } from "./aiDataPrivacy";
 
 // v2.15 — surfaced to callers/UI so a failed live-AI call can show the actual
 // reason (HTTP code, timeout, parse error) without leaking upstream response
@@ -137,7 +138,12 @@ export interface RunChatTriageResult {
   generatedAt: string;
 }
 
-function workspaceClientProfile(storage: any, tenantId: string, selectedClientIds: string[] = []): {
+function workspaceClientProfile(
+  storage: any,
+  tenantId: string,
+  selectedClientIds: string[] = [],
+  identityBoundary?: ClientIdentityBoundary,
+): {
   industries: string[]; geos: string[]; technologies: string[]; clients?: any[];
 } {
   const scope = storage.getClientAnalysisScope?.(tenantId);
@@ -145,19 +151,17 @@ function workspaceClientProfile(storage: any, tenantId: string, selectedClientId
     const selected = selectedClientIds.length
       ? selectedClientIds.map((clientId) => scope.clients.find((client: any) => client.id === clientId)).filter(Boolean)
       : [];
-    const sanitise = (value: string, clientName: string) => String(value || "")
-      .replace(new RegExp(clientName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), "[CLIENT]")
-      .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[EMAIL]")
-      .replace(/\b(?:[a-z0-9-]+\.)+[a-z]{2,}\b/gi, "[DOMAIN]");
     return {
       clients: selected.map((client: any, index: number) => ({
-        profileRef: `CLIENT-${String(index + 1).padStart(2, "0")}`,
+        profileRef: identityBoundary?.aliasForId(client.id) ?? `CLIENT-${String(index + 1).padStart(2, "0")}`,
         clientTypes: client.clientTypes ?? [],
         matchingScope: client.matchingScope ?? "advisory",
         industries: client.industries.map((option: any) => option.label),
         geographies: client.geographies.map((option: any) => option.label),
         technologies: client.technologies.map((option: any) => option.label),
-        mappingContext: (client.mappingTerms || []).map((term: string) => sanitise(term, client.name)).filter(Boolean),
+        mappingContext: identityBoundary
+          ? identityBoundary.sanitiseContextValues(client.mappingTerms || [])
+          : [...(client.mappingTerms || [])],
       })),
       industries: Array.from(new Set(selected.flatMap((client: any) => client.industries.map((option: any) => option.label)))),
       geos: Array.from(new Set(selected.flatMap((client: any) => client.geographies.map((option: any) => option.label)))),
@@ -173,17 +177,17 @@ export async function runChatTriage(storage: any, opts: RunChatTriageOpts): Prom
   const selectedProfiles = analysisMode === "client_impact"
     ? (opts.clientIds ?? []).map((clientId) => storage.getClientProfile(opts.tenantId, clientId)).filter(Boolean)
     : [];
-  const sanitiseClientNames = (value: string | null | undefined) => {
-    let output = String(value || "");
-    selectedProfiles.forEach((profile: any, index: number) => {
-      const escaped = String(profile.name || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      if (escaped) output = output.replace(new RegExp(escaped, "gi"), `CLIENT-${String(index + 1).padStart(2, "0")}`);
-    });
-    return output;
-  };
+  const tenantProvider = storage.resolveAiProvider
+    ? storage.resolveAiProvider(opts.tenantId, "osint_overview")
+    : null;
+  const identityBoundary = createClientIdentityBoundary(
+    tenantProvider ?? { provider: "openai" },
+    selectedProfiles.map((profile: any) => ({ id: profile.id, name: profile.name })),
+  );
+  const sanitiseClientNames = (value: string | null | undefined) => identityBoundary.sanitiseText(String(value || ""));
   const selectedProfileRefs = new Map((opts.clientIds ?? []).map((clientId, index) => [
     clientId,
-    `CLIENT-${String(index + 1).padStart(2, "0")}`,
+    identityBoundary.aliasForId(clientId) ?? `CLIENT-${String(index + 1).padStart(2, "0")}`,
   ]));
   const priorClientMatchesFor = (finding: OsintFindingDTO) => {
     if (analysisMode !== "client_impact") return [];
@@ -265,11 +269,8 @@ export async function runChatTriage(storage: any, opts: RunChatTriageOpts): Prom
   });
 
   const clientProfile = analysisMode === "client_impact"
-    ? workspaceClientProfile(storage, opts.tenantId, opts.clientIds ?? [])
+    ? workspaceClientProfile(storage, opts.tenantId, opts.clientIds ?? [], identityBoundary)
     : { industries: [], geos: [], technologies: [], clients: [] };
-  const tenantProvider = storage.resolveAiProvider
-    ? storage.resolveAiProvider(opts.tenantId, "osint_overview")
-    : null;
 
   const input: ChatTriageInput = {
     rangeLabel: RANGE_LABEL[opts.range],
@@ -301,7 +302,7 @@ export async function runChatTriage(storage: any, opts: RunChatTriageOpts): Prom
           }] : [];
         });
         selectedProfiles.forEach((profile: any, index: number) => {
-          const profileRef = `CLIENT-${String(index + 1).padStart(2, "0")}`;
+          const profileRef = identityBoundary.aliasForId(profile.id) ?? `CLIENT-${String(index + 1).padStart(2, "0")}`;
           const clientName = String(profile?.name || "").trim();
           if (clientName) reportMd = reportMd.replace(new RegExp(`\\b${profileRef}\\b`, "g"), () => clientName);
         });
