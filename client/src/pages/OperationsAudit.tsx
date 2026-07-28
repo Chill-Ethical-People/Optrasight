@@ -358,7 +358,7 @@ function JobRow({
 
 export default function OperationsAudit() {
   const { toast } = useToast();
-  const { jobs: liveAiJobs, loading: liveAiJobsLoading } = useAiJobs();
+  const { jobs: liveAiJobs } = useAiJobs();
   const [tab, setTab] = useState("active");
   const [cancellingIds, setCancellingIds] = useState<Set<string>>(new Set());
 
@@ -479,13 +479,13 @@ export default function OperationsAudit() {
           </TabsList>
 
           <TabsContent value="active" className="mt-0">
-            <JobsTable jobs={visibleJobs} loading={isLoading || liveAiJobsLoading} cancellingIds={cancellingIds} onCancel={(job) => cancelOne.mutate(job)} />
+            <JobsTable jobs={visibleJobs} loading={isLoading} cancellingIds={cancellingIds} onCancel={(job) => cancelOne.mutate(job)} />
           </TabsContent>
           <TabsContent value="failed" className="mt-0">
-            <JobsTable jobs={visibleJobs} loading={isLoading || liveAiJobsLoading} cancellingIds={cancellingIds} onCancel={(job) => cancelOne.mutate(job)} />
+            <JobsTable jobs={visibleJobs} loading={isLoading} cancellingIds={cancellingIds} onCancel={(job) => cancelOne.mutate(job)} />
           </TabsContent>
           <TabsContent value="all" className="mt-0">
-            <JobsTable jobs={visibleJobs} loading={isLoading || liveAiJobsLoading} cancellingIds={cancellingIds} onCancel={(job) => cancelOne.mutate(job)} compact />
+            <JobsTable jobs={visibleJobs} loading={isLoading} cancellingIds={cancellingIds} onCancel={(job) => cancelOne.mutate(job)} compact />
           </TabsContent>
           <TabsContent value="audit" className="mt-0">
             <AuditTable entries={data?.auditEntries ?? []} loading={isLoading} />

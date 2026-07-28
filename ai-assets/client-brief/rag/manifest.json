@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "document_id": "optrasight-client-brief-guide",
+  "title": "Weekly Threat Intelligence Digest Drafting Guide",
+  "source_path": "docs/WEEKLY_THREAT_INTELLIGENCE_DIGEST_GUIDE.md",
+  "source_sha256": "6d6f9a72828727e28f2f968aa554221669f0b8f6d878db77e5457d046abafa90",
+  "chunk_count": 54,
+  "chunking": {
+    "strategy": "markdown_heading_then_paragraph",
+    "maximum_characters": 3500,
+    "overlap": "heading repeated for split sections"
+  },
+  "retrieval_defaults": {
+    "mode": "hybrid_semantic_keyword",
+    "candidate_count": 18,
+    "final_context_chunks": 6,
+    "diversity": "maximal_marginal_relevance",
+    "audience_filter": "boost"
+  },
+  "citation_format": "[Client Brief Guide > {section_path}]"
+}

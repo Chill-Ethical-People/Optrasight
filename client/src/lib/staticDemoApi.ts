@@ -336,8 +336,8 @@ function attackName(id: string) {
 }
 
 const providers = [
-  provider("provider-deepseek", "deepseek", "DeepSeek", "deepseek-chat", true),
-  provider("provider-gemini", "gemini", "Google Gemini", "gemini-flash-latest", false),
+  provider("provider-deepseek", "deepseek", "DeepSeek", "deepseek-v4-flash", true),
+  provider("provider-gemini", "gemini", "Google Gemini", "gemini-3.6-flash", false),
   provider("provider-openai", "openai", "OpenAI", "gpt-4.1-mini", false),
 ];
 

@@ -20,21 +20,30 @@ import { request as httpsRequest } from "node:https";
 
 const TIMEOUT_MS = 10_000;
 const MAX_BYTES = 200_000;
-const MAX_CHARS = 18_000;     // post-strip cap fed to the LLM
-const MAX_CONTEXT_CHARS = 30_000;
+const MAX_CHARS = 24_000;     // post-strip cap fed to the LLM
+const MAX_CONTEXT_CHARS = 96_000;
+const MAX_REFERENCE_PAGES = 24;
+const MAX_REFERENCE_DEPTH = 2;
+const MAX_DISCOVERED_LINKS_PER_PAGE = 64;
+const REFERENCE_FETCH_CONCURRENCY = 4;
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const CACHE_MAX = 200;
 const MAX_REDIRECTS = 5;
 const SAFE_PORTS = new Set(["", "80", "443"]);
 const SKIP_LINK_EXTENSIONS = /\.(?:7z|avi|bmp|css|csv|docx?|gif|gz|ico|jpe?g|js|mov|mp3|mp4|mpeg|png|pptx?|rar|svg|tar|tgz|wav|webm|webp|xlsx?|zip)(?:$|[?#])/i;
 const LOW_VALUE_LINK_PATH = /\/(?:about|advertis(?:e|ing)|author|authors|careers|category|categories|contact|cookie|events?|feed|login|newsletter|partners?|podcast|privacy|register|rss|search|signin|signup|sponsored|subscribe|tag|tags|terms)(?:\/|$)/i;
-const LOW_VALUE_LINK_HOST = /(?:facebook|instagram|linkedin|reddit|tiktok|x\.com|twitter|youtube|discord|slack)\.com$/i;
-const HIGH_VALUE_LINK_HOST = /(?:attack\.mitre\.org|nvd\.nist\.gov|cve\.mitre\.org|cisa\.gov|github\.com|gitlab\.com|virustotal\.com|hybrid-analysis\.com|malwarebazaar\.abuse\.ch|urlhaus\.abuse\.ch|cert\.[^/]+|msrc\.microsoft\.com|learn\.microsoft\.com|cloud\.google\.com|mandiant\.com|crowdstrike\.com|unit42\.paloaltonetworks\.com|talosintelligence\.com|securelist\.com|welivesecurity\.com|fortinet\.com|sophos\.com|trendmicro\.com|proofpoint\.com|recordedfuture\.com|bleepingcomputer\.com|thehackernews\.com|securityweek\.com|darkreading\.com)$/i;
+const LOW_VALUE_LINK_HOST = /^(?:x\.com|(?:facebook|instagram|linkedin|reddit|tiktok|twitter|youtube|discord|slack)\.com)$/i;
 
 type CacheEntry = { value: string | null; expiresAt: number };
 type SafeResolvedUrl = { parsed: URL; address: string; family: 4 | 6 };
 type PinnedFetchResponse = { status: number; headers: Record<string, string | string[] | undefined>; body: Buffer };
 type SourceArticle = { text: string; referencedUrls: string[] };
+type SourceEvidencePage = SourceArticle & { url: string; parentUrl: string | null; depth: number };
+type SourceEvidenceGraph = {
+  pages: SourceEvidencePage[];
+  unavailableUrls: string[];
+  unfetchedUrls: string[];
+};
 const CACHE = new Map<string, CacheEntry>();
 
 function cacheGet(url: string): string | null | undefined {
@@ -107,58 +116,51 @@ function normaliseSourceLink(raw: string, baseUrl: string): string | null {
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
   parsed.hash = "";
+  for (const key of Array.from(parsed.searchParams.keys())) {
+    if (/^(?:utm_.+|fbclid|gclid|mc_cid|mc_eid)$/i.test(key)) parsed.searchParams.delete(key);
+  }
   const href = parsed.toString();
   if (href === baseUrl || SKIP_LINK_EXTENSIONS.test(parsed.pathname)) return null;
   return href;
 }
 
+function likelyArticleHtml(html: string): string {
+  const withoutEmbeddedChrome = (value: string) => value
+    .replace(/<(?:header|footer|nav|aside|form)\b[^>]*>[\s\S]*?<\/(?:header|footer|nav|aside|form)>/gi, " ")
+    .replace(/<(?:script|style|noscript)\b[^>]*>[\s\S]*?<\/(?:script|style|noscript)>/gi, " ");
+  const articleBlocks = Array.from(html.matchAll(/<article\b[^>]*>([\s\S]*?)<\/article>/gi), (match) => match[1]);
+  if (articleBlocks.length > 0) return withoutEmbeddedChrome(articleBlocks.sort((a, b) => stripHtml(b).length - stripHtml(a).length)[0]);
+  const mainBlocks = Array.from(html.matchAll(/<main\b[^>]*>([\s\S]*?)<\/main>/gi), (match) => match[1]);
+  if (mainBlocks.length > 0) return withoutEmbeddedChrome(mainBlocks.sort((a, b) => stripHtml(b).length - stripHtml(a).length)[0]);
+  return withoutEmbeddedChrome(html)
+    .replace(/<head\b[^>]*>[\s\S]*?<\/head>/gi, " ");
+}
+
 function extractReferencedUrls(html: string, baseUrl: string, maxLinks: number): string[] {
+  const contentHtml = likelyArticleHtml(html);
   const candidates: string[] = [];
   const seen = new Set<string>();
   const add = (candidate: string | null) => {
     if (!candidate || seen.has(candidate)) return;
+    let parsed: URL;
+    try {
+      parsed = new URL(candidate);
+    } catch {
+      return;
+    }
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+    if (LOW_VALUE_LINK_HOST.test(host) || LOW_VALUE_LINK_PATH.test(parsed.pathname)) return;
     seen.add(candidate);
     candidates.push(candidate);
   };
-  for (const m of html.matchAll(/\bhref\s*=\s*["']([^"']+)["']/gi)) {
-    add(normaliseSourceLink(m[1], baseUrl));
+  for (const m of contentHtml.matchAll(/<a\b([^>]*)\bhref\s*=\s*["']([^"']+)["']([^>]*)>([\s\S]*?)<\/a>/gi)) {
+    add(normaliseSourceLink(m[2], baseUrl));
   }
-  for (const m of html.matchAll(/\bhttps?:\/\/[^\s<>"')]+/gi)) {
-    add(normaliseSourceLink(m[0], baseUrl));
-  }
-  return candidates
-    .map((url, ordinal) => ({ url, ordinal, score: scoreReferencedUrl(url, baseUrl) }))
-    .filter((item) => item.score > -50)
-    .sort((a, b) => b.score - a.score || a.ordinal - b.ordinal)
-    .slice(0, maxLinks)
-    .map((item) => item.url);
+  return candidates.slice(0, maxLinks);
 }
 
 export function extractReferencedUrlsForTest(html: string, baseUrl: string, maxLinks: number): string[] {
   return extractReferencedUrls(html, baseUrl, maxLinks);
-}
-
-function scoreReferencedUrl(url: string, baseUrl: string): number {
-  let parsed: URL;
-  let base: URL;
-  try {
-    parsed = new URL(url);
-    base = new URL(baseUrl);
-  } catch {
-    return -100;
-  }
-  const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
-  const baseHost = base.hostname.toLowerCase().replace(/^www\./, "");
-  if (LOW_VALUE_LINK_HOST.test(host)) return -100;
-  if (LOW_VALUE_LINK_PATH.test(parsed.pathname)) return -80;
-
-  let score = 0;
-  if (host !== baseHost) score += 18;
-  if (HIGH_VALUE_LINK_HOST.test(host)) score += 55;
-  if (/(?:cve-\d{4}-\d+|\/cve\/|\/kev|\/advisor|\/security|\/vulnerab|\/malware|\/threat|\/ioc|\/indicator|\/attack|\/apt|\/ransom|\/research)/i.test(`${parsed.pathname} ${parsed.search}`)) score += 24;
-  if (/\.(?:pdf|txt)$/i.test(parsed.pathname)) score += 10;
-  if (parsed.searchParams.has("utm_source") || parsed.searchParams.has("utm_campaign")) score -= 6;
-  return score;
 }
 
 function ipv4ToInt(address: string): number | null {
@@ -346,7 +348,7 @@ async function fetchSourceArticle(url: string | null | undefined, linkBudget = 0
       return null;
     }
     const html = res.body.toString("utf8");
-    let text = stripHtml(html);
+    let text = stripHtml(likelyArticleHtml(html));
     if (text.length > MAX_CHARS) text = text.slice(0, MAX_CHARS) + " …[truncated]";
     if (!text || text.length < 40) {
       return null;
@@ -376,35 +378,136 @@ export async function fetchSourceContent(url: string | null | undefined): Promis
 
 export async function fetchSourceContentWithReferences(
   url: string | null | undefined,
-  opts?: { maxReferenceLinks?: number },
+  opts?: { maxReferenceLinks?: number; maxReferenceDepth?: number },
 ): Promise<string | null> {
   if (!url || typeof url !== "string") return null;
-  const maxReferenceLinks = Math.max(0, Math.min(opts?.maxReferenceLinks ?? 3, 6));
-  const article = await fetchSourceArticle(url, maxReferenceLinks);
-  if (!article) return null;
+  const maxReferenceLinks = Math.max(0, Math.min(opts?.maxReferenceLinks ?? 12, MAX_REFERENCE_PAGES));
+  const maxReferenceDepth = Math.max(1, Math.min(opts?.maxReferenceDepth ?? MAX_REFERENCE_DEPTH, MAX_REFERENCE_DEPTH));
+  const graph = await crawlSourceEvidence(url, { maxReferenceLinks, maxReferenceDepth });
+  const primary = graph.pages[0];
+  if (!primary) return null;
 
   const sections = [
     [
       `Primary source (${url}):`,
-      article.text,
+      primary.text,
       "",
-      "Supplemental referenced sources below were discovered inside the primary source page and fetched server-side. Use them only as supporting evidence for context, CVE details, vendor advisories, linked research, or IoC confirmation.",
+      "Supplemental referenced sources below were discovered from main article content and fetched server-side. Each section records its parent link and traversal depth. Use them only as supporting evidence for context, CVE details, vendor advisories, linked research, IoCs, or detection behavior.",
     ].join("\n"),
   ];
   let used = sections[0].length;
-  for (const refUrl of article.referencedUrls.slice(0, maxReferenceLinks)) {
-    const refText = await fetchSourceContent(refUrl);
-    if (!refText) continue;
+  const referencedPages = graph.pages.slice(1);
+  for (let index = 0; index < referencedPages.length; index += 1) {
+    const page = referencedPages[index];
     const remaining = MAX_CONTEXT_CHARS - used;
     if (remaining < 800) break;
-    const clipped = refText.length > Math.min(4_000, remaining)
-      ? `${refText.slice(0, Math.min(4_000, remaining))} …[truncated]`
-      : refText;
-    const block = `Referenced source (${refUrl}):\n${clipped}`;
+    const pagesLeft = Math.max(1, referencedPages.length - index);
+    const pageBudget = Math.max(1_200, Math.min(6_000, Math.floor(remaining / pagesLeft)));
+    const clipped = page.text.length > pageBudget
+      ? `${page.text.slice(0, pageBudget)} …[truncated]`
+      : page.text;
+    const block = [
+      `Referenced source (${page.url}):`,
+      `Linked from: ${page.parentUrl || url} · depth ${page.depth}`,
+      clipped,
+    ].join("\n");
     sections.push(block);
     used += block.length + 2;
   }
+  if (graph.unavailableUrls.length > 0) {
+    sections.push([
+      "Referenced URLs discovered in main content but unavailable to the server:",
+      ...graph.unavailableUrls.map((item) => `- ${item}`),
+    ].join("\n"));
+  }
+  if (graph.unfetchedUrls.length > 0) {
+    sections.push([
+      `Referenced URLs beyond the ${maxReferenceLinks}-page safety budget (preserved for analyst provenance, not read):`,
+      ...graph.unfetchedUrls.map((item) => `- ${item}`),
+    ].join("\n"));
+  }
   return sections.join("\n\n").slice(0, MAX_CONTEXT_CHARS);
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  async function worker() {
+    while (cursor < items.length) {
+      const index = cursor++;
+      results[index] = await mapper(items[index]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => worker()));
+  return results;
+}
+
+async function crawlSourceEvidence(
+  rootUrl: string,
+  opts: { maxReferenceLinks: number; maxReferenceDepth: number },
+  loader: (url: string, linkBudget: number) => Promise<SourceArticle | null> = fetchSourceArticle,
+): Promise<SourceEvidenceGraph> {
+  const primary = await loader(rootUrl, MAX_DISCOVERED_LINKS_PER_PAGE);
+  if (!primary) return { pages: [], unavailableUrls: [], unfetchedUrls: [] };
+
+  const pages: SourceEvidencePage[] = [{ ...primary, url: rootUrl, parentUrl: null, depth: 0 }];
+  const seen = new Set<string>([rootUrl]);
+  const unavailableUrls: string[] = [];
+  const queue: Array<{ url: string; parentUrl: string; depth: number }> = [];
+  const enqueue = (candidate: { url: string; parentUrl: string; depth: number }) => {
+    if (seen.has(candidate.url)) return;
+    seen.add(candidate.url);
+    queue.push(candidate);
+  };
+  primary.referencedUrls.forEach((candidate) => enqueue({ url: candidate, parentUrl: rootUrl, depth: 1 }));
+
+  let attempted = 0;
+  while (queue.length > 0 && attempted < opts.maxReferenceLinks) {
+    const batchSize = Math.min(
+      REFERENCE_FETCH_CONCURRENCY,
+      queue.length,
+      opts.maxReferenceLinks - attempted,
+    );
+    const batch = queue.splice(0, batchSize);
+    attempted += batch.length;
+    const loaded = await mapWithConcurrency(batch, REFERENCE_FETCH_CONCURRENCY, (item) =>
+      loader(item.url, MAX_DISCOVERED_LINKS_PER_PAGE));
+    loaded.forEach((article, index) => {
+      const item = batch[index];
+      if (!article) {
+        unavailableUrls.push(item.url);
+        return;
+      }
+      pages.push({ ...article, ...item });
+      if (item.depth < opts.maxReferenceDepth) {
+        article.referencedUrls.forEach((candidate) => enqueue({
+          url: candidate,
+          parentUrl: item.url,
+          depth: item.depth + 1,
+        }));
+      }
+    });
+  }
+  return {
+    pages,
+    unavailableUrls,
+    unfetchedUrls: queue.map((item) => item.url),
+  };
+}
+
+export async function crawlSourceEvidenceForTest(
+  rootUrl: string,
+  articles: Record<string, SourceArticle | null>,
+  opts?: { maxReferenceLinks?: number; maxReferenceDepth?: number },
+): Promise<SourceEvidenceGraph> {
+  return crawlSourceEvidence(rootUrl, {
+    maxReferenceLinks: opts?.maxReferenceLinks ?? MAX_REFERENCE_PAGES,
+    maxReferenceDepth: opts?.maxReferenceDepth ?? MAX_REFERENCE_DEPTH,
+  }, async (candidate) => articles[candidate] ?? null);
 }
 
 /**
@@ -414,7 +517,7 @@ export async function fetchSourceContentWithReferences(
  */
 export async function fetchSourcesBatch(
   urls: Array<string | null | undefined>,
-  opts?: { includeReferences?: boolean; maxReferenceLinks?: number },
+  opts?: { includeReferences?: boolean; maxReferenceLinks?: number; maxReferenceDepth?: number },
 ): Promise<Array<{ url: string; content: string | null }>> {
   const valid: Array<{ idx: number; url: string }> = [];
   const out: Array<{ url: string; content: string | null }> = urls.map((u) => ({ url: u || "", content: null }));
@@ -427,7 +530,10 @@ export async function fetchSourcesBatch(
       const my = cursor++;
       const v = valid[my];
       const content = opts?.includeReferences
-        ? await fetchSourceContentWithReferences(v.url, { maxReferenceLinks: opts.maxReferenceLinks })
+        ? await fetchSourceContentWithReferences(v.url, {
+            maxReferenceLinks: opts.maxReferenceLinks,
+            maxReferenceDepth: opts.maxReferenceDepth,
+          })
         : await fetchSourceContent(v.url);
       out[v.idx] = { url: v.url, content };
     }

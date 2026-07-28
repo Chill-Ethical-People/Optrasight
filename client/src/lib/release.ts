@@ -12,4 +12,5 @@ export const BATCH_ONE_ALLOWED_PATHS = new Set([
   "/ai-setup",
   "/operations-audit",
   "/platform-users",
+  "/account-security",
 ]);

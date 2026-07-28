@@ -15,10 +15,10 @@ import {
 import type { ClientDigestDTO, ClientProfileDTO } from "@shared/schema";
 import { CLIENT_DIGEST_TEMPLATE_PLACEHOLDERS } from "@shared/clientDigestTemplate";
 
-const BRAND = "4F46E5";
-const INK = "111827";
-const MUTED = "667085";
-const SOFT = "EEF0FE";
+const BRAND = "166534";
+const INK = "13251A";
+const MUTED = "3F5B49";
+const SOFT = "F0FDF4";
 
 export interface ClientEmailLogo {
   data: Buffer;
@@ -130,10 +130,10 @@ export async function buildClientTemplateDocx(profile: ClientProfileDTO, logo?: 
     rows: [
       new TableRow({
         tableHeader: true,
-        children: ["Placeholder", "Placement", "Generated content"].map(
+        children: ["Placeholder", "Required", "Placement", "Generated content"].map(
           (value) =>
             new TableCell({
-              shading: { type: ShadingType.CLEAR, fill: INK, color: "auto" },
+              shading: { type: ShadingType.CLEAR, fill: BRAND, color: "auto" },
               children: [
                 new Paragraph({ children: [new TextRun({ text: value, bold: true, size: 16, color: "FFFFFF" })] }),
               ],
@@ -147,6 +147,11 @@ export async function buildClientTemplateDocx(profile: ClientProfileDTO, logo?: 
               new TableCell({
                 children: [
                   new Paragraph({ children: [new TextRun({ text: item.token, bold: true, size: 16, color: BRAND })] }),
+                ],
+              }),
+              new TableCell({
+                children: [
+                  new Paragraph({ children: [new TextRun({ text: item.required ? "Yes" : "Optional", bold: item.required, size: 16, color: INK })] }),
                 ],
               }),
               new TableCell({
@@ -191,7 +196,7 @@ export async function buildClientTemplateDocx(profile: ClientProfileDTO, logo?: 
             spacing: { after: 160 },
             children: [
               new TextRun({
-                text: "Place inline values within a sentence. Place generated section blocks on their own line.",
+                text: "Required: {{client_name}} in the subject; {{executive_summary}} and {{sources}} in the body. Place generated section blocks on their own line.",
                 size: 18,
                 color: MUTED,
               }),
@@ -205,7 +210,7 @@ export async function buildClientTemplateDocx(profile: ClientProfileDTO, logo?: 
                 text: "DRAFT - Analyst approval is required before client distribution.",
                 bold: true,
                 size: 16,
-                color: "B42318",
+                color: INK,
               }),
             ],
           }),
@@ -223,8 +228,8 @@ function escapeHtml(value: string): string {
 function inlineHtml(value: string): string {
   let escaped = escapeHtml(value);
   escaped = escaped.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-  escaped = escaped.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2" style="color:#4F46E5">$1</a>');
-  escaped = escaped.replace(/({{[a-zA-Z0-9_]+}})/g, '<strong style="color:#4F46E5">$1</strong>');
+  escaped = escaped.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2" style="color:#166534;text-decoration:underline">$1</a>');
+  escaped = escaped.replace(/({{[a-zA-Z0-9_]+}})/g, '<strong style="color:#166534">$1</strong>');
   return escaped;
 }
 
@@ -243,20 +248,10 @@ export function markdownToEmailHtml(body: string): string {
     if (heading) {
       closeList();
       const level = heading[1].length <= 2 ? 2 : 3;
-      const label = heading[2].toLowerCase();
       const section = level === 2;
-      const tone = label.startsWith("critical")
-        ? ["#B42318", "#FEF3F2"]
-        : label.startsWith("high")
-          ? ["#C2410C", "#FFF7ED"]
-          : label.startsWith("medium")
-            ? ["#92400E", "#FFFBEB"]
-            : label.startsWith("low") || label.startsWith("fyi")
-              ? ["#075985", "#F0F9FF"]
-              : ["#312E81", "#EEF0FE"];
       const style = section
-        ? `margin:26px 0 10px;padding:9px 12px;border-left:4px solid ${tone[0]};background:${tone[1]};color:${tone[0]};font-size:15px`
-        : "margin:20px 0 7px;color:#111827;font-size:14px";
+        ? "margin:26px 0 10px;padding:9px 12px;border-left:4px solid #166534;background:#F0FDF4;color:#14532D;font-size:15px"
+        : "margin:20px 0 7px;color:#166534;font-size:14px";
       output.push(`<h${level} style="${style}">${inlineHtml(heading[2])}</h${level}>`);
     } else if (bullet || numbered) {
       const nextList = bullet ? "ul" : "ol";
@@ -296,9 +291,9 @@ function buildClientEmailContent(
   logo?: ClientEmailLogo,
 ) {
   const logoHtml = logo
-    ? '<img src="cid:client-logo" alt="Client logo" style="display:block;max-width:180px;max-height:64px;margin:0 0 14px">'
+    ? '<img src="cid:client-logo" alt="Client logo" style="display:block;max-width:180px;max-height:64px;margin:0 0 14px;filter:grayscale(1)">'
     : "";
-  const html = `<!doctype html><html><body style="margin:0;background:#F2F4F7;font-family:Arial,Helvetica,sans-serif;color:#111827"><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:28px 12px"><table role="presentation" width="700" style="width:100%;max-width:700px;background:#fff;border:1px solid #D0D5DD"><tr><td style="padding:24px 28px;border-top:5px solid #4F46E5;border-bottom:1px solid #E4E7EC">${logoHtml}<div style="font-size:22px;font-weight:700">${escapeHtml(profile.name)}</div><div style="margin-top:4px;color:#4F46E5;font-size:11px;font-weight:700;letter-spacing:1px">THREAT INTELLIGENCE BRIEF</div></td></tr><tr><td style="padding:18px 28px;background:#EEF0FE"><div style="font-size:10px;font-weight:700;color:#667085">SUBJECT</div><div style="margin-top:5px;font-size:14px;font-weight:700">${inlineHtml(content.subject)}</div></td></tr><tr><td style="padding:28px;font-size:14px">${markdownToEmailHtml(content.bodyMd)}</td></tr><tr><td style="padding:16px 28px;background:#111827;color:#D0D5DD;font-size:11px">Sent after analyst approval through OptraSight.</td></tr></table></td></tr></table></body></html>`;
+  const html = `<!doctype html><html><body style="margin:0;background:#F3F7F4;font-family:Arial,Helvetica,sans-serif;color:#13251A"><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:28px 12px"><table role="presentation" width="700" style="width:100%;max-width:700px;background:#FFFFFF;border:1px solid #A7C7B0"><tr><td height="6" bgcolor="#166534" style="font-size:0;line-height:0">&nbsp;</td></tr><tr><td style="padding:24px 28px;border-bottom:1px solid #A7C7B0">${logoHtml}<div style="font-size:22px;font-weight:700">${escapeHtml(profile.name)}</div><div style="margin-top:4px;color:#166534;font-size:11px;font-weight:700;letter-spacing:1px">THREAT INTELLIGENCE BRIEF</div></td></tr><tr><td style="padding:18px 28px;background:#F0FDF4;border-bottom:1px solid #A7C7B0"><div style="font-size:10px;font-weight:700;color:#166534">SUBJECT</div><div style="margin-top:5px;font-size:14px;font-weight:700">${inlineHtml(content.subject)}</div></td></tr><tr><td style="padding:28px;font-size:14px">${markdownToEmailHtml(content.bodyMd)}</td></tr><tr><td style="padding:16px 28px;background:#14532D;color:#FFFFFF;font-size:11px">Sent after analyst approval through OptraSight.</td></tr></table></td></tr></table></body></html>`;
   const text = `${content.bodyMd}\n\nSent after analyst approval through OptraSight.`;
   return { subject: content.subject, recipients: content.recipients, html, text, logo };
 }

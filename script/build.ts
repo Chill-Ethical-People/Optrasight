@@ -39,10 +39,7 @@ async function buildAll() {
 
   console.log("building server...");
   const pkg = JSON.parse(await readFile("package.json", "utf-8"));
-  const allDeps = [
-    ...Object.keys(pkg.dependencies || {}),
-    ...Object.keys(pkg.devDependencies || {}),
-  ];
+  const allDeps = [...Object.keys(pkg.dependencies || {}), ...Object.keys(pkg.devDependencies || {})];
   const externals = allDeps.filter((dep) => !allowlist.includes(dep));
 
   await esbuild({
@@ -79,6 +76,34 @@ async function buildAll() {
     bundle: true,
     format: "cjs",
     outfile: "dist/chatTriageWorker.cjs",
+    define: {
+      "process.env.NODE_ENV": '"production"',
+    },
+    minify: true,
+    external: externals,
+    logLevel: "info",
+  });
+
+  await esbuild({
+    entryPoints: ["server/aiWorkWorker.ts"],
+    platform: "node",
+    bundle: true,
+    format: "cjs",
+    outfile: "dist/aiWorkWorker.cjs",
+    define: {
+      "process.env.NODE_ENV": '"production"',
+    },
+    minify: true,
+    external: externals,
+    logLevel: "info",
+  });
+
+  await esbuild({
+    entryPoints: ["server/aiProviderWorker.ts"],
+    platform: "node",
+    bundle: true,
+    format: "cjs",
+    outfile: "dist/aiProviderWorker.cjs",
     define: {
       "process.env.NODE_ENV": '"production"',
     },

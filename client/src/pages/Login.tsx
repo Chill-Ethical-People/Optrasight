@@ -1,11 +1,12 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/lib/auth";
+import { isMfaChallengeError } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Logo } from "@/components/Logo";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowRight, CheckCircle2, KeyRound, RadioTower, ShieldCheck, UserRoundCheck } from "lucide-react";
+import { ArrowLeft, ArrowRight, CheckCircle2, KeyRound, RadioTower, ShieldCheck, UserRoundCheck } from "lucide-react";
 
 type LoginStep = "credentials" | "mfa";
 
@@ -28,7 +29,8 @@ export default function Login() {
       await login(email, password, mfaRequired ? mfaCode : undefined);
       navigate("/osint");
     } catch (err: any) {
-      if (/MFA code required|mfaRequired/i.test(String(err.message ?? err))) {
+      if (isMfaChallengeError(err)
+        || /MFA code required|mfaRequired/i.test(String(err.message ?? err))) {
         setStep("mfa");
         setMfaCode("");
         toast({ title: "MFA code required", description: "Enter the 6-digit code from your authenticator app." });
@@ -95,10 +97,11 @@ export default function Login() {
 
         <section className="os-card p-7 sm:p-9 flex flex-col justify-center min-h-[420px] xl:min-h-[620px]">
           <div className="mb-7">
-            <h2 className="os-page-title">Sign in</h2>
+            <h2 className="os-page-title">{mfaRequired ? "Verify MFA" : "Sign in"}</h2>
             <p className="text-sm text-muted-foreground leading-[1.55] mt-1.5">
-              Sign in with an assigned account. Reviewer accounts are read-only;
-              platform admin accounts enable source, automation, and configuration workflows.
+              {mfaRequired
+                ? `Enter the six-digit code for ${email} from your enrolled authenticator.`
+                : "Sign in with an assigned account. Reviewer accounts are read-only; platform admin accounts enable source, automation, and configuration workflows."}
             </p>
           </div>
 
@@ -139,6 +142,9 @@ export default function Login() {
                 <label className="text-[11px] font-medium uppercase text-muted-foreground tracking-[0.12em]" htmlFor="mfaCode">MFA code</label>
                 <Input
                   id="mfaCode"
+                  autoFocus
+                  autoComplete="one-time-code"
+                  required
                   inputMode="numeric"
                   pattern="[0-9]*"
                   maxLength={6}
@@ -160,6 +166,20 @@ export default function Login() {
               <span>{submitting ? "Signing in..." : mfaRequired ? "Verify MFA code" : "Sign in"}</span>
               <ArrowRight size={15} />
             </Button>
+            {mfaRequired ? (
+              <Button
+                type="button"
+                variant="ghost"
+                className="w-full"
+                disabled={submitting}
+                onClick={() => {
+                  setStep("credentials");
+                  setMfaCode("");
+                }}
+              >
+                <ArrowLeft size={14} className="mr-1.5" /> Back to account sign-in
+              </Button>
+            ) : null}
           </form>
 
           <div className="mt-8 pt-5 border-t border-border/60 space-y-2 text-[11px] text-muted-foreground leading-[1.6]">

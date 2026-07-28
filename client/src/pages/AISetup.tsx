@@ -52,6 +52,7 @@ import {
   ExternalLink,
   KeyRound,
   MailCheck,
+  RefreshCw,
 } from "lucide-react";
 
 const PROVIDER_META: Record<
@@ -60,19 +61,19 @@ const PROVIDER_META: Record<
 > = {
   openai: {
     label: "OpenAI",
-    defaultModel: "gpt-5.4-mini",
+    defaultModel: "gpt-5.6",
     tone: "from-emerald-500/15 to-emerald-500/5 border-emerald-500/30",
     needsKey: true,
   },
   anthropic: {
     label: "Anthropic",
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: "claude-sonnet-5",
     tone: "from-orange-500/15 to-orange-500/5 border-orange-500/30",
     needsKey: true,
   },
   gemini: {
     label: "Google Gemini",
-    defaultModel: "gemini-flash-latest",
+    defaultModel: "gemini-3.6-flash",
     tone: "from-blue-500/15 to-blue-500/5 border-blue-500/30",
     needsKey: true,
   },
@@ -117,7 +118,10 @@ const PROVIDER_META: Record<
 // integration. Users can still type a newer account/deployment-specific id.
 const MODEL_PRESETS: Record<AiProviderKind, string[]> = {
   openai: [
-    "gpt-5.5",
+    "gpt-5.6",
+    "gpt-5.6-sol",
+    "gpt-5.6-luna",
+    "gpt-5.6-terra",
     "gpt-5.4",
     "gpt-5.4-mini",
     "gpt-5.4-nano",
@@ -133,33 +137,57 @@ const MODEL_PRESETS: Record<AiProviderKind, string[]> = {
     "o4-mini",
   ],
   anthropic: [
-    "claude-opus-4-7",
+    "claude-fable-5",
+    "claude-opus-5",
+    "claude-sonnet-5",
+    "claude-opus-4-8",
     "claude-sonnet-4-6",
     "claude-haiku-4-5",
     "claude-opus-4-1-20250805",
     "claude-3-7-sonnet-20250219",
   ],
   gemini: [
-    "gemini-flash-latest",
+    "gemini-3.6-flash",
     "gemini-3.5-flash",
-    "gemini-3.1-pro",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-pro-preview",
     "gemini-3.1-flash-lite",
-    "gemini-3-flash",
+    "gemini-3-flash-preview",
     "gemini-3.1-flash-image",
     "gemini-3-pro-image",
   ],
-  "azure-openai": ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4o"],
+  "azure-openai": [
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "gpt-5.5",
+    "gpt-5.4",
+    "gpt-5.4-mini",
+    "gpt-4.1",
+    "gpt-4.1-mini",
+    "gpt-4o",
+  ],
   ollama: ["llama3.1:8b", "llama3.1:70b", "qwen2.5:14b", "mistral:7b", "deepseek-r1:14b"],
   perplexity: ["sonar-pro", "sonar", "sonar-reasoning-pro", "sonar-deep-research"],
-  deepseek: ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat", "deepseek-reasoner"],
+  deepseek: ["deepseek-v4-flash", "deepseek-v4-pro"],
   // Moonshot Kimi — OpenAI-compatible endpoint, multiple vision-capable models.
-  kimi: ["kimi-k2.7-code", "kimi-k2.6", "moonshot-v1-128k", "moonshot-v1-32k", "moonshot-v1-8k", "kimi-k2-0711-preview"],
+  kimi: [
+    "kimi-k2.7-code",
+    "kimi-k2.6",
+    "moonshot-v1-128k",
+    "moonshot-v1-32k",
+    "moonshot-v1-8k",
+    "kimi-k2-0711-preview",
+  ],
 };
 
 // Short note shown next to each model chip on hover so the user knows what each is for.
 const MODEL_DESCRIPTIONS: Record<string, string> = {
   // OpenAI
-  "gpt-5.5": "Newest OpenAI flagship text model where enabled",
+  "gpt-5.6": "Current OpenAI GPT-5.6 alias; verify availability for this account",
+  "gpt-5.6-sol": "GPT-5.6 flagship for difficult professional work",
+  "gpt-5.6-luna": "GPT-5.6 model for cost-sensitive, high-volume workflows",
+  "gpt-5.6-terra": "GPT-5.6 model balancing intelligence and cost",
   "gpt-5.4": "Current OpenAI high-capability text model",
   "gpt-5.4-mini": "Balanced current OpenAI model for BatchOne analysis",
   "gpt-5.4-nano": "Low-latency current OpenAI model",
@@ -174,8 +202,11 @@ const MODEL_DESCRIPTIONS: Record<string, string> = {
   o3: "Reasoning model",
   "o4-mini": "Fast reasoning model",
   // Anthropic
-  "claude-opus-4-7": "Latest Claude Opus model where enabled",
-  "claude-sonnet-4-6": "Current Claude Sonnet model",
+  "claude-fable-5": "Anthropic's highest-capability widely available model",
+  "claude-opus-5": "Current Claude Opus model for complex enterprise work",
+  "claude-sonnet-5": "Current Claude Sonnet model balancing speed and intelligence",
+  "claude-opus-4-8": "Current Claude Opus model where enabled",
+  "claude-sonnet-4-6": "Previous-generation Claude Sonnet model",
   "claude-haiku-4-5": "Current Claude Haiku model",
   "claude-opus-4-1-20250805": "Claude Opus 4.1",
   "claude-opus-4-20250514": "Claude Opus 4",
@@ -185,16 +216,15 @@ const MODEL_DESCRIPTIONS: Record<string, string> = {
   // Gemini
   "gemini-3.1-flash-image": "Gemini 3.1 Flash Image for TAP portraits",
   "gemini-3-pro-image": "Gemini 3 Pro Image for higher-quality TAP portraits",
-  "gemini-flash-latest": "Latest Gemini Flash alias",
+  "gemini-3.6-flash": "Current production Gemini Flash model",
   "gemini-3.5-flash": "Current stable Gemini Flash model",
-  "gemini-3.1-pro": "Preview Gemini Pro model",
+  "gemini-3.5-flash-lite": "Current low-latency Gemini Flash-Lite model",
+  "gemini-3.1-pro-preview": "Preview Gemini Pro model",
   "gemini-3.1-flash-lite": "Lightweight Gemini Flash model",
-  "gemini-3-flash": "Preview Gemini Flash model",
+  "gemini-3-flash-preview": "Previous preview Gemini Flash model",
   // DeepSeek
   "deepseek-v4-flash": "Current DeepSeek chat model",
   "deepseek-v4-pro": "Current DeepSeek reasoning model",
-  "deepseek-chat": "DeepSeek chat model",
-  "deepseek-reasoner": "DeepSeek reasoning model",
   // Perplexity
   "sonar-pro": "Advanced search with grounding",
   sonar: "Lightweight, cost-effective search",
@@ -221,18 +251,20 @@ function normaliseModelForProvider(provider: AiProviderKind, model?: string | nu
   if (!m) return PROVIDER_META[provider].defaultModel;
   if (
     provider === "gemini" &&
-    (/^gemini-1(?:\.|$|-)/i.test(m) ||
-      /^gemini-2(?:\.|$|-)/i.test(m) ||
-      key === "gemini-pro")
+    (/^gemini-1(?:\.|$|-)/i.test(m) || /^gemini-2(?:\.|$|-)/i.test(m) || key === "gemini-pro")
   )
-    return "gemini-flash-latest";
+    return "gemini-3.6-flash";
+  if (provider === "gemini" && (key === "gemini-3-flash" || key === "gemini-3-flash-preview")) {
+    return "gemini-3.6-flash";
+  }
+  if (provider === "gemini" && key === "gemini-3.1-pro") return "gemini-3.1-pro-preview";
   if (provider === "anthropic") {
     const aliases: Record<string, string> = {
       "claude-3-5-sonnet": "claude-sonnet-4-6",
       "claude-3-5-sonnet-latest": "claude-sonnet-4-6",
       "claude-3-5-haiku-latest": "claude-haiku-4-5",
-      "claude-sonnet-latest": "claude-sonnet-4-6",
-      "claude-opus-latest": "claude-opus-4-7",
+      "claude-sonnet-latest": "claude-sonnet-5",
+      "claude-opus-latest": "claude-opus-5",
       "claude-haiku-latest": "claude-haiku-4-5",
     };
     return aliases[key] || m;
@@ -551,6 +583,17 @@ function ProviderEditDialog({
   const [showKey, setShowKey] = useState(false);
   const [isDefault, setIsDefault] = useState(false);
 
+  const discoveredModels = useQuery<{ ok: boolean; message: string; models: string[] }>({
+    queryKey: ["/api/v1/ai/providers", initial?.id, "models"],
+    queryFn: async () => {
+      const response = await apiRequest("GET", `/api/v1/ai/providers/${initial!.id}/models`);
+      return response.json();
+    },
+    enabled: open && !!initial?.id && !readOnly,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+
   useEffect(() => {
     if (open) {
       const p = initial?.provider ?? "openai";
@@ -575,11 +618,10 @@ function ProviderEditDialog({
         isDefault,
       };
       if (apiKey) payload.apiKey = apiKey;
-      if (initial?.id) {
-        return apiRequest("PUT", `/api/v1/ai/providers/${initial.id}`, payload);
-      } else {
-        return apiRequest("POST", "/api/v1/ai/providers", payload);
-      }
+      const response = initial?.id
+        ? await apiRequest("PUT", `/api/v1/ai/providers/${initial.id}`, payload)
+        : await apiRequest("POST", "/api/v1/ai/providers", payload);
+      return response.json() as Promise<AiProviderSummary & { assignedDefaultTasks?: AiTask[] }>;
     },
     onSuccess: (saved: any) => {
       setApiKey("");
@@ -587,9 +629,8 @@ function ProviderEditDialog({
       const assigned = Array.isArray(saved?.assignedDefaultTasks) ? saved.assignedDefaultTasks.length : 0;
       toast({
         title: initial?.id ? "Provider updated" : "Provider added",
-        description: assigned > 0
-          ? `${label} was assigned to ${assigned} unassigned AI task${assigned === 1 ? "" : "s"}.`
-          : label,
+        description:
+          assigned > 0 ? `${label} was assigned to ${assigned} unassigned AI task${assigned === 1 ? "" : "s"}.` : label,
       });
       queryClient.invalidateQueries({ queryKey: ["/api/v1/ai/providers"] });
       queryClient.invalidateQueries({ queryKey: ["/api/v1/ai/assignments"] });
@@ -648,7 +689,22 @@ function ProviderEditDialog({
             />
           </div>
           <div>
-            <Label className="text-xs text-muted-foreground">Model</Label>
+            <div className="flex items-center justify-between gap-3">
+              <Label className="text-xs text-muted-foreground">Model</Label>
+              {initial?.id && !readOnly ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-[11px]"
+                  onClick={() => discoveredModels.refetch()}
+                  disabled={discoveredModels.isFetching}
+                >
+                  <RefreshCw size={12} className={`mr-1.5 ${discoveredModels.isFetching ? "animate-spin" : ""}`} />
+                  Refresh available models
+                </Button>
+              ) : null}
+            </div>
             <Input
               value={model}
               onChange={(e) => setModel(e.target.value)}
@@ -657,6 +713,35 @@ function ProviderEditDialog({
               data-testid="input-provider-model"
               disabled={readOnly}
             />
+            {initial?.id && discoveredModels.data?.models?.length ? (
+              <div className="mt-2">
+                <Select value={model} onValueChange={setModel} disabled={readOnly}>
+                  <SelectTrigger className="h-9 font-mono text-xs" data-testid="select-account-model">
+                    <SelectValue placeholder="Choose an account-available model" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-72">
+                    {!discoveredModels.data.models.includes(model) && model ? (
+                      <SelectItem value={model}>{model} · current configuration</SelectItem>
+                    ) : null}
+                    {discoveredModels.data.models.map((availableModel) => (
+                      <SelectItem key={availableModel} value={availableModel}>
+                        {availableModel}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  Reported by the configured provider account. Changing a model still requires a successful connection
+                  test.
+                </p>
+              </div>
+            ) : discoveredModels.isFetching ? (
+              <p className="mt-1 text-[10px] text-muted-foreground">Checking models available to this account...</p>
+            ) : discoveredModels.isError ? (
+              <p className="mt-1 text-[10px] text-amber-700">
+                Could not list account models. The custom model field remains available.
+              </p>
+            ) : null}
             {MODEL_PRESETS[provider]?.length > 0 && (
               <div className="mt-1.5 space-y-1">
                 <div className="flex flex-wrap gap-1">
@@ -734,7 +819,7 @@ function ProviderEditDialog({
               data-testid="switch-provider-default"
               disabled={readOnly}
             />
-            <span>Use as default for unassigned tasks</span>
+            <span>Make default and assign currently unassigned tasks</span>
           </label>
         </div>
         <DialogFooter>
@@ -771,14 +856,15 @@ function IntegrationsPanel({ readOnly = false }: { readOnly?: boolean }) {
   const [bearerToken, setBearerToken] = useState("");
   const [showToken, setShowToken] = useState(false);
   const [clearBearerToken, setClearBearerToken] = useState(false);
+  const [xPanelOpen, setXPanelOpen] = useState(false);
 
   const { data: settings, isLoading } = useQuery<XIntegrationSettingsDTO>({
     queryKey: ["/api/v1/integrations/x"],
-    enabled: !readOnly,
+    enabled: !readOnly && xPanelOpen,
   });
   const { data: smtpSettings } = useQuery<SmtpSettingsDTO>({
     queryKey: ["/api/v1/email-delivery/settings"],
-    enabled: !readOnly,
+    enabled: !readOnly && emailSettingsOpen,
   });
 
   useEffect(() => {
@@ -810,11 +896,12 @@ function IntegrationsPanel({ readOnly = false }: { readOnly?: boolean }) {
           : "FalconFeeds.io ingestion is disabled.",
       });
     },
-    onError: (error: Error) => toast({
-      title: "Could not save X integration",
-      description: error.message,
-      variant: "destructive",
-    }),
+    onError: (error: Error) =>
+      toast({
+        title: "Could not save X integration",
+        description: error.message,
+        variant: "destructive",
+      }),
   });
 
   const test = useMutation({
@@ -833,16 +920,26 @@ function IntegrationsPanel({ readOnly = false }: { readOnly?: boolean }) {
   });
 
   const configured = readOnly ? false : settings?.configured === true;
-  const status = !enabled
+  const status = !settings
+    ? { label: "Open to load", tone: "border-border bg-muted/40 text-muted-foreground" }
+    : !enabled
     ? { label: "Disabled", tone: "border-border bg-muted/40 text-muted-foreground" }
     : configured
       ? { label: "Configured", tone: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" }
-      : { label: "Credential required", tone: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300" };
-  const emailStatus = !smtpSettings?.enabled
-    ? { label: "Disabled", tone: "border-border bg-muted/40 text-muted-foreground" }
-    : smtpSettings.configured
-      ? { label: "Configured", tone: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" }
-      : { label: "Setup required", tone: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300" };
+      : {
+          label: "Credential required",
+          tone: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+        };
+  const emailStatus = !smtpSettings
+    ? { label: "Open to load", tone: "border-border bg-muted/40 text-muted-foreground" }
+    : !smtpSettings.enabled
+      ? { label: "Disabled", tone: "border-border bg-muted/40 text-muted-foreground" }
+      : smtpSettings.configured
+        ? {
+            label: "Configured",
+            tone: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+          }
+        : { label: "Setup required", tone: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300" };
 
   return (
     <section className="space-y-4">
@@ -858,8 +955,13 @@ function IntegrationsPanel({ readOnly = false }: { readOnly?: boolean }) {
         title="Email delivery"
         description="Send approved client briefs through the workspace SMTP account."
         iconClassName="border-cyan-500/20 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300"
-        badges={<Badge variant="outline" className={emailStatus.tone}>{emailStatus.label}</Badge>}
-        action={<Button
+        badges={
+          <Badge variant="outline" className={emailStatus.tone}>
+            {emailStatus.label}
+          </Badge>
+        }
+        action={
+          <Button
             variant="outline"
             onClick={() => {
               if (readOnly) {
@@ -870,28 +972,47 @@ function IntegrationsPanel({ readOnly = false }: { readOnly?: boolean }) {
             }}
             className={readOnly ? "cursor-not-allowed opacity-55 hover:opacity-70" : undefined}
           >
-            <Settings2 size={14} className="mr-2" />Configure
-          </Button>}
+            <Settings2 size={14} className="mr-2" />
+            Configure
+          </Button>
+        }
       >
         <div className="bg-muted/10 px-5 py-4 text-xs text-muted-foreground">
           {smtpSettings?.configured ? (
             <div className="flex flex-wrap gap-x-5 gap-y-2">
-              <span>Sender <strong className="font-medium text-foreground">{smtpSettings.fromAddress}</strong></span>
-              <span>Server <strong className="font-mono font-medium text-foreground">{smtpSettings.host}:{smtpSettings.port}</strong></span>
+              <span>
+                Sender <strong className="font-medium text-foreground">{smtpSettings.fromAddress}</strong>
+              </span>
+              <span>
+                Server{" "}
+                <strong className="font-mono font-medium text-foreground">
+                  {smtpSettings.host}:{smtpSettings.port}
+                </strong>
+              </span>
               <span>{smtpSettings.secure ? "Implicit TLS" : "STARTTLS"}</span>
             </div>
-          ) : "Open Configure to add a workspace SMTP account."}
+          ) : (
+            "Open Configure to add a workspace SMTP account."
+          )}
         </div>
       </ConnectorPanel>
 
       <ConnectorPanel
+        open={xPanelOpen}
+        onOpenChange={setXPanelOpen}
         icon={<RadioTower size={18} />}
         title="X ransomware alerts"
         description="Ingest ransomware and extortion early warnings from FalconFeeds.io through the official X API."
-        badges={<Badge variant="outline" className={status.tone}>{status.label}</Badge>}
+        badges={
+          <Badge variant="outline" className={status.tone}>
+            {status.label}
+          </Badge>
+        }
         action={
           <div className="flex items-center gap-3">
-            <Label htmlFor="x-integration-enabled" className="text-xs text-muted-foreground">Enable ingest</Label>
+            <Label htmlFor="x-integration-enabled" className="text-xs text-muted-foreground">
+              Enable ingest
+            </Label>
             <Switch
               id="x-integration-enabled"
               checked={enabled}
@@ -902,7 +1023,6 @@ function IntegrationsPanel({ readOnly = false }: { readOnly?: boolean }) {
           </div>
         }
       >
-
         <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_280px]">
           <div className="space-y-5 px-5 py-5">
             <div className="grid gap-4 sm:grid-cols-2">
@@ -995,11 +1115,15 @@ function IntegrationsPanel({ readOnly = false }: { readOnly?: boolean }) {
               </div>
               <div className="flex items-center justify-between gap-3">
                 <span className="text-muted-foreground">Last tested</span>
-                <span className="text-right font-medium">{settings?.lastTestedAt ? fmtTime(settings.lastTestedAt) : "Never"}</span>
+                <span className="text-right font-medium">
+                  {settings?.lastTestedAt ? fmtTime(settings.lastTestedAt) : "Never"}
+                </span>
               </div>
             </div>
             {settings?.lastTestMessage ? (
-              <div className={`mt-4 rounded-md border px-3 py-2 text-xs ${settings.lastTestOk ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300" : "border-rose-500/20 bg-rose-500/5 text-rose-700 dark:text-rose-300"}`}>
+              <div
+                className={`mt-4 rounded-md border px-3 py-2 text-xs ${settings.lastTestOk ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300" : "border-rose-500/20 bg-rose-500/5 text-rose-700 dark:text-rose-300"}`}
+              >
                 {settings.lastTestMessage}
               </div>
             ) : null}
@@ -1009,14 +1133,22 @@ function IntegrationsPanel({ readOnly = false }: { readOnly?: boolean }) {
                 onClick={() => test.mutate()}
                 disabled={readOnly || test.isPending || !configured}
               >
-                {test.isPending ? <Loader2 size={14} className="mr-2 animate-spin" /> : <RadioTower size={14} className="mr-2" />}
+                {test.isPending ? (
+                  <Loader2 size={14} className="mr-2 animate-spin" />
+                ) : (
+                  <RadioTower size={14} className="mr-2" />
+                )}
                 Test connection
               </Button>
               <Button
                 onClick={() => save.mutate()}
                 disabled={readOnly || save.isPending || isLoading || (enabled && !configured && !bearerToken)}
               >
-                {save.isPending ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Save size={14} className="mr-2" />}
+                {save.isPending ? (
+                  <Loader2 size={14} className="mr-2 animate-spin" />
+                ) : (
+                  <Save size={14} className="mr-2" />
+                )}
                 Save integration
               </Button>
             </div>
@@ -1028,7 +1160,9 @@ function IntegrationsPanel({ readOnly = false }: { readOnly?: boolean }) {
 
       <div className="pt-2">
         <div className="text-sm font-semibold">Community and open-standard connectors</div>
-        <p className="mt-1 text-xs text-muted-foreground">Free services remain subject to provider fair-use terms and workspace-specific quotas.</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Free services remain subject to provider fair-use terms and workspace-specific quotas.
+        </p>
       </div>
       {(["abusech", "taxii", "misp", "urlscan", "greynoise"] as const).map((kind) => (
         <CommunityIntegrationCard key={kind} kind={kind} readOnly={readOnly} />
@@ -1061,8 +1195,10 @@ export default function AISetup() {
   });
   const assignments = assignmentsData?.assignments;
   const visibleTasks = useMemo(
-    () => (assignmentsData?.tasks ?? providersData?.tasks ?? [...BATCH_ONE_AI_TASKS])
-      .filter((task) => mssMode || task !== "client_digest"),
+    () =>
+      (assignmentsData?.tasks ?? providersData?.tasks ?? [...BATCH_ONE_AI_TASKS]).filter(
+        (task) => mssMode || task !== "client_digest",
+      ),
     [assignmentsData?.tasks, providersData?.tasks, mssMode],
   );
 
@@ -1143,7 +1279,10 @@ export default function AISetup() {
                   </Button>
                 </>
               ) : (
-                <Badge variant="secondary"><RadioTower size={12} className="mr-1" />Source integrations</Badge>
+                <Badge variant="secondary">
+                  <RadioTower size={12} className="mr-1" />
+                  Source integrations
+                </Badge>
               )}
             </div>
           }
@@ -1151,8 +1290,14 @@ export default function AISetup() {
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="mb-6">
           <TabsList>
-            <TabsTrigger value="providers"><Sparkles size={14} className="mr-2" />AI providers</TabsTrigger>
-            <TabsTrigger value="integrations"><RadioTower size={14} className="mr-2" />Integrations</TabsTrigger>
+            <TabsTrigger value="providers">
+              <Sparkles size={14} className="mr-2" />
+              AI providers
+            </TabsTrigger>
+            <TabsTrigger value="integrations">
+              <RadioTower size={14} className="mr-2" />
+              Integrations
+            </TabsTrigger>
           </TabsList>
         </Tabs>
 
@@ -1162,134 +1307,147 @@ export default function AISetup() {
           </Card>
         )}
 
-        {activeTab === "providers" ? <><section className="mb-8">
-          <div className="flex items-center gap-2 mb-3">
-            <div className="text-sm font-semibold">Providers</div>
-            <div className="text-xs text-muted-foreground">{providers.length} configured</div>
-          </div>
-
-          {providersLoading ? (
-            <Card className="p-12 text-center text-sm text-muted-foreground">Loading…</Card>
-          ) : providers.length === 0 ? (
-            <Card className="p-12 text-center">
-              <Sparkles className="mx-auto mb-3 text-muted-foreground" size={28} />
-              <div className="text-sm font-medium">No AI providers configured</div>
-              <div className="text-xs text-muted-foreground mt-1">Add one to enable triage and analysis.</div>
-            </Card>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-              {providers.map((p) => (
-                <ProviderCard
-                  key={p.id}
-                  p={p}
-                  onEdit={() => {
-                    setEditing(p);
-                    setEditOpen(true);
-                  }}
-                  onDelete={() => del.mutate(p.id)}
-                  readOnly={STATIC_DEMO_MODE}
-                />
-              ))}
-            </div>
-          )}
-        </section>
-
-        <section>
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <div className="text-sm font-semibold">Task routing</div>
-              <div className="text-xs text-muted-foreground">
-                Pick which provider handles BatchOne intel and TAP workloads.
+        {activeTab === "providers" ? (
+          <>
+            <section className="mb-8">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="text-sm font-semibold">Providers</div>
+                <div className="text-xs text-muted-foreground">{providers.length} configured</div>
               </div>
-            </div>
-            <Button
-              onClick={() => {
-                if (STATIC_DEMO_MODE) {
-                  showStaticDemoNotice({ kind: "write", action: "Task routing changes restricted" });
-                  return;
-                }
-                saveAssignments.mutate();
-              }}
-              disabled={!STATIC_DEMO_MODE && (!dirty || saveAssignments.isPending || usableCount === 0)}
-              className={STATIC_DEMO_MODE ? "cursor-not-allowed opacity-55 hover:opacity-70" : undefined}
-              data-testid="button-save-assignments"
-              title={STATIC_DEMO_MODE ? "Routing changes are disabled in the static public demo" : undefined}
-            >
-              {saveAssignments.isPending ? (
-                <>
-                  <Loader2 size={14} className="mr-1.5 animate-spin" />
-                  Saving
-                </>
+
+              {providersLoading ? (
+                <Card className="p-12 text-center text-sm text-muted-foreground">Loading…</Card>
+              ) : providers.length === 0 ? (
+                <Card className="p-12 text-center">
+                  <Sparkles className="mx-auto mb-3 text-muted-foreground" size={28} />
+                  <div className="text-sm font-medium">No AI providers configured</div>
+                  <div className="text-xs text-muted-foreground mt-1">Add one to enable triage and analysis.</div>
+                </Card>
               ) : (
-                <>
-                  <Save size={14} className="mr-1.5" />
-                  Save routing
-                </>
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                  {providers.map((p) => (
+                    <ProviderCard
+                      key={p.id}
+                      p={p}
+                      onEdit={() => {
+                        setEditing(p);
+                        setEditOpen(true);
+                      }}
+                      onDelete={() => del.mutate(p.id)}
+                      readOnly={STATIC_DEMO_MODE}
+                    />
+                  ))}
+                </div>
               )}
-            </Button>
-          </div>
+            </section>
 
-          {/* Routing grid — `auto-rows-fr` makes every row stretch to the tallest
-           *  cell, so the dropdown row at the bottom of each card aligns across
-           *  columns regardless of how long the task description is. */}
-          <Card className="overflow-hidden">
-            <div className="grid grid-cols-1 md:grid-cols-2 auto-rows-fr md:divide-x divide-y md:divide-y-0">
-              {visibleTasks.map((task, idx) => {
-                const meta = taskMeta(task);
-                const taskProviders = keyedProviders.filter((p) => providerSupportsTask(p, task));
-                const assigned = draftAssignments[task] ?? "";
-                const assignedProvider = assigned ? providerById.get(assigned) : undefined;
-                const value = assignedProvider && providerSupportsTask(assignedProvider, task) ? assigned : "";
-                // Row separator: every cell from index 2 onward sits on a new
-                // grid row in 2-col layout, so it needs a top border to keep
-                // the divider rhythm intact when `divide-y` is hidden at `md`.
-                const needsRowBorder = idx >= 2;
-                return (
-                  <div key={task} className={`p-4 flex flex-col h-full ${needsRowBorder ? "md:border-t" : ""}`}>
-                    <div className="flex items-start justify-between gap-3 mb-2">
-                      <div className="min-w-0">
-                        <div className="text-sm font-medium" data-testid={`text-task-label-${task}`}>
-                          {meta.label}
-                        </div>
-                        <div className="text-xs text-muted-foreground mt-0.5">{meta.description}</div>
-                      </div>
-                      <Badge variant="outline" className="text-[10px] font-mono shrink-0 uppercase">
-                        {task}
-                      </Badge>
-                    </div>
-                    <Select
-                      value={value}
-                      onValueChange={(v) => setDraftAssignments((d) => ({ ...d, [task]: v }))}
-                      disabled={STATIC_DEMO_MODE || taskProviders.length === 0}
-                    >
-                      <SelectTrigger className="h-9 text-sm mt-auto" data-testid={`select-assignment-${task}`}>
-                        <SelectValue
-                          placeholder={
-                            taskProviders.length === 0 ? "No compatible live-tested providers" : "Pick a provider…"
-                          }
-                        />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {taskProviders.map((p) => (
-                          <SelectItem key={p.id} value={p.id} data-testid={`option-provider-${task}-${p.id}`}>
-                            <span className="font-medium">{p.label}</span>
-                            <span className="text-muted-foreground font-mono text-[10px] ml-2">{p.model}</span>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+            <section>
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <div className="text-sm font-semibold">Task routing</div>
+                  <div className="text-xs text-muted-foreground">
+                    Pick which provider handles BatchOne intel and TAP workloads.
                   </div>
-                );
-              })}
-            </div>
-          </Card>
+                </div>
+                <Button
+                  onClick={() => {
+                    if (STATIC_DEMO_MODE) {
+                      showStaticDemoNotice({ kind: "write", action: "Task routing changes restricted" });
+                      return;
+                    }
+                    saveAssignments.mutate();
+                  }}
+                  disabled={!STATIC_DEMO_MODE && (!dirty || saveAssignments.isPending || usableCount === 0)}
+                  className={STATIC_DEMO_MODE ? "cursor-not-allowed opacity-55 hover:opacity-70" : undefined}
+                  data-testid="button-save-assignments"
+                  title={STATIC_DEMO_MODE ? "Routing changes are disabled in the static public demo" : undefined}
+                >
+                  {saveAssignments.isPending ? (
+                    <>
+                      <Loader2 size={14} className="mr-1.5 animate-spin" />
+                      Saving
+                    </>
+                  ) : (
+                    <>
+                      <Save size={14} className="mr-1.5" />
+                      Save routing
+                    </>
+                  )}
+                </Button>
+              </div>
 
-          {usableCount === 0 && (
-            <div className="mt-3 text-xs text-muted-foreground">
-              Save an API key, enable the provider, and pass its live test to assign tasks and unlock AI features.
-            </div>
-          )}
-        </section></> : <IntegrationsPanel readOnly={STATIC_DEMO_MODE} />}
+              {/* Routing grid — `auto-rows-fr` makes every row stretch to the tallest
+               *  cell, so the dropdown row at the bottom of each card aligns across
+               *  columns regardless of how long the task description is. */}
+              <Card className="overflow-hidden">
+                <div className="grid grid-cols-1 md:grid-cols-2 auto-rows-fr md:divide-x divide-y md:divide-y-0">
+                  {visibleTasks.map((task, idx) => {
+                    const meta = taskMeta(task);
+                    const assigned = draftAssignments[task] ?? "";
+                    const taskProviders = providers.filter(
+                      (p) =>
+                        providerSupportsTask(p, task) &&
+                        ((p.enabled && p.hasKey && p.lastTestOk === true) || p.id === assigned),
+                    );
+                    const assignedProvider = assigned ? providerById.get(assigned) : undefined;
+                    const value = assignedProvider && providerSupportsTask(assignedProvider, task) ? assigned : "";
+                    // Row separator: every cell from index 2 onward sits on a new
+                    // grid row in 2-col layout, so it needs a top border to keep
+                    // the divider rhythm intact when `divide-y` is hidden at `md`.
+                    const needsRowBorder = idx >= 2;
+                    return (
+                      <div key={task} className={`p-4 flex flex-col h-full ${needsRowBorder ? "md:border-t" : ""}`}>
+                        <div className="flex items-start justify-between gap-3 mb-2">
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium" data-testid={`text-task-label-${task}`}>
+                              {meta.label}
+                            </div>
+                            <div className="text-xs text-muted-foreground mt-0.5">{meta.description}</div>
+                          </div>
+                          <Badge variant="outline" className="text-[10px] font-mono shrink-0 uppercase">
+                            {task}
+                          </Badge>
+                        </div>
+                        <Select
+                          value={value}
+                          onValueChange={(v) => setDraftAssignments((d) => ({ ...d, [task]: v }))}
+                          disabled={STATIC_DEMO_MODE || taskProviders.length === 0}
+                        >
+                          <SelectTrigger className="h-9 text-sm mt-auto" data-testid={`select-assignment-${task}`}>
+                            <SelectValue
+                              placeholder={
+                                taskProviders.length === 0 ? "No compatible live-tested providers" : "Pick a provider…"
+                              }
+                            />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {taskProviders.map((p) => (
+                              <SelectItem key={p.id} value={p.id} data-testid={`option-provider-${task}-${p.id}`}>
+                                <span className="font-medium">{p.label}</span>
+                                <span className="text-muted-foreground font-mono text-[10px] ml-2">{p.model}</span>
+                                {(!p.enabled || !p.hasKey || p.lastTestOk !== true) && (
+                                  <span className="text-amber-600 text-[10px] ml-2">needs live test</span>
+                                )}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    );
+                  })}
+                </div>
+              </Card>
+
+              {usableCount === 0 && (
+                <div className="mt-3 text-xs text-muted-foreground">
+                  Save an API key, enable the provider, and pass its live test to assign tasks and unlock AI features.
+                </div>
+              )}
+            </section>
+          </>
+        ) : (
+          <IntegrationsPanel readOnly={STATIC_DEMO_MODE} />
+        )}
 
         <ProviderEditDialog open={editOpen} onOpenChange={setEditOpen} initial={editing} readOnly={STATIC_DEMO_MODE} />
       </div>

@@ -20,6 +20,7 @@ import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import type { ThreatActorDTO } from "@shared/schema";
 import { storage } from "./storage";
+import { resolveAiPrompt } from "./promptRegistry";
 import { liveGenerateImage } from "./aiLive";
 
 const execFileP = promisify(execFile);
@@ -219,10 +220,11 @@ export async function generateActorPortrait(
 
     storage.setThreatActorPortraitStatus(tenantId, actorId, "generating");
     try {
-      const prompt = buildPortraitPrompt(actor);
+      const basePrompt = buildPortraitPrompt(actor);
       let absPath: string;
       const provider = storage.resolveAiPortraitProvider(tenantId);
       if (provider && isTapPortraitProvider(provider)) {
+        const prompt = resolveAiPrompt("tap_portrait", provider, basePrompt);
         const generated = liveGenerateImage(provider, prompt, { timeoutSeconds: 300 });
         if (!generated.ok || !generated.data) {
           throw new Error(generated.message || "AI provider did not return portrait image data");
@@ -231,7 +233,7 @@ export async function generateActorPortrait(
         absPath = join(PORTRAITS_DIR, `${actorId}.png`);
         writeFileSync(absPath, generated.data);
       } else {
-        absPath = await runImageGen(prompt, actorId);
+        absPath = await runImageGen(basePrompt, actorId);
       }
 
       // Normalize: ensure the file is at PORTRAITS_DIR/<actorId>.png so the

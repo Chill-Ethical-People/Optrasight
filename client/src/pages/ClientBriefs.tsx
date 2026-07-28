@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import ReactMarkdown from "react-markdown";
@@ -12,14 +12,18 @@ import {
   Mail,
   PencilLine,
   Loader2,
+  Megaphone,
   MailCheck,
   Inbox,
+  RadioTower,
   Save,
   Send,
   Settings2,
+  ShieldCheck,
   Sparkles,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { ClientBriefGuideDialog } from "@/components/ClientBriefGuideDialog";
 import { EmailDeliverySettingsDialog } from "@/components/EmailDeliverySettingsDialog";
 import { PageHeader } from "@/components/PageHeader";
 import { Badge } from "@/components/ui/badge";
@@ -47,6 +51,82 @@ import type { ClientDigestDTO, ClientProfileDTO, OsintFindingDTO, SmtpSettingsDT
 type ProfilesResponse = { profiles: ClientProfileDTO[] };
 type FindingsResponse = { findings: OsintFindingDTO[] };
 type DigestsResponse = { digests: ClientDigestDTO[] };
+type DeliveryJob = {
+  id: string;
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
+  progressPct: number;
+  result?: {
+    recipientCount: number;
+    acceptedCount: number;
+    rejectedCount: number;
+    messageId: string;
+  } | null;
+  error?: {
+    message?: string;
+    code?: string | null;
+    retryable?: boolean;
+    retryAfterSeconds?: number | null;
+  } | null;
+};
+
+type NotificationAudience = "cti" | "managed" | "marketing";
+
+const notificationAudiences: Array<{
+  id: NotificationAudience;
+  label: string;
+  shortLabel: string;
+  cadence: string;
+  purpose: string;
+  guardrail: string;
+  icon: typeof ShieldCheck;
+  railClass: string;
+  activeClass: string;
+  iconClass: string;
+}> = [
+  {
+    id: "cti",
+    label: "CTI subscription clients",
+    shortLabel: "CTI subscription",
+    cadence: "Scheduled digest + material alerts",
+    purpose: "Evidence-led intelligence with actor, TTP, IOC, and mitigation context.",
+    guardrail: "Deliver only analyst-approved, subscription-scoped intelligence.",
+    icon: ShieldCheck,
+    railClass: "bg-success",
+    activeClass: "border-success/40 bg-success/5",
+    iconClass: "text-success",
+  },
+  {
+    id: "managed",
+    label: "MSS / MDR clients",
+    shortLabel: "MSS / MDR",
+    cadence: "Immediate operations + service digest",
+    purpose: "Actionable exposure, detection, investigation, and response updates.",
+    guardrail: "Route urgent notices through the service workflow with acknowledgement.",
+    icon: RadioTower,
+    railClass: "bg-signal",
+    activeClass: "border-signal/50 bg-signal/5",
+    iconClass: "text-signal-2",
+  },
+  {
+    id: "marketing",
+    label: "Other opted-in contacts",
+    shortLabel: "Marketing",
+    cadence: "Monthly or campaign-based bulletin",
+    purpose: "Sanitized thought leadership, product news, and public threat themes.",
+    guardrail: "Keep consent, suppression, and recipient lists separate from client delivery.",
+    icon: Megaphone,
+    railClass: "bg-primary",
+    activeClass: "border-primary/35 bg-brand-soft/55",
+    iconClass: "text-primary",
+  },
+];
+
+function recommendedNotificationAudience(clientTypes: string[]): NotificationAudience | null {
+  const types = new Set(clientTypes.map((value) => value.trim().toUpperCase()));
+  if (types.has("MSS") || types.has("MDR")) return "managed";
+  if (types.has("TI") || types.has("CTI")) return "cti";
+  return null;
+}
 
 const cadenceDays: Record<ClientProfileDTO["digestCadence"], number> = {
   daily: 1,
@@ -66,13 +146,8 @@ function severityClass(severity: string) {
   return "border-sky-200 bg-sky-50 text-sky-700";
 }
 
-function emailHeadingTone(label: string) {
-  const value = label.toLowerCase();
-  if (value.startsWith("critical")) return "border-red-500 bg-red-50 text-red-800";
-  if (value.startsWith("high")) return "border-orange-500 bg-orange-50 text-orange-800";
-  if (value.startsWith("medium")) return "border-amber-500 bg-amber-50 text-amber-900";
-  if (value.startsWith("low") || value.startsWith("fyi")) return "border-sky-500 bg-sky-50 text-sky-800";
-  return "border-primary bg-[#EEF0FE] text-[#312e81]";
+function emailHeadingTone(_label: string) {
+  return "border-green-700 bg-green-50 text-green-950";
 }
 
 export default function ClientBriefs() {
@@ -86,12 +161,15 @@ export default function ClientBriefs() {
   const profiles = profileData?.profiles.filter((profile) => profile.isActive) ?? [];
   const [clientId, setClientId] = useState("");
   const client = profiles.find((profile) => profile.id === clientId) ?? profiles[0];
+  const recommendedAudience = recommendedNotificationAudience(client?.clientTypes ?? []);
   const [cadence, setCadence] = useState<ClientProfileDTO["digestCadence"]>("weekly");
   const [candidateIds, setCandidateIds] = useState<string[]>([]);
   const [activeDigestId, setActiveDigestId] = useState("");
   const [draftView, setDraftView] = useState<"preview" | "edit">("preview");
   const [emailSettingsOpen, setEmailSettingsOpen] = useState(false);
   const [sendConfirmOpen, setSendConfirmOpen] = useState(false);
+  const [deliveryJobId, setDeliveryJobId] = useState("");
+  const handledDeliveryJobId = useRef("");
 
   const { data: smtpSettings } = useQuery<SmtpSettingsDTO>({
     queryKey: ["/api/v1/email-delivery/settings"],
@@ -118,6 +196,19 @@ export default function ClientBriefs() {
   const digests = digestData?.digests ?? [];
   const activeDigest = digests.find((digest) => digest.id === activeDigestId) ?? digests[0];
   const [preparedEml, setPreparedEml] = useState<{ url: string; fileName: string } | null>(null);
+
+  const { data: deliveryJob } = useQuery<DeliveryJob>({
+    queryKey: ["/api/v1/ai-jobs", deliveryJobId, "full"],
+    queryFn: async () => {
+      const response = await apiRequest("GET", `/api/v1/ai-jobs/${deliveryJobId}/full`);
+      return response.json();
+    },
+    enabled: Boolean(deliveryJobId),
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "completed" || status === "failed" || status === "cancelled" ? false : 1200;
+    },
+  });
 
   useEffect(() => {
     setActiveDigestId(digests[0]?.id ?? "");
@@ -195,7 +286,7 @@ export default function ClientBriefs() {
     onSuccess: () =>
       toast({
         title: "AI brief queued",
-        description: "AI will select the defensibly relevant intelligence and prepare an analyst-review draft.",
+        description: "AI will run client-impact triage, select defensibly relevant intelligence, and prepare an analyst-review draft.",
       }),
     onError: (error: Error) =>
       toast({ title: "Could not generate brief", description: error.message, variant: "destructive" }),
@@ -228,23 +319,16 @@ export default function ClientBriefs() {
         `/api/v1/client-profiles/${client.id}/digests/${activeDigest.id}/send`,
         {},
       );
-      return response.json() as Promise<{
-        recipientCount: number;
-        acceptedCount: number;
-        rejectedCount: number;
-        messageId: string;
-      }>;
+      return response.json() as Promise<{ jobId: string; alreadyQueued?: boolean }>;
     },
-    onSuccess: async (result) => {
-      setSendConfirmOpen(false);
-      await queryClient.invalidateQueries({ queryKey: ["/api/v1/client-profiles", client?.id, "digests"] });
+    onSuccess: (result) => {
+      setDeliveryJobId(result.jobId);
       toast({
-        title: "Client brief sent",
-        description: `${result.acceptedCount} of ${result.recipientCount} recipient deliveries accepted by the SMTP server.`,
+        title: result.alreadyQueued ? "Delivery already in progress" : "Secure delivery started",
+        description: "You can continue working while OptraSight waits for SMTP acceptance.",
       });
     },
     onError: (error: Error) => {
-      setSendConfirmOpen(false);
       const apiError = error instanceof ApiError ? error : null;
       const deferred = apiError?.code === "smtp_temporarily_deferred";
       const timedOut = apiError?.code === "smtp_submission_timeout";
@@ -266,6 +350,26 @@ export default function ClientBriefs() {
     },
   });
 
+  const deliveryPending =
+    sendDraft.isPending ||
+    (Boolean(deliveryJobId) &&
+      (!deliveryJob || deliveryJob.status === "queued" || deliveryJob.status === "running"));
+  const deliveryComplete = deliveryJob?.status === "completed";
+  const deliveryFailed = deliveryJob?.status === "failed" || deliveryJob?.status === "cancelled";
+
+  useEffect(() => {
+    if (!deliveryJob || (deliveryJob.status !== "completed" && deliveryJob.status !== "failed" && deliveryJob.status !== "cancelled")) return;
+    if (handledDeliveryJobId.current === deliveryJob.id) return;
+    handledDeliveryJobId.current = deliveryJob.id;
+    void queryClient.invalidateQueries({ queryKey: ["/api/v1/client-profiles", client?.id, "digests"] });
+    if (deliveryJob.status === "completed") {
+      toast({
+        title: "Client brief accepted",
+        description: `${deliveryJob.result?.acceptedCount ?? 0} of ${deliveryJob.result?.recipientCount ?? 0} recipient deliveries were accepted by the SMTP server.`,
+      });
+    }
+  }, [client?.id, deliveryJob, toast]);
+
   const selectedEvidence = activeDigest
     ? (findingData?.findings ?? []).filter((finding) => activeDigest.findingIds.includes(finding.id))
     : [];
@@ -284,33 +388,38 @@ export default function ClientBriefs() {
           title="Client Briefs"
           description="Turn client-scoped, analyst-triaged intelligence into an AI-curated summary and an auditable email draft."
           actions={
-            client ? (
-              <div className="flex flex-wrap items-center gap-2">
-                {isAdmin ? (
-                  <Button variant="outline" onClick={() => setEmailSettingsOpen(true)}>
-                    <Settings2 size={15} className="mr-2" />
-                    Email settings
-                    {smtpSettings?.enabled && smtpSettings.configured ? (
-                      <span
-                        className="ml-2 h-2 w-2 rounded-full bg-emerald-500"
-                        aria-label="Email delivery configured"
-                      />
-                    ) : null}
+            <div className="flex flex-wrap items-center gap-2">
+              <ClientBriefGuideDialog />
+              {client ? (
+                <>
+                  {isAdmin ? (
+                    <Button variant="outline" onClick={() => setEmailSettingsOpen(true)}>
+                      <Settings2 size={15} className="mr-2" />
+                      Email settings
+                      {smtpSettings?.enabled && smtpSettings.configured ? (
+                        <span
+                          className="ml-2 h-2 w-2 rounded-full bg-emerald-500"
+                          aria-label="Email delivery configured"
+                        />
+                      ) : null}
+                    </Button>
+                  ) : null}
+                  <Button
+                    onClick={() => generate.mutate()}
+                    disabled={
+                      generate.isPending || candidateIds.length === 0 || client.notificationEmails.length === 0
+                    }
+                  >
+                    {generate.isPending ? (
+                      <Loader2 size={15} className="mr-2 animate-spin" />
+                    ) : (
+                      <Sparkles size={15} className="mr-2" />
+                    )}
+                    Generate AI draft
                   </Button>
-                ) : null}
-                <Button
-                  onClick={() => generate.mutate()}
-                  disabled={generate.isPending || candidateIds.length === 0 || client.notificationEmails.length === 0}
-                >
-                  {generate.isPending ? (
-                    <Loader2 size={15} className="mr-2 animate-spin" />
-                  ) : (
-                    <Sparkles size={15} className="mr-2" />
-                  )}
-                  Generate AI draft
-                </Button>
-              </div>
-            ) : null
+                </>
+              ) : null}
+            </div>
           }
         />
 
@@ -373,6 +482,67 @@ export default function ClientBriefs() {
                   <div className="mt-1 font-mono text-xl font-semibold">{digests.length}</div>
                   <div className="mt-0.5 text-[10px] text-muted-foreground">Saved briefs</div>
                 </div>
+              </div>
+            </section>
+
+            <section
+              className="mb-5 overflow-hidden rounded-md border border-border bg-card"
+              aria-labelledby="notification-lanes-title"
+            >
+              <div className="flex flex-col gap-2 border-b border-border px-5 py-4 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <div className="os-eyebrow">Audience routing</div>
+                  <h2 id="notification-lanes-title" className="mt-2 text-sm font-semibold">
+                    Client notification lanes
+                  </h2>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    Separate operational intelligence from consent-based outreach before recipient selection.
+                  </p>
+                </div>
+                <div className="text-[11px] text-muted-foreground">
+                  Suggested lane for {client?.name}:{" "}
+                  <span className="font-semibold text-foreground">
+                    {notificationAudiences.find((item) => item.id === recommendedAudience)?.shortLabel ??
+                      "Review classification"}
+                  </span>
+                </div>
+              </div>
+              <div className="grid md:grid-cols-3">
+                {notificationAudiences.map((audience, index) => {
+                  const AudienceIcon = audience.icon;
+                  const active = recommendedAudience !== null && audience.id === recommendedAudience;
+                  return (
+                    <article
+                      key={audience.id}
+                      className={`min-w-0 border-b border-border px-5 py-4 last:border-b-0 md:border-b-0 md:border-r md:last:border-r-0 ${active ? audience.activeClass : "bg-background/35"}`}
+                    >
+                      <div className={`-mx-5 -mt-4 mb-4 h-1 ${audience.railClass}`} aria-hidden="true" />
+                      <div className="flex items-start gap-3">
+                        <span
+                          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-current/20 bg-background/80 ${audience.iconClass}`}
+                        >
+                          <AudienceIcon size={15} />
+                        </span>
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-mono text-[10px] text-muted-foreground">0{index + 1}</span>
+                            <h3 className="text-xs font-semibold">{audience.label}</h3>
+                            {active ? (
+                              <Badge variant="outline" className="h-5 text-[9px]">
+                                Suggested
+                              </Badge>
+                            ) : null}
+                          </div>
+                          <p className="mt-2 text-[11px] font-medium text-foreground">{audience.cadence}</p>
+                          <p className="mt-1.5 text-[11px] leading-5 text-muted-foreground">{audience.purpose}</p>
+                          <p className="mt-2 border-l-2 border-border pl-2 text-[10px] leading-4 text-muted-foreground">
+                            {audience.guardrail}
+                          </p>
+                        </div>
+                      </div>
+                    </article>
+                  );
+                })}
               </div>
             </section>
 
@@ -594,12 +764,18 @@ export default function ClientBriefs() {
                               type="button"
                               size="sm"
                               className="h-8 px-2.5 text-xs"
-                              onClick={() => setSendConfirmOpen(true)}
+                              onClick={() => {
+                                if (!deliveryPending) {
+                                  setDeliveryJobId("");
+                                  handledDeliveryJobId.current = "";
+                                }
+                                setSendConfirmOpen(true);
+                              }}
                               disabled={
                                 activeDigest.status !== "approved" ||
                                 !smtpSettings?.enabled ||
                                 !smtpSettings.configured ||
-                                sendDraft.isPending
+                                deliveryPending
                               }
                               title={
                                 activeDigest.status !== "approved"
@@ -609,67 +785,68 @@ export default function ClientBriefs() {
                                     : "Send the approved brief to Client Profile recipients"
                               }
                             >
-                              {sendDraft.isPending ? (
+                              {deliveryPending ? (
                                 <Loader2 size={13} className="mr-1.5 animate-spin" />
                               ) : (
                                 <Send size={13} className="mr-1.5" />
                               )}
-                              Send email
+                              {deliveryPending ? "Sending…" : "Send email"}
                             </Button>
                           ) : null}
                         </div>
                       </div>
-                      <div className="bg-[#eef1f5] p-4 sm:p-6 lg:p-8">
-                        <article className="mx-auto w-full max-w-[760px] overflow-hidden border border-[#d0d5dd] bg-white text-[#111827] shadow-sm">
-                          <div className="border-b border-[#e4e7ec] bg-[#f8f9fb] px-5 py-4 text-xs sm:px-7">
+                      <div className="bg-green-50/40 p-4 sm:p-6 lg:p-8">
+                        <article className="mx-auto w-full max-w-[760px] overflow-hidden border border-green-800 bg-white text-green-950 shadow-sm">
+                          <div className="border-b border-green-200 bg-green-50/60 px-5 py-4 text-xs sm:px-7">
                             <div className="grid grid-cols-[58px_minmax(0,1fr)] gap-x-3 gap-y-2">
-                              <span className="font-medium text-[#667085]">From</span>
+                              <span className="font-medium text-green-900">From</span>
                               <span className="font-medium">OptraSight Threat Intelligence</span>
-                              <span className="font-medium text-[#667085]">To</span>
+                              <span className="font-medium text-green-900">To</span>
                               <span className="break-words">
                                 {activeDigest.recipients.length
                                   ? activeDigest.recipients.join(", ")
                                   : "Recipient to be added before distribution"}
                               </span>
-                              <span className="self-center font-medium text-[#667085]">Subject</span>
+                              <span className="self-center font-medium text-green-900">Subject</span>
                               {draftView === "edit" ? (
                                 <Input
                                   id="brief-subject"
                                   value={subject}
                                   onChange={(event) => setSubject(event.target.value)}
                                   aria-label="Email subject"
-                                  className="h-8 border-[#cbd5e1] bg-white text-xs font-semibold text-[#111827]"
+                                  className="h-8 border-green-700 bg-white text-xs font-semibold text-green-950 focus-visible:ring-green-700"
                                 />
                               ) : (
                                 <span className="break-words font-semibold">{subject}</span>
                               )}
                             </div>
                           </div>
-                          <header className="border-t-[5px] border-t-primary px-6 py-5 sm:px-8">
+                          <div className="h-[5px] bg-green-700" aria-hidden="true" />
+                          <header className="px-6 py-5 sm:px-8">
                             <div className="flex min-h-[58px] items-start justify-between gap-4">
                               <div className="min-w-0">
                                 {client?.emailLogoUrl ? (
                                   <img
                                     src={client.emailLogoUrl}
                                     alt={`${client.name} logo`}
-                                    className="mb-3 h-12 w-[170px] object-contain object-left"
+                                    className="mb-3 h-12 w-[170px] object-contain object-left grayscale"
                                   />
                                 ) : (
-                                  <Mail size={24} className="mb-3 text-primary" />
+                                  <Mail size={24} className="mb-3 text-green-700" />
                                 )}
                                 <div className="truncate text-lg font-semibold">{client?.name}</div>
-                                <div className="mt-1 text-[10px] font-semibold uppercase text-primary">
+                                <div className="mt-1 text-[10px] font-semibold uppercase text-green-800">
                                   Threat Intelligence Brief
                                 </div>
                               </div>
                               <span
-                                className={`rounded-md border px-2 py-1 text-[10px] font-semibold uppercase ${activeDigest.status === "sent" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-red-200 bg-red-50 text-red-700"}`}
+                                className="rounded-md border border-green-700 bg-green-50 px-2 py-1 text-[10px] font-semibold uppercase text-green-900"
                               >
                                 {activeDigest.status}
                               </span>
                             </div>
                           </header>
-                          <div className="border-y border-[#d0d5dd] bg-[#EEF0FE] px-6 py-3 text-xs text-[#475467] sm:px-8">
+                          <div className="border-y border-green-200 bg-green-50 px-6 py-3 text-xs text-green-950 sm:px-8">
                             {cadenceLabel(activeDigest.cadence)} brief ·{" "}
                             {new Date(activeDigest.periodStart).toLocaleDateString()} -{" "}
                             {new Date(activeDigest.periodEnd).toLocaleDateString()}
@@ -678,10 +855,10 @@ export default function ClientBriefs() {
                             {draftView === "edit" ? (
                               <div>
                                 <div className="mb-2 flex items-center justify-between gap-3">
-                                  <Label htmlFor="brief-body" className="text-xs text-[#344054]">
+                                  <Label htmlFor="brief-body" className="text-xs text-green-950">
                                     Email body
                                   </Label>
-                                  <span className="text-[10px] text-[#667085]">Markdown supported</span>
+                                  <span className="text-[10px] text-green-800">Markdown supported</span>
                                 </div>
                                 <Textarea
                                   id="brief-body"
@@ -689,15 +866,15 @@ export default function ClientBriefs() {
                                   onChange={(event) => setBody(event.target.value)}
                                   rows={28}
                                   aria-label="Email body"
-                                  className="min-h-[520px] resize-y border-[#cbd5e1] bg-white font-sans text-sm leading-6 text-[#111827] focus-visible:ring-primary"
+                                  className="min-h-[520px] resize-y border-green-700 bg-white font-sans text-sm leading-6 text-green-950 focus-visible:ring-green-700"
                                 />
-                                <p className="mt-2 text-[10px] leading-4 text-[#667085]">
+                                <p className="mt-2 text-[10px] leading-4 text-green-800">
                                   Keep severity headings, assessment, recommendations, and reference links in the
                                   message body. Save changes to refresh the formatted preview and EML export.
                                 </p>
                               </div>
                             ) : (
-                              <div className="prose prose-sm max-w-none prose-headings:font-semibold prose-headings:text-[#111827] prose-h3:mb-2 prose-h3:mt-5 prose-h3:text-sm prose-p:leading-6 prose-a:font-medium prose-a:text-primary prose-li:leading-6">
+                              <div className="prose prose-sm max-w-none prose-headings:font-semibold prose-headings:text-green-950 prose-h3:mb-2 prose-h3:mt-5 prose-h3:text-sm prose-p:leading-6 prose-a:font-medium prose-a:text-green-800 prose-a:underline prose-li:leading-6">
                                 <ReactMarkdown
                                   remarkPlugins={[remarkGfm]}
                                   components={{
@@ -718,7 +895,7 @@ export default function ClientBriefs() {
                               </div>
                             )}
                           </div>
-                          <footer className="border-t border-[#e4e7ec] bg-[#111827] px-6 py-3 text-[10px] text-[#d0d5dd] sm:px-8">
+                          <footer className="border-t border-green-900 bg-green-900 px-6 py-3 text-[10px] text-white sm:px-8">
                             {activeDigest.status === "sent"
                               ? "SENT · Delivery outcome recorded in the audit log."
                               : "DRAFT · Analyst approval is required before client distribution."}
@@ -789,40 +966,98 @@ export default function ClientBriefs() {
       ) : null}
       <Dialog
         open={sendConfirmOpen}
-        onOpenChange={(open) => {
-          if (!sendDraft.isPending) setSendConfirmOpen(open);
-        }}
+        onOpenChange={setSendConfirmOpen}
       >
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Send approved client brief?</DialogTitle>
+            <DialogTitle>
+              {deliveryComplete
+                ? "Client brief accepted"
+                : deliveryFailed
+                  ? "Email was not sent"
+                  : deliveryJobId || sendDraft.isPending
+                    ? "Sending client brief"
+                    : "Send approved client brief?"}
+            </DialogTitle>
             <DialogDescription>
-              This external delivery cannot be recalled. OptraSight will record the SMTP result and mark the brief as
-              sent only after the server accepts it.
+              {deliveryComplete
+                ? "The SMTP server accepted the delivery and OptraSight recorded the brief as sent."
+                : deliveryFailed
+                  ? "The SMTP server did not accept this delivery. The brief remains approved and can be retried safely."
+                  : deliveryJobId || sendDraft.isPending
+                    ? "Delivery continues safely in the background. You may close this window and keep working."
+                    : "This external delivery cannot be recalled. OptraSight marks the brief as sent only after the SMTP server accepts it."}
             </DialogDescription>
           </DialogHeader>
-          <div className="rounded-md border border-border bg-muted/20 px-4 py-3 text-sm">
-            <div className="text-xs font-semibold uppercase text-muted-foreground">Recipients</div>
-            <div className="mt-2 break-words leading-6">
-              {activeDigest?.recipients.join(", ") || "No recipients configured"}
+          {deliveryJobId || sendDraft.isPending ? (
+            <div className="space-y-4 rounded-md border border-border bg-muted/20 px-4 py-4">
+              <div className="flex items-start gap-3">
+                {deliveryComplete ? (
+                  <CheckCircle2 className="mt-0.5 text-success" size={20} />
+                ) : deliveryFailed ? (
+                  <CircleAlert className="mt-0.5 text-destructive" size={20} />
+                ) : (
+                  <Loader2 className="mt-0.5 animate-spin text-primary" size={20} />
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium">
+                    {deliveryComplete
+                      ? "Server acceptance confirmed"
+                      : deliveryFailed
+                        ? deliveryJob?.error?.message || "Delivery could not be completed."
+                        : !deliveryJob || deliveryJob.status === "queued" || deliveryJob.progressPct < 25
+                          ? "Preparing secure delivery"
+                          : deliveryJob.progressPct < 45
+                            ? "Building the approved email"
+                            : "Waiting for SMTP acceptance"}
+                  </div>
+                  {deliveryFailed && deliveryJob?.error?.retryable ? (
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                      Retry after about {Math.ceil((deliveryJob.error.retryAfterSeconds || 300) / 60)} minutes.
+                    </p>
+                  ) : null}
+                  {deliveryComplete ? (
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                      {deliveryJob?.result?.acceptedCount ?? 0} of {deliveryJob?.result?.recipientCount ?? 0} recipient deliveries accepted.
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-border">
+                <div
+                  className={`h-full rounded-full transition-[width] duration-500 ${deliveryFailed ? "bg-destructive" : deliveryComplete ? "bg-success" : "bg-primary"}`}
+                  style={{ width: `${deliveryFailed ? 100 : deliveryComplete ? 100 : Math.max(8, deliveryJob?.progressPct ?? 8)}%` }}
+                />
+              </div>
+              <div className="border-t border-border pt-3 text-xs text-muted-foreground">
+                Subject: {subject}
+              </div>
             </div>
-            <div className="mt-3 border-t border-border pt-3 text-xs text-muted-foreground">Subject: {subject}</div>
-          </div>
+          ) : (
+            <div className="rounded-md border border-border bg-muted/20 px-4 py-3 text-sm">
+              <div className="text-xs font-semibold uppercase text-muted-foreground">Recipients</div>
+              <div className="mt-2 break-words leading-6">
+                {activeDigest?.recipients.join(", ") || "No recipients configured"}
+              </div>
+              <div className="mt-3 border-t border-border pt-3 text-xs text-muted-foreground">Subject: {subject}</div>
+            </div>
+          )}
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setSendConfirmOpen(false)} disabled={sendDraft.isPending}>
-              Cancel
-            </Button>
-            <Button
-              onClick={() => sendDraft.mutate()}
-              disabled={sendDraft.isPending || !activeDigest?.recipients.length}
-            >
-              {sendDraft.isPending ? (
-                <Loader2 size={14} className="mr-2 animate-spin" />
-              ) : (
-                <Send size={14} className="mr-2" />
-              )}
-              Send now
-            </Button>
+            {deliveryJobId || sendDraft.isPending ? (
+              <Button onClick={() => setSendConfirmOpen(false)}>
+                {deliveryPending ? "Continue in background" : "Done"}
+              </Button>
+            ) : (
+              <>
+                <Button variant="ghost" onClick={() => setSendConfirmOpen(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={() => sendDraft.mutate()} disabled={sendDraft.isPending || !activeDigest?.recipients.length}>
+                  {sendDraft.isPending ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Send size={14} className="mr-2" />}
+                  Send now
+                </Button>
+              </>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

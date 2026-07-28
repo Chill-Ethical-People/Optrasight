@@ -39,7 +39,9 @@ function ProtectedRoutes() {
   const { user, loading } = useAuth();
   if (loading) return null;
   if (!user) return <Login />;
-  if (user.passwordMustChange || !(user.mfaEnabled && user.mfaVerifiedAt)) return <AccountSecuritySetup />;
+  if (user.passwordMustChange || !(user.mfaEnabled && user.mfaVerifiedAt) || !user.mfaSessionVerifiedAt) {
+    return <AccountSecuritySetup />;
+  }
   if (!user.tenant.operatingMode) return <WorkspaceSetup required />;
   const reviewOnly = user.access_mode === "guest" || user.role === "reviewer";
   const mssMode = user.tenant.operatingMode === "mss";
@@ -51,7 +53,7 @@ function ProtectedRoutes() {
       window.location.hash = "#/osint";
       return <OsintMonitoring />;
     }
-    if (reviewOnly && !["/", "/osint", "/intel", "/threat-actors", "/detection-rules"].includes(hashPath)) {
+    if (reviewOnly && !["/", "/osint", "/intel", "/threat-actors", "/detection-rules", "/account-security"].includes(hashPath)) {
       window.location.hash = "#/osint";
       return <OsintMonitoring />;
     }
@@ -88,6 +90,8 @@ function ProtectedRoutes() {
           return reviewOnly ? <OsintMonitoring /> : <OperationsAudit />;
         case "/platform-users":
           return user.role === "admin" ? <PlatformUsers /> : <OsintMonitoring />;
+        case "/account-security":
+          return <AccountSecuritySetup />;
       }
     }
   }
@@ -103,6 +107,7 @@ function ProtectedRoutes() {
       <Route path="/ai-setup">{reviewOnly ? <OsintMonitoring /> : <AISetup />}</Route>
       <Route path="/operations-audit">{reviewOnly ? <OsintMonitoring /> : <OperationsAudit />}</Route>
       <Route path="/platform-users">{user.role === "admin" ? <PlatformUsers /> : <OsintMonitoring />}</Route>
+      <Route path="/account-security" component={AccountSecuritySetup} />
       <Route component={NotFound} />
     </Switch>
   );

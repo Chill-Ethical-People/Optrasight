@@ -14,6 +14,7 @@ import {
   Download,
   Eye,
   FileText,
+  FileSpreadsheet,
   Globe2,
   Image as ImageIcon,
   Layers3,
@@ -44,6 +45,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
@@ -55,13 +57,40 @@ import {
   CLIENT_DIGEST_TEMPLATE_PLACEHOLDERS,
   DEFAULT_CLIENT_DIGEST_BODY_TEMPLATE,
   DEFAULT_CLIENT_DIGEST_SUBJECT_TEMPLATE,
+  missingRequiredClientDigestPlaceholders,
   unsupportedClientDigestPlaceholders,
 } from "@shared/clientDigestTemplate";
+import {
+  CLIENT_MATCHING_SCOPE_META,
+  MANAGED_SECURITY_MAPPING_TERM_LIMIT,
+  MANAGED_SECURITY_TECHNOLOGY_LIMIT,
+  clientMatchingScopeForTypes,
+  clientProfileScopeLimitErrors,
+  isManagedSecurityClient,
+} from "@shared/clientMatchingScope";
+import {
+  CLIENT_PROFILE_BULK_CSV_TEMPLATE,
+  parseClientProfileBulkCsv,
+  type ClientProfileBulkCsvRecord,
+} from "@shared/clientProfileBulk";
 
 type ProfilesResp = { profiles: ClientProfileDTO[] };
 type OptionsResp = { options: ClientTaxonomyOptionDTO[] };
 type TaxonomiesResp = { clientTypes: Array<{ id: string; label: string }> };
 type DigestsResp = { digests: ClientDigestDTO[] };
+
+function downloadClientProfileBulkTemplate() {
+  const url = URL.createObjectURL(
+    new Blob([CLIENT_PROFILE_BULK_CSV_TEMPLATE], { type: "text/csv;charset=utf-8" }),
+  );
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = "optrasight-client-profile-import.csv";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
 
 function toggle(values: string[], id: string) {
   return values.includes(id) ? values.filter((value) => value !== id) : [...values, id];
@@ -137,6 +166,7 @@ function ScopeEditor({
   options,
   onChange,
   onCreate,
+  maxSelections,
 }: {
   title: string;
   description: string;
@@ -145,6 +175,7 @@ function ScopeEditor({
   options: Array<{ id: string; label: string; category?: string; optionKind?: string; source?: string }>;
   onChange: (next: string[]) => void;
   onCreate?: (kind: ClientTaxonomyKind, label: string) => Promise<string>;
+  maxSelections?: number;
 }) {
   const [query, setQuery] = useState("");
   const [customLabel, setCustomLabel] = useState("");
@@ -273,14 +304,16 @@ function ScopeEditor({
       <div className="mt-4 grid max-h-[440px] gap-2 overflow-y-auto pr-1 sm:grid-cols-2 xl:grid-cols-3">
         {filtered.map((option) => {
           const checked = values.includes(option.id);
+          const limitReached = !checked && maxSelections !== undefined && values.length >= maxSelections;
           return (
             <label
               key={option.id}
-              className={`group flex min-h-14 cursor-pointer items-center gap-3 rounded-md border px-3 py-2.5 transition-colors duration-200 focus-within:ring-2 focus-within:ring-primary/50 ${checked ? "border-primary/45 bg-primary/[0.055]" : "border-border bg-background hover:border-primary/25 hover:bg-muted/40"}`}
+              className={`group flex min-h-14 items-center gap-3 rounded-md border px-3 py-2.5 transition-colors duration-200 focus-within:ring-2 focus-within:ring-primary/50 ${limitReached ? "cursor-not-allowed opacity-45" : "cursor-pointer"} ${checked ? "border-primary/45 bg-primary/[0.055]" : "border-border bg-background hover:border-primary/25 hover:bg-muted/40"}`}
             >
               <Checkbox
                 checked={checked}
                 onCheckedChange={() => onChange(toggle(values, option.id))}
+                disabled={limitReached}
                 aria-label={`${checked ? "Remove" : "Add"} ${option.label}`}
               />
               <span className="min-w-0 flex-1">
@@ -301,6 +334,11 @@ function ScopeEditor({
           </div>
         )}
       </div>
+      {maxSelections !== undefined && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          Up to {maxSelections} option{maxSelections === 1 ? "" : "s"} can be selected for this service type.
+        </p>
+      )}
     </section>
   );
 }
@@ -372,6 +410,350 @@ function CreateClientDialog({ onCreated }: { onCreated: (profile: ClientProfileD
   );
 }
 
+type BulkCreateResult = {
+  requested: number;
+  createdCount: number;
+  failedCount: number;
+  created: ClientProfileDTO[];
+  results: Array<{ row: number; name: string; status: "created" | "failed"; clientId?: string; error?: string }>;
+};
+
+function BulkMultiSelect({
+  label,
+  values,
+  options,
+  onChange,
+  maxSelections,
+}: {
+  label: string;
+  values: string[];
+  options: Array<{ value: string; label: string }>;
+  onChange: (values: string[]) => void;
+  maxSelections?: number;
+}) {
+  const testId = label.toLocaleLowerCase("en-US").replace(/[^a-z0-9]+/g, "-");
+  return (
+    <div>
+      <Label className="text-[11px] text-muted-foreground">{label}</Label>
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            className="mt-1 h-9 w-full justify-between px-3 text-xs font-normal"
+            data-testid={`button-bulk-${testId}`}
+          >
+            <span className="truncate">{values.length ? `${values.length} selected` : `Select ${label.toLowerCase()}`}</span>
+            <ChevronRight size={13} className="rotate-90 text-muted-foreground" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="max-h-72 w-72 overflow-y-auto p-2">
+          <div className="space-y-1">
+            {options.map((option) => {
+              const checked = values.includes(option.value);
+              const disabled = !checked && maxSelections !== undefined && values.length >= maxSelections;
+              return (
+                <label
+                  key={option.value}
+                  className={`flex items-center gap-2 rounded px-2 py-1.5 text-xs ${disabled ? "cursor-not-allowed opacity-45" : "cursor-pointer hover:bg-muted"}`}
+                >
+                  <Checkbox
+                    checked={checked}
+                    disabled={disabled}
+                    onCheckedChange={() => onChange(toggle(values, option.value))}
+                    data-testid={`checkbox-bulk-${testId}-${option.value}`}
+                  />
+                  <span>{option.label}</span>
+                </label>
+              );
+            })}
+          </div>
+          {maxSelections !== undefined && (
+            <p className="border-t px-2 pt-2 text-[10px] text-muted-foreground">Maximum {maxSelections} selections.</p>
+          )}
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
+}
+
+function BulkCreateClientDialog({
+  onCreated,
+  clientTypes,
+  taxonomyOptions,
+}: {
+  onCreated: (clientId: string) => void;
+  clientTypes: Array<{ id: string; label: string }>;
+  taxonomyOptions: ClientTaxonomyOptionDTO[];
+}) {
+  const { toast } = useToast();
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const [open, setOpen] = useState(false);
+  const [csv, setCsv] = useState("");
+  const [createMissingTaxonomyOptions, setCreateMissingTaxonomyOptions] = useState(false);
+  const [lastResult, setLastResult] = useState<BulkCreateResult | null>(null);
+  const preview = useMemo<{ profiles: ClientProfileBulkCsvRecord[]; error: string | null }>(() => {
+    if (!csv.trim()) return { profiles: [], error: null };
+    try {
+      return { profiles: parseClientProfileBulkCsv(csv), error: null };
+    } catch (error) {
+      return { profiles: [], error: error instanceof Error ? error.message : "CSV could not be parsed." };
+    }
+  }, [csv]);
+  const [profilesForImport, setProfilesForImport] = useState<ClientProfileBulkCsvRecord[]>([]);
+  useEffect(() => {
+    setProfilesForImport(preview.error ? [] : preview.profiles);
+  }, [preview]);
+  const profileLimitErrors = useMemo(
+    () => profilesForImport.map((profile) => clientProfileScopeLimitErrors(profile)),
+    [profilesForImport],
+  );
+  const hasProfileLimitErrors = profileLimitErrors.some((errors) => errors.length > 0);
+  const taxonomyPickerOptions = (kind: ClientTaxonomyKind) => taxonomyOptions
+    .filter((option) => option.kind === kind)
+    .map((option) => ({ value: option.label, label: option.label }));
+  const updateProfile = (index: number, patch: Partial<ClientProfileBulkCsvRecord>) => {
+    setProfilesForImport((current) => current.map((profile, profileIndex) =>
+      profileIndex === index ? { ...profile, ...patch } : profile));
+    setLastResult(null);
+  };
+
+  const bulkCreate = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/v1/client-profiles/bulk", {
+        profiles: profilesForImport,
+        createMissingTaxonomyOptions,
+      });
+      return response.json() as Promise<BulkCreateResult>;
+    },
+    onSuccess: async (result) => {
+      setLastResult(result);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["/api/v1/client-profiles"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/v1/client-taxonomy-options"] }),
+      ]);
+      if (result.created[0]?.id) onCreated(result.created[0].id);
+      toast({
+        title: `${result.createdCount} Client Profile${result.createdCount === 1 ? "" : "s"} created`,
+        description: result.failedCount
+          ? `${result.failedCount} row${result.failedCount === 1 ? "" : "s"} need correction. Review the result below.`
+          : "The profiles are ready for client-type-aware intelligence matching.",
+        variant: result.createdCount === 0 ? "destructive" : "default",
+      });
+      if (result.failedCount === 0) {
+        setCsv("");
+        setOpen(false);
+      }
+    },
+    onError: (error: any) =>
+      toast({ title: "Bulk creation failed", description: String(error?.message ?? error), variant: "destructive" }),
+  });
+
+  const readFile = async (file: File) => {
+    if (file.size > 1024 * 1024) {
+      toast({ title: "CSV is too large", description: "Use a CSV smaller than 1MB.", variant: "destructive" });
+      return;
+    }
+    setLastResult(null);
+    setCsv(await file.text());
+    if (fileRef.current) fileRef.current.value = "";
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" className="h-10">
+          <FileSpreadsheet size={15} className="mr-2" /> Bulk import
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-4xl">
+        <DialogHeader>
+          <DialogTitle>Bulk-create Client Profiles</DialogTitle>
+          <DialogDescription>
+            Upload or paste up to 100 CSV rows. Use a vertical bar inside a cell for multiple values. Taxonomy labels
+            and aliases are resolved to canonical IDs before profile creation.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-2">
+          <div className="flex flex-wrap gap-2">
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) void readFile(file);
+              }}
+            />
+            <Button type="button" variant="outline" size="sm" onClick={() => fileRef.current?.click()}>
+              <Upload size={14} className="mr-2" /> Upload CSV
+            </Button>
+            <Button type="button" variant="ghost" size="sm" onClick={downloadClientProfileBulkTemplate}>
+              <Download size={14} className="mr-2" /> Download CSV template
+            </Button>
+          </div>
+
+          <div>
+            <Label htmlFor="bulk-client-csv">CSV content</Label>
+            <Textarea
+              id="bulk-client-csv"
+              value={csv}
+              onChange={(event) => {
+                setCsv(event.target.value);
+                setLastResult(null);
+              }}
+              rows={10}
+              className="mt-2 font-mono text-xs leading-5"
+              placeholder={CLIENT_PROFILE_BULK_CSV_TEMPLATE}
+              data-testid="textarea-client-profile-bulk-csv"
+            />
+          </div>
+
+          <label className="flex items-start gap-3 rounded-md border p-3 text-sm">
+            <Checkbox
+              checked={createMissingTaxonomyOptions}
+              onCheckedChange={(value) => setCreateMissingTaxonomyOptions(value === true)}
+            />
+            <span>
+              <span className="block font-medium">Create unknown taxonomy labels as custom options</span>
+              <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                Leave disabled to catch spelling mistakes. When enabled, unknown geography, industry, and technology
+                labels are created and then linked by canonical ID.
+              </span>
+            </span>
+          </label>
+
+          {preview.error ? (
+            <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+              {preview.error}
+            </div>
+          ) : profilesForImport.length ? (
+            <div className="overflow-hidden rounded-md border">
+              <div className="border-b bg-muted/40 px-3 py-2 text-xs font-semibold">
+                Guided preview · {profilesForImport.length} Client Profile{profilesForImport.length === 1 ? "" : "s"}
+              </div>
+              <div className="max-h-[430px] divide-y overflow-y-auto">
+                {profilesForImport.map((profile, index) => {
+                  const scope = clientMatchingScopeForTypes(profile.clientTypes);
+                  const managed = isManagedSecurityClient(profile.clientTypes);
+                  const rowErrors = profileLimitErrors[index] ?? [];
+                  return (
+                    <div key={index} className="space-y-3 px-3 py-3">
+                      <div className="flex items-center justify-between gap-3 text-xs">
+                        <span className="font-semibold">Row {index + 2}</span>
+                        <Badge variant="outline" className="text-[10px]">{CLIENT_MATCHING_SCOPE_META[scope].label}</Badge>
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                        <div className="lg:col-span-2">
+                          <Label className="text-[11px] text-muted-foreground">Client name</Label>
+                          <Input
+                            value={profile.name}
+                            onChange={(event) => updateProfile(index, { name: event.target.value })}
+                            className="mt-1 h-9 text-xs"
+                            data-testid={`input-bulk-client-name-${index}`}
+                          />
+                        </div>
+                        <BulkMultiSelect
+                          label="Service types"
+                          values={profile.clientTypes}
+                          options={clientTypes.map((option) => ({ value: option.id, label: option.label }))}
+                          onChange={(values) => updateProfile(index, { clientTypes: values })}
+                        />
+                        <div>
+                          <Label className="text-[11px] text-muted-foreground">Digest cadence</Label>
+                          <Select
+                            value={profile.digestCadence}
+                            onValueChange={(value) => updateProfile(index, { digestCadence: value as ClientProfileBulkCsvRecord["digestCadence"] })}
+                          >
+                            <SelectTrigger className="mt-1 h-9 text-xs" data-testid={`select-bulk-cadence-${index}`}><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {(["daily", "weekly", "biweekly", "monthly"] as const).map((cadence) => (
+                                <SelectItem key={cadence} value={cadence}>{cadenceLabel(cadence)}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <BulkMultiSelect
+                          label="Geographies"
+                          values={profile.geographies}
+                          options={taxonomyPickerOptions("geo")}
+                          onChange={(values) => updateProfile(index, { geographies: values })}
+                        />
+                        <BulkMultiSelect
+                          label="Industries"
+                          values={profile.industries}
+                          options={taxonomyPickerOptions("industry")}
+                          onChange={(values) => updateProfile(index, { industries: values })}
+                        />
+                        <BulkMultiSelect
+                          label="Technologies"
+                          values={profile.monitoredTechnologies}
+                          options={taxonomyPickerOptions("technology")}
+                          maxSelections={managed ? MANAGED_SECURITY_TECHNOLOGY_LIMIT : undefined}
+                          onChange={(values) => updateProfile(index, { monitoredTechnologies: values })}
+                        />
+                        <div>
+                          <Label className="text-[11px] text-muted-foreground">
+                            Mapping keywords{managed ? ` (max ${MANAGED_SECURITY_MAPPING_TERM_LIMIT})` : ""}
+                          </Label>
+                          <Input
+                            value={profile.mappingTerms.join(" | ")}
+                            onChange={(event) => updateProfile(index, {
+                              mappingTerms: event.target.value.split(/[|;]/g).map((item) => item.trim()).filter(Boolean),
+                            })}
+                            className="mt-1 h-9 text-xs"
+                            placeholder="brand | business unit"
+                            data-testid={`input-bulk-mapping-keywords-${index}`}
+                          />
+                        </div>
+                      </div>
+                      <label className="flex items-center gap-2 text-xs">
+                        <Checkbox
+                          checked={profile.digestEnabled}
+                          onCheckedChange={(checked) => updateProfile(index, { digestEnabled: checked === true })}
+                          data-testid={`checkbox-bulk-digest-enabled-${index}`}
+                        />
+                        Enable Client Brief delivery
+                      </label>
+                      {rowErrors.length > 0 && (
+                        <p className="text-xs text-destructive">{rowErrors.join(" ")}</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+
+          {lastResult?.failedCount ? (
+            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950">
+              <div className="font-semibold">Rows requiring correction</div>
+              <ul className="mt-2 space-y-1">
+                {lastResult.results.filter((result) => result.status === "failed").map((result) => (
+                  <li key={`${result.row}-${result.name}`}>Row {result.row + 1} · {result.name}: {result.error}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </div>
+
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
+          <Button
+            onClick={() => bulkCreate.mutate()}
+            disabled={bulkCreate.isPending || profilesForImport.length === 0 || !!preview.error || hasProfileLimitErrors}
+          >
+            {bulkCreate.isPending ? <Loader2 size={14} className="mr-2 animate-spin" /> : <FileSpreadsheet size={14} className="mr-2" />}
+            Import {profilesForImport.length || ""} profile{profilesForImport.length === 1 ? "" : "s"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function ArchiveClientDialog({
   clientName,
   disabled,
@@ -435,8 +817,9 @@ export default function ClientProfile() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("profile");
   const [demoEmailOpen, setDemoEmailOpen] = useState(false);
-  const [templateAction, setTemplateAction] = useState<"logo" | "remove-logo" | "docx" | "eml" | null>(null);
+  const [templateAction, setTemplateAction] = useState<"logo" | "remove-logo" | "upload-docx" | "docx" | "eml" | null>(null);
   const logoFileRef = useRef<HTMLInputElement | null>(null);
+  const templateFileRef = useRef<HTMLInputElement | null>(null);
   const [clientQuery, setClientQuery] = useState("");
   const selected = profiles.find((profile) => profile.id === selectedId) ?? profiles[0] ?? null;
 
@@ -558,7 +941,7 @@ export default function ClientProfile() {
       return startBackgroundJob(`/api/v1/client-profiles/${selected.id}/digests/generate`, { cadence: digestCadence });
     },
     onSuccess: () => {
-      toast({ title: "Client digest queued", description: "The AI jobs tray will show generation progress." });
+      toast({ title: "Client-impact brief queued", description: "Client-impact triage and draft generation will appear in the AI jobs tray." });
     },
     onError: (error: any) =>
       toast({
@@ -635,6 +1018,49 @@ export default function ClientProfile() {
     }
   };
 
+  const uploadEmailTemplate = async (file: File) => {
+    if (!selected) return;
+    if (!/\.docx$/i.test(file.name)) {
+      toast({ title: "Unsupported template", description: "Upload a Word .docx document.", variant: "destructive" });
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast({ title: "Template is too large", description: "Use a Word document smaller than 5MB.", variant: "destructive" });
+      return;
+    }
+    setTemplateAction("upload-docx");
+    try {
+      const contentBase64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(reader.error);
+        reader.onload = () => resolve(String(reader.result || "").split(",").pop() || "");
+        reader.readAsDataURL(file);
+      });
+      const response = await apiRequest("POST", `/api/v1/client-profiles/${selected.id}/email-template.docx`, {
+        fileName: file.name,
+        contentBase64,
+      });
+      const uploaded = await response.json() as {
+        subjectTemplate: string;
+        bodyTemplate: string;
+        placeholders: string[];
+        warnings?: string[];
+      };
+      setDigestSubjectTemplate(uploaded.subjectTemplate);
+      setDigestBodyTemplate(uploaded.bodyTemplate);
+      await queryClient.invalidateQueries({ queryKey: ["/api/v1/client-profiles"] });
+      toast({
+        title: "Word template applied",
+        description: `${uploaded.placeholders.length} placeholder${uploaded.placeholders.length === 1 ? "" : "s"} detected${uploaded.warnings?.length ? ` · ${uploaded.warnings[0]}` : ""}`,
+      });
+    } catch (error: any) {
+      toast({ title: "Template upload failed", description: String(error?.message ?? error), variant: "destructive" });
+    } finally {
+      setTemplateAction(null);
+      if (templateFileRef.current) templateFileRef.current.value = "";
+    }
+  };
+
   const downloadEmailTemplate = async (format: "docx" | "eml") => {
     if (!selected) return;
     setTemplateAction(format);
@@ -672,6 +1098,14 @@ export default function ClientProfile() {
     profile.name.toLocaleLowerCase("en-US").includes(clientQuery.trim().toLocaleLowerCase("en-US")),
   );
   const scopeTotal = geos.length + industries.length + technologies.length;
+  const matchingScope = clientMatchingScopeForTypes(clientTypes);
+  const matchingScopeMeta = CLIENT_MATCHING_SCOPE_META[matchingScope];
+  const managedClient = isManagedSecurityClient(clientTypes);
+  const profileScopeLimitErrors = clientProfileScopeLimitErrors({
+    clientTypes,
+    monitoredTechnologies: technologies,
+    mappingTerms: splitMappingTerms(mappingTerms),
+  });
   const demoEmail = demoClientEmail(
     selected?.name ?? "Client",
     digestCadence,
@@ -684,6 +1118,10 @@ export default function ClientProfile() {
       ...unsupportedClientDigestPlaceholders(digestBodyTemplate),
     ]),
   );
+  const missingRequiredTemplateTokens = missingRequiredClientDigestPlaceholders(
+    digestSubjectTemplate,
+    digestBodyTemplate,
+  );
 
   return (
     <AppShell>
@@ -691,7 +1129,19 @@ export default function ClientProfile() {
         <PageHeader
           title="Client Profiles"
           description="Define each client's operational context for precise, ID-based threat-intelligence analysis."
-          actions={<CreateClientDialog onCreated={(profile) => setSelectedId(profile.id)} />}
+          actions={
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="outline" className="h-10" onClick={downloadClientProfileBulkTemplate}>
+                <Download size={15} className="mr-2" /> CSV template
+              </Button>
+              <BulkCreateClientDialog
+                onCreated={setSelectedId}
+                clientTypes={tax?.clientTypes ?? []}
+                taxonomyOptions={options}
+              />
+              <CreateClientDialog onCreated={(profile) => setSelectedId(profile.id)} />
+            </div>
+          }
         />
 
         <div className="overflow-hidden rounded-lg border border-border bg-background shadow-sm">
@@ -800,7 +1250,12 @@ export default function ClientProfile() {
                     <Button
                       onClick={() => save.mutate()}
                       disabled={
-                        save.isPending || !hasChanges || name.trim().length < 2 || unsupportedTemplateTokens.length > 0
+                        save.isPending ||
+                        !hasChanges ||
+                        name.trim().length < 2 ||
+                        profileScopeLimitErrors.length > 0 ||
+                        unsupportedTemplateTokens.length > 0 ||
+                        missingRequiredTemplateTokens.length > 0
                       }
                       className="h-10"
                     >
@@ -813,6 +1268,12 @@ export default function ClientProfile() {
                     </Button>
                   </div>
                 </div>
+
+                {profileScopeLimitErrors.length > 0 && (
+                  <div className="border-b border-destructive/20 bg-destructive/5 px-5 py-3 text-sm text-destructive lg:px-7">
+                    {profileScopeLimitErrors.join(" ")}
+                  </div>
+                )}
 
                 <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                   <div className="border-b border-border px-5 lg:px-7">
@@ -903,6 +1364,7 @@ export default function ClientProfile() {
                           />
                           <div className="mt-2 text-xs text-muted-foreground">
                             {splitMappingTerms(mappingTerms).length} mapping signals
+                            {managedClient ? ` · maximum ${MANAGED_SECURITY_MAPPING_TERM_LIMIT} for MSS/MDR/IR` : ""}
                           </div>
                         </div>
                         <div className="rounded-md border border-cyan-200 bg-cyan-50/70 p-4 text-sm text-slate-700">
@@ -920,13 +1382,24 @@ export default function ClientProfile() {
                   </TabsContent>
 
                   <TabsContent value="services" className="m-0 p-5 lg:p-7">
-                    <ScopeEditor
-                      title="Service coverage"
-                      description="Select the services delivered to this client so analysts can frame recommendations against the actual engagement."
-                      values={clientTypes}
-                      options={clientTypeOptions}
-                      onChange={setClientTypes}
-                    />
+                    <div className="space-y-6">
+                      <div className="rounded-md border border-primary/25 bg-primary/[0.035] p-4">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">AI matching scope</span>
+                          <Badge variant="outline" className="rounded-sm">{matchingScopeMeta.label}</Badge>
+                        </div>
+                        <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+                          {matchingScopeMeta.description}
+                        </p>
+                      </div>
+                      <ScopeEditor
+                        title="Service coverage"
+                        description="Select the services delivered to this client. TI uses a broader strategic and tactical intelligence lens; MSS, MDR, and CIR use an operational exposure and detection lens. Combined services use both."
+                        values={clientTypes}
+                        options={clientTypeOptions}
+                        onChange={setClientTypes}
+                      />
+                    </div>
                   </TabsContent>
 
                   <TabsContent value="scope" className="m-0 p-5 lg:p-7">
@@ -975,6 +1448,7 @@ export default function ClientProfile() {
                           options={optionsFor("technology")}
                           onChange={setTechnologies}
                           onCreate={createOption}
+                          maxSelections={managedClient ? MANAGED_SECURITY_TECHNOLOGY_LIMIT : undefined}
                         />
                       </TabsContent>
                     </Tabs>
@@ -1007,49 +1481,49 @@ export default function ClientProfile() {
                                     </DialogDescription>
                                   </div>
                                 </DialogHeader>
-                                <div className="bg-[#eef1f5] px-4 py-6 sm:px-8">
-                                  <article className="mx-auto w-full max-w-[760px] overflow-hidden border border-[#d0d5dd] bg-white shadow-sm">
-                                    <header className="border-t-[5px] border-t-primary px-6 py-5 sm:px-8">
+                                <div className="bg-green-50/40 px-4 py-6 sm:px-8">
+                                  <article className="mx-auto w-full max-w-[760px] overflow-hidden border border-green-800 bg-white text-green-950 shadow-sm">
+                                    <header className="border-t-[5px] border-t-green-700 px-6 py-5 sm:px-8">
                                       <div className="flex min-h-[64px] items-center justify-between gap-4">
                                         <div className="min-w-0">
                                           {selected?.emailLogoUrl ? (
                                             <img
                                               src={selected.emailLogoUrl}
                                               alt={`${selected.name} email logo`}
-                                              className="mb-3 h-14 w-[180px] object-contain object-left"
+                                              className="mb-3 h-14 w-[180px] object-contain object-left grayscale"
                                             />
                                           ) : (
-                                            <div className="mb-3 flex h-14 w-[180px] items-center gap-3 text-primary">
-                                              <span className="flex h-11 w-11 items-center justify-center rounded-md bg-primary/10">
+                                            <div className="mb-3 flex h-14 w-[180px] items-center gap-3 text-green-800">
+                                              <span className="flex h-11 w-11 items-center justify-center rounded-md border border-green-700 bg-green-50">
                                                 <ImageIcon size={20} />
                                               </span>
-                                              <span className="text-xs text-muted-foreground">Client logo</span>
+                                              <span className="text-xs text-green-800">Client logo</span>
                                             </div>
                                           )}
-                                          <div className="truncate text-xl font-semibold text-[#111827]">
+                                          <div className="truncate text-xl font-semibold text-green-950">
                                             {selected?.name ?? "Client"}
                                           </div>
-                                          <div className="mt-1 text-[10px] font-semibold uppercase text-primary">
+                                          <div className="mt-1 text-[10px] font-semibold uppercase text-green-800">
                                             Threat Intelligence
                                           </div>
                                         </div>
-                                        <Badge className="self-start rounded-md bg-red-50 text-red-700 hover:bg-red-50">
+                                        <Badge className="self-start rounded-md border border-green-700 bg-green-50 text-green-900 hover:bg-green-50">
                                           Draft
                                         </Badge>
                                       </div>
                                     </header>
-                                    <div className="border-y border-[#d0d5dd] bg-[#eef0fe] px-6 py-4 sm:px-8">
-                                      <div className="text-[10px] font-semibold uppercase text-[#667085]">Subject</div>
-                                      <div className="mt-1 break-words text-sm font-semibold text-[#111827]">
+                                    <div className="border-y border-green-200 bg-green-50 px-6 py-4 sm:px-8">
+                                      <div className="text-[10px] font-semibold uppercase text-green-800">Subject</div>
+                                      <div className="mt-1 break-words text-sm font-semibold text-green-950">
                                         {demoEmail.subject}
                                       </div>
                                     </div>
                                     <div className="px-6 py-6 sm:px-8">
-                                      <div className="prose prose-sm max-w-none prose-headings:font-semibold prose-headings:text-[#111827] prose-h2:mt-7 prose-h2:border-b prose-h2:border-[#e4e7ec] prose-h2:pb-2 prose-h2:text-lg prose-h3:text-base prose-p:leading-7 prose-a:text-primary prose-li:leading-6">
+                                      <div className="prose prose-sm max-w-none prose-headings:font-semibold prose-headings:text-green-950 prose-h2:mt-7 prose-h2:border-b prose-h2:border-green-700 prose-h2:pb-2 prose-h2:text-lg prose-h3:text-base prose-p:leading-7 prose-a:text-green-800 prose-a:underline prose-li:leading-6">
                                         <ReactMarkdown remarkPlugins={[remarkGfm]}>{demoEmail.body}</ReactMarkdown>
                                       </div>
                                     </div>
-                                    <footer className="bg-[#111827] px-6 py-4 text-[11px] text-[#98a2b3] sm:px-8">
+                                    <footer className="bg-green-900 px-6 py-4 text-[11px] text-white sm:px-8">
                                       Confidential draft. Analyst approval is required before client distribution.
                                     </footer>
                                   </article>
@@ -1221,12 +1695,38 @@ export default function ClientProfile() {
 
                           <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                             <div>
-                              <div className="text-sm font-medium">Download template</div>
+                              <div className="text-sm font-medium">Word-driven email template</div>
                               <div className="mt-1 text-xs text-muted-foreground">
-                                Exports use the last saved subject, body, and logo.
+                                Upload a .docx containing supported placeholders, or download the current template for editing.
                               </div>
                             </div>
                             <div className="flex flex-wrap gap-2">
+                              <input
+                                ref={templateFileRef}
+                                type="file"
+                                accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                                className="hidden"
+                                onChange={(event) => {
+                                  const file = event.target.files?.[0];
+                                  if (file) void uploadEmailTemplate(file);
+                                }}
+                                data-testid="input-client-email-template-docx"
+                              />
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => templateFileRef.current?.click()}
+                                disabled={templateAction !== null || hasChanges}
+                                title={hasChanges ? "Save changes before uploading a Word template" : "Upload and apply Word template"}
+                              >
+                                {templateAction === "upload-docx" ? (
+                                  <Loader2 size={14} className="mr-2 animate-spin" />
+                                ) : (
+                                  <Upload size={14} className="mr-2" />
+                                )}
+                                Upload Word
+                              </Button>
                               <Button
                                 type="button"
                                 size="sm"
@@ -1240,7 +1740,7 @@ export default function ClientProfile() {
                                 ) : (
                                   <FileText size={14} className="mr-2" />
                                 )}{" "}
-                                Word
+                                Download Word
                               </Button>
                               <Button
                                 type="button"
@@ -1290,9 +1790,22 @@ export default function ClientProfile() {
                             </div>
                           ) : null}
 
+                          {missingRequiredTemplateTokens.length > 0 ? (
+                            <div className="mt-3 rounded-md border border-amber-400/40 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                              Missing required placeholders: {missingRequiredTemplateTokens.join(", ")}
+                            </div>
+                          ) : null}
+
+                          <div className="mt-5 rounded-md border border-black bg-white px-4 py-3 text-xs leading-5 text-black">
+                            <span className="font-semibold">Required DOCX contract:</span> keep {"{{client_name}}"} in
+                            the subject and place {"{{executive_summary}}"} plus {"{{sources}}"} in the body. All
+                            other placeholders are optional and can be arranged to match your client communication style.
+                          </div>
+
                           <div className="mt-5 overflow-x-auto rounded-md border border-border">
-                            <div className="grid min-w-[720px] grid-cols-[minmax(150px,0.8fr)_90px_minmax(0,1.5fr)_40px] gap-3 bg-muted/50 px-3 py-2 text-[10px] font-semibold uppercase text-muted-foreground">
+                            <div className="grid min-w-[820px] grid-cols-[minmax(150px,0.8fr)_80px_90px_minmax(0,1.5fr)_40px] gap-3 bg-muted/50 px-3 py-2 text-[10px] font-semibold uppercase text-muted-foreground">
                               <span>Placeholder</span>
+                              <span>Required</span>
                               <span>Placement</span>
                               <span>Generated content</span>
                               <span />
@@ -1300,9 +1813,12 @@ export default function ClientProfile() {
                             {CLIENT_DIGEST_TEMPLATE_PLACEHOLDERS.map((item) => (
                               <div
                                 key={item.token}
-                                className="grid min-w-[720px] grid-cols-[minmax(150px,0.8fr)_90px_minmax(0,1.5fr)_40px] items-center gap-3 border-t border-border px-3 py-2.5 text-xs"
+                                className="grid min-w-[820px] grid-cols-[minmax(150px,0.8fr)_80px_90px_minmax(0,1.5fr)_40px] items-center gap-3 border-t border-border px-3 py-2.5 text-xs"
                               >
                                 <code className="break-all font-mono font-medium text-primary">{item.token}</code>
+                                <Badge variant="outline" className="w-fit rounded-sm text-[9px]">
+                                  {item.required ? "Required" : "Optional"}
+                                </Badge>
                                 <span className="text-muted-foreground">{item.placement}</span>
                                 <span className="leading-5 text-muted-foreground">{item.description}</span>
                                 <Button

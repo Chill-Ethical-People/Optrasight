@@ -23,7 +23,7 @@ import type { AiProvider, AiProviderKind } from "@shared/schema";
 import { aiProviderBaseUrlSyncFailure } from "./aiProviderSecurity";
 import { aiProviderProtocolArgs, curlRequestSync, type CurlHttpResult } from "./httpClient";
 
-const GEMINI_SAFE_FALLBACK_MODEL = "gemini-flash-latest";
+const GEMINI_SAFE_FALLBACK_MODEL = "gemini-3.6-flash";
 const OPENAI_PORTRAIT_MODEL = "gpt-image-2";
 const GEMINI_PORTRAIT_MODEL = "gemini-3.1-flash-image";
 const GEMINI_PORTRAIT_FALLBACK_MODELS = ["gemini-3.1-flash-image", "gemini-3-pro-image"] as const;
@@ -40,7 +40,9 @@ function loadKekForDecrypt(): Buffer {
       const v = readFileSync(keyPath, "utf8").trim();
       if (v) return Buffer.from(v, "base64");
     }
-  } catch { /* fall through to deterministic legacy fallback */ }
+  } catch {
+    /* fall through to deterministic legacy fallback */
+  }
   return createHash("sha256").update(`optrasight-local-${process.cwd()}`).digest();
 }
 
@@ -57,7 +59,9 @@ function dec(b64: string | null | undefined): string | null {
       return Buffer.concat([decipher.update(Buffer.from(bodyB64, "base64")), decipher.final()]).toString("utf8");
     }
     return Buffer.from(b64, "base64").toString("utf8");
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 function normaliseProviderApiKey(kind: AiProviderKind, raw: string | null): string | null {
@@ -118,17 +122,18 @@ function isGemini3Model(model: string): boolean {
 
 function geminiApiModel(model: string): string {
   const m = (model || "").trim();
-  if (
-    !m
-    || /^gemini-1(?:\.|$|-)/i.test(m)
-    || /^gemini-2(?:\.|$|-)/i.test(m)
-    || /^gemini-pro$/i.test(m)
-  ) return "gemini-flash-latest";
+  const key = m.toLowerCase();
+  if (!m || /^gemini-1(?:\.|$|-)/i.test(m) || /^gemini-2(?:\.|$|-)/i.test(m) || /^gemini-pro$/i.test(m))
+    return GEMINI_SAFE_FALLBACK_MODEL;
+  if (key === "gemini-3-flash" || key === "gemini-3-flash-preview") return GEMINI_SAFE_FALLBACK_MODEL;
+  if (key === "gemini-3.1-pro") return "gemini-3.1-pro-preview";
   return m;
 }
 
 function supportsGeminiUrlContext(model: string): boolean {
-  return /^gemini-(?:flash-latest|3\.5-flash|3\.1-pro|3\.1-flash-lite|3-flash)/i.test(geminiApiModel(model));
+  return /^gemini-(?:flash-latest|3\.6-flash|3\.5-flash(?:-lite)?|3\.1-pro(?:-preview)?|3\.1-flash-lite|3-flash-preview)/i.test(
+    geminiApiModel(model),
+  );
 }
 
 function geminiFallbackModel(model: string): string | null {
@@ -151,18 +156,18 @@ function providerApiModel(kind: AiProviderKind, model: string): string {
   if (kind === "gemini") return geminiApiModel(m);
   const key = m.toLowerCase();
   if (kind === "openai" || kind === "azure-openai") {
-    return m || "gpt-5.4-mini";
+    return m || "gpt-5.6";
   }
   if (kind === "anthropic") {
     const aliases: Record<string, string> = {
       "claude-3-5-sonnet": "claude-sonnet-4-6",
       "claude-3-5-sonnet-latest": "claude-sonnet-4-6",
       "claude-3-5-haiku-latest": "claude-haiku-4-5",
-      "claude-sonnet-latest": "claude-sonnet-4-6",
-      "claude-opus-latest": "claude-opus-4-7",
+      "claude-sonnet-latest": "claude-sonnet-5",
+      "claude-opus-latest": "claude-opus-5",
       "claude-haiku-latest": "claude-haiku-4-5",
     };
-    return aliases[key] || m || "claude-sonnet-4-6";
+    return aliases[key] || m || "claude-sonnet-5";
   }
   if (kind === "deepseek") {
     if (key === "deepseek-chat") return "deepseek-v4-flash";
@@ -206,7 +211,11 @@ function portraitModelAttempts(kind: AiProviderKind, model: string): string[] {
   return [primary];
 }
 
-function geminiThinkingLevel(model: string, images: LiveChatImage[], useUrlContext: boolean): "low" | "medium" | "high" {
+function geminiThinkingLevel(
+  model: string,
+  images: LiveChatImage[],
+  useUrlContext: boolean,
+): "low" | "medium" | "high" {
   if (images.length > 0 || useUrlContext) return "high";
   return /flash/i.test(model) ? "medium" : "low";
 }
@@ -242,7 +251,12 @@ function extractGeminiText(parsed: any): string | null {
  * managed to assemble; the caller's tryParseJsonObject will catch malformed
  * results just like the non-streaming path does.
  */
-function curlPostStreaming(url: string, headers: Record<string, string>, body: string, timeoutSeconds?: number): CurlResult {
+function curlPostStreaming(
+  url: string,
+  headers: Record<string, string>,
+  body: string,
+  timeoutSeconds?: number,
+): CurlResult {
   const t = Math.max(1, Math.min(MAX_TIMEOUT_SECONDS, timeoutSeconds ?? TIMEOUT_SECONDS));
   const { latencyMs: _latencyMs, ...r } = curlRequestSync({
     method: "POST",
@@ -277,7 +291,11 @@ function curlPostStreaming(url: string, headers: Record<string, string>, body: s
     const payload = line.slice(5).trim();
     if (!payload || payload === "[DONE]") continue;
     let parsed: any;
-    try { parsed = JSON.parse(payload); } catch { continue; }
+    try {
+      parsed = JSON.parse(payload);
+    } catch {
+      continue;
+    }
     if (!parsed || typeof parsed !== "object") continue;
     if (!id && typeof parsed.id === "string") id = parsed.id;
     if (!model && typeof parsed.model === "string") model = parsed.model;
@@ -297,17 +315,23 @@ function curlPostStreaming(url: string, headers: Record<string, string>, body: s
     id: id || `synth-${Date.now()}`,
     object: "chat.completion",
     model,
-    choices: [{
-      index: 0,
-      message: { role: "assistant", content },
-      finish_reason: finishReason || "stop",
-    }],
+    choices: [
+      {
+        index: 0,
+        message: { role: "assistant", content },
+        finish_reason: finishReason || "stop",
+      },
+    ],
     ...(usage ? { usage } : {}),
   };
   return { ok: true, status, body: JSON.stringify(envelope) };
 }
 
-function curlGet(url: string, headers: Record<string, string>, opts?: { httpVersion?: "1.1" | "auto"; protocolGuard?: boolean }): CurlResult {
+function curlGet(
+  url: string,
+  headers: Record<string, string>,
+  opts?: { httpVersion?: "1.1" | "auto"; protocolGuard?: boolean },
+): CurlResult {
   const { latencyMs: _latencyMs, ...result } = curlRequestSync({
     method: "GET",
     url,
@@ -323,17 +347,26 @@ function curlGet(url: string, headers: Record<string, string>, opts?: { httpVers
 // ---------- per-provider base URL resolution ----------
 function defaultBaseUrl(provider: string): string {
   switch (provider) {
-    case "openai":       return "https://api.openai.com";
-    case "deepseek":     return "https://api.deepseek.com";
-    case "perplexity":   return "https://api.perplexity.ai";
-    case "anthropic":    return "https://api.anthropic.com";
-    case "gemini":       return "https://generativelanguage.googleapis.com";
-    case "ollama":       return "http://localhost:11434";
-    case "azure-openai": return "";  // user must provide base URL
+    case "openai":
+      return "https://api.openai.com";
+    case "deepseek":
+      return "https://api.deepseek.com";
+    case "perplexity":
+      return "https://api.perplexity.ai";
+    case "anthropic":
+      return "https://api.anthropic.com";
+    case "gemini":
+      return "https://generativelanguage.googleapis.com";
+    case "ollama":
+      return "http://localhost:11434";
+    case "azure-openai":
+      return ""; // user must provide base URL
     // Moonshot Kimi is OpenAI-compatible. International endpoint by default;
     // China-mainland users should override to https://api.moonshot.cn .
-    case "kimi":         return "https://api.moonshot.ai";
-    default:             return "";
+    case "kimi":
+      return "https://api.moonshot.ai";
+    default:
+      return "";
   }
 }
 
@@ -356,34 +389,64 @@ function modelsUrl(kind: AiProviderKind, base: string) {
  * Some providers wrap JSON in ```json fenced blocks or prefix it with prose.
  * Try strict parse first; if that fails, extract the first {...} block.
  */
-function tryParseJsonObject(s: string): Record<string, any> | null {
+export function tryParseJsonObjectForTest(s: string): Record<string, any> | null {
   if (!s) return null;
   const trimmed = s.trim();
   // Strict path
   try {
     const v = JSON.parse(trimmed);
     if (v && typeof v === "object" && !Array.isArray(v)) return v;
-  } catch { /* fall through */ }
+  } catch {
+    /* fall through */
+  }
   // Fenced code block ```json ... ```
   const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (fenced) {
     try {
       const v = JSON.parse(fenced[1].trim());
       if (v && typeof v === "object" && !Array.isArray(v)) return v;
-    } catch { /* continue */ }
+    } catch {
+      /* continue */
+    }
   }
-  // First {...} balanced run — naive but adequate for most provider quirks
-  const first = trimmed.indexOf("{");
-  const last = trimmed.lastIndexOf("}");
-  if (first >= 0 && last > first) {
-    const slice = trimmed.slice(first, last + 1);
+  // String-aware balanced object scan. This tolerates provider prose or
+  // <think> blocks containing braces before the actual JSON object.
+  let start = -1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < trimmed.length; i++) {
+    const ch = trimmed[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === "{") {
+      if (depth === 0) start = i;
+      depth += 1;
+      continue;
+    }
+    if (ch !== "}" || depth === 0) continue;
+    depth -= 1;
+    if (depth !== 0 || start < 0) continue;
     try {
-      const v = JSON.parse(slice);
+      const v = JSON.parse(trimmed.slice(start, i + 1));
       if (v && typeof v === "object" && !Array.isArray(v)) return v;
-    } catch { /* ignore */ }
+    } catch {
+      /* keep scanning for the next top-level object */
+    }
+    start = -1;
   }
   return null;
 }
+
+const tryParseJsonObject = tryParseJsonObjectForTest;
 
 /**
  * v2.26 — robust recovery of `choices[0].message.content` from an
@@ -399,11 +462,11 @@ function tryParseJsonObject(s: string): Record<string, any> | null {
 function extractContentFromTruncatedEnvelope(raw: string): string | null {
   if (!raw) return null;
   // Find the FIRST occurrence of `"content":"` after a `"message":{` marker.
-  const msgIdx = raw.indexOf("\"message\"");
+  const msgIdx = raw.indexOf('"message"');
   if (msgIdx < 0) return null;
-  const contentKey = raw.indexOf("\"content\":\"", msgIdx);
+  const contentKey = raw.indexOf('"content":"', msgIdx);
   if (contentKey < 0) return null;
-  let i = contentKey + "\"content\":\"".length;
+  let i = contentKey + '"content":"'.length;
   const out: string[] = [];
   while (i < raw.length) {
     const ch = raw.charCodeAt(i);
@@ -419,15 +482,33 @@ function extractContentFromTruncatedEnvelope(raw: string): string | null {
         continue;
       }
       switch (nxt) {
-        case "n":  out.push("\n"); break;
-        case "t":  out.push("\t"); break;
-        case "r":  out.push("\r"); break;
-        case "\"": out.push("\""); break;
-        case "\\": out.push("\\"); break;
-        case "/":  out.push("/"); break;
-        case "b":  out.push("\b"); break;
-        case "f":  out.push("\f"); break;
-        default:   out.push(nxt); break;
+        case "n":
+          out.push("\n");
+          break;
+        case "t":
+          out.push("\t");
+          break;
+        case "r":
+          out.push("\r");
+          break;
+        case '"':
+          out.push('"');
+          break;
+        case "\\":
+          out.push("\\");
+          break;
+        case "/":
+          out.push("/");
+          break;
+        case "b":
+          out.push("\b");
+          break;
+        case "f":
+          out.push("\f");
+          break;
+        default:
+          out.push(nxt);
+          break;
       }
       i += 2;
       continue;
@@ -487,8 +568,13 @@ const ALLOWED_IMAGE_MIMES = new Set(["image/png", "image/jpeg", "image/jpg", "im
 function filterImages(images?: LiveChatImage[]): LiveChatImage[] {
   if (!images || images.length === 0) return [];
   return images
-    .filter((img) => img && typeof img.dataBase64 === "string" && img.dataBase64.length > 0
-      && ALLOWED_IMAGE_MIMES.has((img.mime || "").toLowerCase()))
+    .filter(
+      (img) =>
+        img &&
+        typeof img.dataBase64 === "string" &&
+        img.dataBase64.length > 0 &&
+        ALLOWED_IMAGE_MIMES.has((img.mime || "").toLowerCase()),
+    )
     .slice(0, 8); // hard cap so a misbehaving caller can't blow up the request
 }
 
@@ -544,8 +630,19 @@ export function liveChatJsonDiagnostic(provider: AiProvider, opts: LiveChatOptio
   const maxTokens = typeof opts.maxTokens === "number" && opts.maxTokens > 0 ? opts.maxTokens : null;
   const timeoutSeconds = opts.timeoutSeconds;
 
-  const out = (reason: string, httpStatus = 0, rawBodyPreview = "", result: Record<string, any> | null = null): LiveChatDiagnostic =>
-    ({ ok: result != null, result, reason, httpStatus, latencyMs: Date.now() - start, rawBodyPreview });
+  const out = (
+    reason: string,
+    httpStatus = 0,
+    rawBodyPreview = "",
+    result: Record<string, any> | null = null,
+  ): LiveChatDiagnostic => ({
+    ok: result != null,
+    result,
+    reason,
+    httpStatus,
+    latencyMs: Date.now() - start,
+    rawBodyPreview,
+  });
 
   // Ollama is the only family that can run keyless; everyone else needs a key.
   if (!apiKey && kind !== "ollama") return out("missing API key on configured provider");
@@ -555,7 +652,14 @@ export function liveChatJsonDiagnostic(provider: AiProvider, opts: LiveChatOptio
   if (!model) return out("provider has no model configured");
 
   try {
-    if (kind === "openai" || kind === "deepseek" || kind === "perplexity" || kind === "azure-openai" || kind === "ollama" || kind === "kimi") {
+    if (
+      kind === "openai" ||
+      kind === "deepseek" ||
+      kind === "perplexity" ||
+      kind === "azure-openai" ||
+      kind === "ollama" ||
+      kind === "kimi"
+    ) {
       // OpenAI-compatible chat completions (Moonshot Kimi falls into this
       // branch; DeepSeek uses the same body shape but documents the path
       // without `/v1` under https://api.deepseek.com).
@@ -567,24 +671,25 @@ export function liveChatJsonDiagnostic(provider: AiProvider, opts: LiveChatOptio
       // text otherwise so we stay compatible with text-only models.
       const openAiImages = filterImages(opts.images);
       const jsonSystem = `${opts.system}\n\nReturn a valid JSON object only. Do not include markdown fences, prose outside the JSON object, or trailing commentary.`;
-      const userContent: any = openAiImages.length > 0
-        ? [
-            { type: "text", text: `${opts.user}\n\nThe final answer must be valid JSON.` },
-            ...openAiImages.map((img) => ({
-              type: "image_url",
-              image_url: {
-                url: `data:${img.mime};base64,${img.dataBase64}`,
-                detail: "low",
-              },
-            })),
-          ]
-        : `${opts.user}\n\nThe final answer must be valid JSON.`;
+      const userContent: any =
+        openAiImages.length > 0
+          ? [
+              { type: "text", text: `${opts.user}\n\nThe final answer must be valid JSON.` },
+              ...openAiImages.map((img) => ({
+                type: "image_url",
+                image_url: {
+                  url: `data:${img.mime};base64,${img.dataBase64}`,
+                  detail: "low",
+                },
+              })),
+            ]
+          : `${opts.user}\n\nThe final answer must be valid JSON.`;
       // Perplexity ignores response_format; OpenAI/DeepSeek/Kimi honor it.
       const requestBody: Record<string, any> = {
         model,
         messages: [
           { role: "system", content: jsonSystem },
-          { role: "user",   content: userContent },
+          { role: "user", content: userContent },
         ],
       };
       if (openAiSupportsTemperature(kind, model)) requestBody.temperature = temperature;
@@ -604,8 +709,14 @@ export function liveChatJsonDiagnostic(provider: AiProvider, opts: LiveChatOptio
       // `stream: true` the provider emits keep-alive SSE chunks the whole
       // time, so the connection never goes idle and we receive the full
       // assembled content even when the model takes 4-6 min to finish.
-      const useStreaming = typeof timeoutSeconds === "number" && timeoutSeconds > 60
-        && (kind === "openai" || kind === "deepseek" || kind === "azure-openai" || kind === "perplexity" || kind === "kimi");
+      const useStreaming =
+        typeof timeoutSeconds === "number" &&
+        timeoutSeconds > 60 &&
+        (kind === "openai" ||
+          kind === "deepseek" ||
+          kind === "azure-openai" ||
+          kind === "perplexity" ||
+          kind === "kimi");
       if (useStreaming) requestBody.stream = true;
       let r = useStreaming
         ? curlPostStreaming(url, headers, JSON.stringify(requestBody), timeoutSeconds)
@@ -637,6 +748,8 @@ export function liveChatJsonDiagnostic(provider: AiProvider, opts: LiveChatOptio
 
       let choice: string | null = null;
       const parsed = tryParseJsonObject(r.body);
+      const finishReason =
+        typeof parsed?.choices?.[0]?.finish_reason === "string" ? parsed.choices[0].finish_reason : null;
       if (parsed && typeof parsed.choices?.[0]?.message?.content === "string") {
         choice = parsed.choices[0].message.content;
       } else {
@@ -655,7 +768,19 @@ export function liveChatJsonDiagnostic(provider: AiProvider, opts: LiveChatOptio
         );
       }
       const json = tryParseJsonObject(choice);
-      if (!json) return out("model response was not valid JSON (consider raising maxTokens for long reports)", r.status, choice.slice(0, 400));
+      if (!json && finishReason === "length") {
+        return out(
+          `model response was truncated at the provider output limit${maxTokens ? ` despite requesting ${maxTokens} tokens` : ""}; retry with a smaller scope`,
+          r.status,
+          choice.slice(0, 400),
+        );
+      }
+      if (!json)
+        return out(
+          "model response was not valid JSON; the provider returned malformed structured output",
+          r.status,
+          choice.slice(0, 400),
+        );
       return out("ok", r.status, choice.slice(0, 400), json);
     }
 
@@ -671,19 +796,20 @@ export function liveChatJsonDiagnostic(provider: AiProvider, opts: LiveChatOptio
       // didn't specify, so the model decides where to stop.
       const anthropicMaxTokens = maxTokens ?? 200000;
       const anthropicImages = filterImages(opts.images);
-      const anthropicUserContent: any = anthropicImages.length > 0
-        ? [
-            { type: "text", text: opts.user },
-            ...anthropicImages.map((img) => ({
-              type: "image",
-              source: {
-                type: "base64",
-                media_type: normaliseAnthropicMime(img.mime),
-                data: img.dataBase64,
-              },
-            })),
-          ]
-        : [{ type: "text", text: opts.user }];
+      const anthropicUserContent: any =
+        anthropicImages.length > 0
+          ? [
+              { type: "text", text: opts.user },
+              ...anthropicImages.map((img) => ({
+                type: "image",
+                source: {
+                  type: "base64",
+                  media_type: normaliseAnthropicMime(img.mime),
+                  data: img.dataBase64,
+                },
+              })),
+            ]
+          : [{ type: "text", text: opts.user }];
       const requestBody = {
         model,
         max_tokens: anthropicMaxTokens,
@@ -710,9 +836,11 @@ export function liveChatJsonDiagnostic(provider: AiProvider, opts: LiveChatOptio
       const headers: Record<string, string> = { "X-goog-api-key": apiKey || "" };
       const geminiImages = filterImages(opts.images);
       const canUseUrlContext = supportsGeminiUrlContext(effectiveModel) && hasHttpUrl(opts.user);
-      const geminiParts: any[] = [{
-        text: `${opts.user}\n\nThe final answer must be one valid JSON object only. Start with { and end with }. Do not include markdown, prose, or commentary outside the JSON object.`,
-      }];
+      const geminiParts: any[] = [
+        {
+          text: `${opts.user}\n\nThe final answer must be one valid JSON object only. Start with { and end with }. Do not include markdown, prose, or commentary outside the JSON object.`,
+        },
+      ];
       for (const img of geminiImages) {
         geminiParts.push({ inlineData: { mimeType: img.mime, data: img.dataBase64 } });
       }
@@ -767,6 +895,99 @@ export interface LivePingResult {
   message: string;
 }
 
+export interface LiveModelListResult {
+  ok: boolean;
+  latencyMs: number;
+  message: string;
+  models: string[];
+}
+
+function cleanModelIds(values: unknown[]): string[] {
+  return Array.from(
+    new Set(
+      values
+        .filter((value): value is string => typeof value === "string")
+        .map((value) => value.replace(/^models\//, "").trim())
+        .filter((value) => value.length > 0 && value.length <= 180),
+    ),
+  )
+    .sort((a, b) => a.localeCompare(b))
+    .slice(0, 500);
+}
+
+/**
+ * List the models exposed to this provider account. This helper is deliberately
+ * synchronous because it is executed by aiProviderWorker, never on Express's
+ * request thread.
+ */
+export function liveListModels(provider: AiProvider): LiveModelListResult {
+  const kind = provider.provider as AiProviderKind;
+  const apiKey = normaliseProviderApiKey(kind, dec(provider.apiKeyEnc));
+  const base = stripTrailingSlash(provider.baseUrl || defaultBaseUrl(kind));
+  const startedAt = Date.now();
+  const result = (ok: boolean, message: string, models: string[] = []): LiveModelListResult => ({
+    ok,
+    latencyMs: Date.now() - startedAt,
+    message,
+    models,
+  });
+
+  if (!apiKey && kind !== "ollama") return result(false, `${provider.label}: missing API key`);
+  if (!base) return result(false, `${provider.label}: missing base URL`);
+  const baseUrlFailure = aiProviderBaseUrlSyncFailure(base);
+  if (baseUrlFailure) return result(false, `${provider.label}: ${baseUrlFailure}`);
+
+  let url = "";
+  const headers: Record<string, string> = {};
+  if (kind === "ollama") {
+    url = `${base}/api/tags`;
+  } else if (kind === "gemini") {
+    url = `${base}/v1beta/models?pageSize=1000`;
+    headers["X-goog-api-key"] = apiKey || "";
+  } else if (kind === "anthropic") {
+    url = `${base}/v1/models?limit=1000`;
+    headers["x-api-key"] = apiKey || "";
+    headers["anthropic-version"] = "2023-06-01";
+  } else if (
+    kind === "openai" ||
+    kind === "deepseek" ||
+    kind === "perplexity" ||
+    kind === "azure-openai" ||
+    kind === "kimi"
+  ) {
+    url = modelsUrl(kind, base);
+    headers.Authorization = `Bearer ${apiKey}`;
+  } else {
+    return result(false, `${provider.label}: model discovery is not available for this connector`);
+  }
+
+  const response = curlGet(url, headers);
+  if (!response.ok) {
+    return result(
+      false,
+      `${provider.label}: ${response.status ? `HTTP ${response.status}` : response.error || "no response"}`,
+    );
+  }
+  const parsed = tryParseJsonObject(response.body);
+  if (!parsed) return result(false, `${provider.label}: model endpoint returned an invalid response`);
+
+  let models: string[] = [];
+  if (kind === "ollama") {
+    models = cleanModelIds(Array.isArray(parsed.models) ? parsed.models.map((item: any) => item?.name) : []);
+  } else if (kind === "gemini") {
+    const available = Array.isArray(parsed.models)
+      ? parsed.models.filter((item: any) => {
+          const methods = Array.isArray(item?.supportedGenerationMethods) ? item.supportedGenerationMethods : [];
+          return methods.length === 0 || methods.includes("generateContent");
+        })
+      : [];
+    models = cleanModelIds(available.map((item: any) => item?.name));
+  } else {
+    models = cleanModelIds(Array.isArray(parsed.data) ? parsed.data.map((item: any) => item?.id) : []);
+  }
+  return result(true, `${models.length} account-available model${models.length === 1 ? "" : "s"} found`, models);
+}
+
 /**
  * Confirm the provider responds. Uses a lightweight endpoint that does not
  * consume meaningful credits:
@@ -792,16 +1013,27 @@ export function livePing(provider: AiProvider): LivePingResult {
 
   const t0 = Date.now();
   try {
-    if (kind === "openai" || kind === "deepseek" || kind === "perplexity" || kind === "azure-openai" || kind === "ollama" || kind === "kimi") {
+    if (
+      kind === "openai" ||
+      kind === "deepseek" ||
+      kind === "perplexity" ||
+      kind === "azure-openai" ||
+      kind === "ollama" ||
+      kind === "kimi"
+    ) {
       const selectedModel = providerApiModel(kind, provider.model);
       const probeHeaders: Record<string, string> = {};
       if (apiKey) probeHeaders["Authorization"] = `Bearer ${apiKey}`;
       if (!/^gpt-image-/i.test(selectedModel)) {
-        const probe = curlPost(chatCompletionsUrl(kind, base), probeHeaders, JSON.stringify({
-          model: selectedModel,
-          messages: [{ role: "user", content: "Reply with ok." }],
-          ...(openAiUsesCompletionTokenParam(kind, selectedModel) ? { max_completion_tokens: 8 } : { max_tokens: 8 }),
-        }));
+        const probe = curlPost(
+          chatCompletionsUrl(kind, base),
+          probeHeaders,
+          JSON.stringify({
+            model: selectedModel,
+            messages: [{ role: "user", content: "Reply with ok." }],
+            ...(openAiUsesCompletionTokenParam(kind, selectedModel) ? { max_completion_tokens: 8 } : { max_tokens: 8 }),
+          }),
+        );
         const latencyMs = Date.now() - t0;
         if (probe.ok) {
           return { ok: true, latencyMs, message: `${provider.label} (${selectedModel}) — connected via chat` };
@@ -809,8 +1041,18 @@ export function livePing(provider: AiProvider): LivePingResult {
         // Some OpenAI accounts expose newest model ids in /models before they
         // are enabled for chat-completions. Treat that as a failed selected
         // model test so users do not route jobs to a model that cannot run.
-        if (kind === "openai" || kind === "azure-openai" || kind === "deepseek" || kind === "kimi" || kind === "perplexity") {
-          return { ok: false, latencyMs, message: `${provider.label}: ${probe.status ? `HTTP ${probe.status}` : "network"}${probe.error ? ` — ${probe.error}` : ""}` };
+        if (
+          kind === "openai" ||
+          kind === "azure-openai" ||
+          kind === "deepseek" ||
+          kind === "kimi" ||
+          kind === "perplexity"
+        ) {
+          return {
+            ok: false,
+            latencyMs,
+            message: `${provider.label}: ${probe.status ? `HTTP ${probe.status}` : "network"}${probe.error ? ` — ${probe.error}` : ""}`,
+          };
         }
       }
 
@@ -824,7 +1066,11 @@ export function livePing(provider: AiProvider): LivePingResult {
       if (r.ok) {
         return { ok: true, latencyMs, message: `${provider.label} (${provider.model}) — connected` };
       }
-      return { ok: false, latencyMs, message: `${provider.label}: ${r.status ? `HTTP ${r.status}` : "network"}${r.error ? ` — ${r.error}` : ""}` };
+      return {
+        ok: false,
+        latencyMs,
+        message: `${provider.label}: ${r.status ? `HTTP ${r.status}` : "network"}${r.error ? ` — ${r.error}` : ""}`,
+      };
     }
 
     if (kind === "anthropic") {
@@ -841,7 +1087,11 @@ export function livePing(provider: AiProvider): LivePingResult {
       const r = curlPost(url, headers, body);
       const latencyMs = Date.now() - t0;
       if (r.ok) return { ok: true, latencyMs, message: `${provider.label} (${provider.model}) — connected` };
-      return { ok: false, latencyMs, message: `${provider.label}: ${r.status ? `HTTP ${r.status}` : (r.error || "no response")}` };
+      return {
+        ok: false,
+        latencyMs,
+        message: `${provider.label}: ${r.status ? `HTTP ${r.status}` : r.error || "no response"}`,
+      };
     }
 
     if (kind === "gemini") {
@@ -850,12 +1100,11 @@ export function livePing(provider: AiProvider): LivePingResult {
       // Keep this probe aligned with Google's REST quickstart shape. A
       // connection test should prove auth/model reachability; task-specific
       // JSON validation happens in liveChatJsonDiagnostic().
+      const generationConfig: Record<string, number> = { maxOutputTokens: 64 };
+      if (!isGemini3Model(effectiveModel)) generationConfig.temperature = 0;
       const body = JSON.stringify({
         contents: [{ parts: [{ text: "Explain how AI works in a few words" }] }],
-        generationConfig: {
-          maxOutputTokens: 64,
-          temperature: 0,
-        },
+        generationConfig,
       });
       let lastFailure: CurlResult | null = null;
       for (const attemptModel of modelAttempts) {
@@ -866,24 +1115,35 @@ export function livePing(provider: AiProvider): LivePingResult {
           const parsed = tryParseJsonObject(r.body);
           const text = parsed ? (extractGeminiText(parsed) ?? "") : "";
           if (text.trim().length > 0) {
-            const modelLabel = attemptModel === provider.model
-              ? provider.model
-              : `${provider.model} -> ${attemptModel}`;
-            return { ok: true, latencyMs, message: `${provider.label} (${modelLabel}) — connected via generateContent` };
+            const modelLabel =
+              attemptModel === provider.model ? provider.model : `${provider.model} -> ${attemptModel}`;
+            return {
+              ok: true,
+              latencyMs,
+              message: `${provider.label} (${modelLabel}) — connected via generateContent`,
+            };
           }
           const finishReason = String(parsed?.candidates?.[0]?.finishReason || "");
           if (finishReason === "MAX_TOKENS") {
             lastFailure = r;
             continue;
           }
-          return { ok: false, latencyMs, message: `${provider.label}: HTTP ${r.status} but response had no candidate text` };
+          return {
+            ok: false,
+            latencyMs,
+            message: `${provider.label}: HTTP ${r.status} but response had no candidate text`,
+          };
         }
         lastFailure = r;
         if (!isRetryableGeminiTransportFailure(r)) break;
       }
       const latencyMs = Date.now() - t0;
       const r = lastFailure;
-      return { ok: false, latencyMs, message: `${provider.label}: ${r?.status ? `HTTP ${r.status}` : "network"}${r?.error ? ` — ${r.error}` : ""}` };
+      return {
+        ok: false,
+        latencyMs,
+        message: `${provider.label}: ${r?.status ? `HTTP ${r.status}` : "network"}${r?.error ? ` — ${r.error}` : ""}`,
+      };
     }
   } catch (e: any) {
     return { ok: false, latencyMs: Date.now() - t0, message: `${provider.label}: ${e?.message ?? String(e)}` };
@@ -932,7 +1192,11 @@ function firstImageFromGeminiEnvelope(parsed: any): { mimeType: string; dataBase
  * Text-only providers return a clear unsupported message so the UI can route
  * them to TAP enrichment without implying portrait capability.
  */
-export function liveGenerateImage(provider: AiProvider, prompt: string, opts?: { timeoutSeconds?: number }): LiveImageResult {
+export function liveGenerateImage(
+  provider: AiProvider,
+  prompt: string,
+  opts?: { timeoutSeconds?: number },
+): LiveImageResult {
   const kind = provider.provider as AiProviderKind;
   const apiKey = normaliseProviderApiKey(kind, dec(provider.apiKeyEnc));
   const base = stripTrailingSlash(provider.baseUrl || defaultBaseUrl(kind));
@@ -944,23 +1208,36 @@ export function liveGenerateImage(provider: AiProvider, prompt: string, opts?: {
 
   if (kind === "openai" || kind === "azure-openai") {
     const model = portraitModelForProvider(kind, provider.model);
-    const url = kind === "azure-openai" && base
-      ? `${base}/images/generations`
-      : "https://api.openai.com/v1/images/generations";
+    const url =
+      kind === "azure-openai" && base ? `${base}/images/generations` : "https://api.openai.com/v1/images/generations";
     const headers: Record<string, string> = { Authorization: `Bearer ${apiKey}` };
-    const r = curlPost(url, headers, JSON.stringify({
-      model,
-      prompt,
-      n: 1,
-      size: "1024x1024",
-      quality: "medium",
-    }), timeoutSeconds);
+    const r = curlPost(
+      url,
+      headers,
+      JSON.stringify({
+        model,
+        prompt,
+        n: 1,
+        size: "1024x1024",
+        quality: "medium",
+      }),
+      timeoutSeconds,
+    );
     const preview = (r.body || "").slice(0, 400);
-    if (!r.ok) return { ok: false, status: r.status, message: `${provider.label}: HTTP ${r.status || "network"}${r.error ? ` — ${r.error}` : ""}` };
+    if (!r.ok)
+      return {
+        ok: false,
+        status: r.status,
+        message: `${provider.label}: HTTP ${r.status || "network"}${r.error ? ` — ${r.error}` : ""}`,
+      };
     const parsed = tryParseJsonObject(r.body);
     const b64 = parsed?.data?.[0]?.b64_json;
     if (typeof b64 !== "string" || !b64.trim()) {
-      return { ok: false, status: r.status, message: `${provider.label}: image response did not include base64 data: ${preview}` };
+      return {
+        ok: false,
+        status: r.status,
+        message: `${provider.label}: image response did not include base64 data: ${preview}`,
+      };
     }
     return { ok: true, status: r.status, mimeType: "image/png", data: Buffer.from(b64, "base64"), message: "ok" };
   }
@@ -969,30 +1246,53 @@ export function liveGenerateImage(provider: AiProvider, prompt: string, opts?: {
     let last: CurlResult | null = null;
     for (const model of portraitModelAttempts(kind, provider.model)) {
       const url = `${base}/v1/models/${encodeURIComponent(model)}:generateContent`;
-      const r = curlPost(url, { "X-goog-api-key": apiKey }, JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: {
-          responseFormat: {
-            image: {
-              aspectRatio: "1:1",
-              imageSize: "1K",
+      const r = curlPost(
+        url,
+        { "X-goog-api-key": apiKey },
+        JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: {
+            responseFormat: {
+              image: {
+                aspectRatio: "1:1",
+                imageSize: "1K",
+              },
             },
           },
-        },
-      }), timeoutSeconds, { httpVersion: "auto" });
+        }),
+        timeoutSeconds,
+        { httpVersion: "auto" },
+      );
       last = r;
       const parsed = tryParseJsonObject(r.body);
       if (r.ok && parsed) {
         const image = firstImageFromGeminiEnvelope(parsed);
-        if (image) return { ok: true, status: r.status, mimeType: image.mimeType, data: Buffer.from(image.dataBase64, "base64"), message: `ok (${model})` };
+        if (image)
+          return {
+            ok: true,
+            status: r.status,
+            mimeType: image.mimeType,
+            data: Buffer.from(image.dataBase64, "base64"),
+            message: `ok (${model})`,
+          };
       }
       if (!isRetryableGeminiTransportFailure(r) && r.status !== 404 && r.status !== 400) break;
     }
     const preview = (last?.body || "").slice(0, 400);
-    if (!last?.ok) return { ok: false, status: last?.status, message: `${provider.label}: HTTP ${last?.status || "network"}${last?.error ? ` — ${last.error}` : ""}` };
+    if (!last?.ok)
+      return {
+        ok: false,
+        status: last?.status,
+        message: `${provider.label}: HTTP ${last?.status || "network"}${last?.error ? ` — ${last.error}` : ""}`,
+      };
     const parsed = tryParseJsonObject(last.body);
-    if (!parsed) return { ok: false, status: last.status, message: `${provider.label}: image response was not valid JSON` };
-    return { ok: false, status: last.status, message: `${provider.label}: image response did not include inline image data: ${preview}` };
+    if (!parsed)
+      return { ok: false, status: last.status, message: `${provider.label}: image response was not valid JSON` };
+    return {
+      ok: false,
+      status: last.status,
+      message: `${provider.label}: image response did not include inline image data: ${preview}`,
+    };
   }
 
   return { ok: false, message: `${provider.label}: ${kind} is text-only for BatchOne TAP portrait generation` };

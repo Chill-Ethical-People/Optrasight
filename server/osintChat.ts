@@ -24,6 +24,7 @@ import {
   type ChatDeepDivePerFinding,
 } from "./aiClient";
 import type { LiveChatDiagnostic } from "./aiLive";
+import { resolveAiPrompt } from "./promptRegistry";
 
 // v2.15 — surfaced to callers/UI so a failed live-AI call can show the actual
 // reason (HTTP code, timeout, parse error) without leaking upstream response
@@ -79,11 +80,12 @@ export class ChatProviderUnavailableError extends ChatLiveAiError {
 // Date-range filter
 // ---------------------------------------------------------------------------
 
-export type ChatRangeKey = "1d" | "7d" | "1m" | "1q" | "1y" | "all";
+export type ChatRangeKey = "1d" | "7d" | "2w" | "1m" | "1q" | "1y" | "all";
 
 const RANGE_HOURS: Record<ChatRangeKey, number | null> = {
   "1d": 24,
   "7d": 24 * 7,
+  "2w": 24 * 14,
   "1m": 24 * 30,
   "1q": 24 * 90,
   "1y": 24 * 365,
@@ -92,6 +94,7 @@ const RANGE_HOURS: Record<ChatRangeKey, number | null> = {
 const RANGE_LABEL: Record<ChatRangeKey, string> = {
   "1d": "last 24 hours",
   "7d": "last 7 days",
+  "2w": "last 14 days",
   "1m": "last 30 days",
   "1q": "last quarter",
   "1y": "last year",
@@ -149,6 +152,8 @@ function workspaceClientProfile(storage: any, tenantId: string, selectedClientId
     return {
       clients: selected.map((client: any, index: number) => ({
         profileRef: `CLIENT-${String(index + 1).padStart(2, "0")}`,
+        clientTypes: client.clientTypes ?? [],
+        matchingScope: client.matchingScope ?? "advisory",
         industries: client.industries.map((option: any) => option.label),
         geographies: client.geographies.map((option: any) => option.label),
         technologies: client.technologies.map((option: any) => option.label),
@@ -396,7 +401,11 @@ export async function runChatDeepDive(storage: any, opts: RunChatDeepDiveOpts): 
 
   if (missing.length > 0 && tenantProvider) {
     // Pre-fetch source bodies for the missing batch.
-    const fetched = await fetchSourcesBatch(missing.map((f) => f.url), { includeReferences: true, maxReferenceLinks: 3 });
+    const fetched = await fetchSourcesBatch(missing.map((f) => f.url), {
+      includeReferences: true,
+      maxReferenceLinks: 24,
+      maxReferenceDepth: 2,
+    });
     const sourceByIdx = new Map<number, string | null>();
     fetched.forEach((r, i) => sourceByIdx.set(i, r.content));
 
@@ -789,7 +798,7 @@ export async function runChatConverse(storage: any, opts: RunChatConverseOpts): 
   }
 
   const diag = liveChatJsonDiagnostic(provider, {
-    system: CONVERSE_SYSTEM,
+    system: resolveAiPrompt("osint_chat", provider, CONVERSE_SYSTEM),
     user: JSON.stringify(userPayload),
     temperature: 0.4,
     // v2.26 — unbounded tokens; let the provider use its full default budget

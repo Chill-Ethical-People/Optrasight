@@ -2,8 +2,15 @@ import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import {
+  CLIENT_MATCHING_SCOPES,
+  clientProfileScopeLimitErrors,
+  type ClientMatchingScope,
+} from "./clientMatchingScope";
+import {
   DEFAULT_CLIENT_DIGEST_BODY_TEMPLATE,
   DEFAULT_CLIENT_DIGEST_SUBJECT_TEMPLATE,
+  CLIENT_DIGEST_REQUIRED_BODY_TOKENS,
+  CLIENT_DIGEST_REQUIRED_SUBJECT_TOKENS,
   unsupportedClientDigestPlaceholders,
 } from "./clientDigestTemplate";
 
@@ -1449,16 +1456,49 @@ const clientProfileFieldsSchema = z.object({
   digestCadence: z.enum(["daily", "weekly", "biweekly", "monthly"]).optional().default("weekly"),
   digestSubjectTemplate: z.string().trim().min(3).max(500)
     .refine((value) => unsupportedClientDigestPlaceholders(value).length === 0, "subject template contains an unsupported placeholder")
+    .refine(
+      (value) => CLIENT_DIGEST_REQUIRED_SUBJECT_TOKENS.every((token) => value.includes(token)),
+      `subject template must contain ${CLIENT_DIGEST_REQUIRED_SUBJECT_TOKENS.join(", ")}`,
+    )
     .optional().default(DEFAULT_CLIENT_DIGEST_SUBJECT_TEMPLATE),
   digestBodyTemplate: z.string().trim().min(20).max(50000)
     .refine((value) => unsupportedClientDigestPlaceholders(value).length === 0, "body template contains an unsupported placeholder")
+    .refine(
+      (value) => CLIENT_DIGEST_REQUIRED_BODY_TOKENS.every((token) => value.includes(token)),
+      `body template must contain ${CLIENT_DIGEST_REQUIRED_BODY_TOKENS.join(", ")}`,
+    )
     .optional().default(DEFAULT_CLIENT_DIGEST_BODY_TEMPLATE),
 });
 
-export const clientProfileCreateSchema = clientProfileFieldsSchema;
+export const clientProfileCreateSchema = clientProfileFieldsSchema.superRefine((profile, ctx) => {
+  for (const message of clientProfileScopeLimitErrors(profile)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message });
+  }
+});
 
 export const clientProfileUpdateSchema = clientProfileFieldsSchema.partial().extend({
   isActive: z.boolean().optional(),
+});
+
+const clientProfileBulkEntrySchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  clientTypes: z.array(z.string().trim().min(1).max(100)).max(20).optional().default([]),
+  geographies: z.array(z.string().trim().min(1).max(100)).max(80).optional().default([]),
+  industries: z.array(z.string().trim().min(1).max(100)).max(80).optional().default([]),
+  monitoredTechnologies: z.array(z.string().trim().min(1).max(100)).max(160).optional().default([]),
+  mappingTerms: z.array(z.string().trim().min(1).max(160)).max(120).optional().default([]),
+  notificationEmails: z.array(z.string().email()).max(40).optional().default([]),
+  digestEnabled: z.boolean().optional().default(false),
+  digestCadence: z.enum(["daily", "weekly", "biweekly", "monthly"]).optional().default("weekly"),
+}).superRefine((profile, ctx) => {
+  for (const message of clientProfileScopeLimitErrors(profile)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message });
+  }
+});
+
+export const clientProfileBulkCreateSchema = z.object({
+  profiles: z.array(clientProfileBulkEntrySchema).min(1).max(100),
+  createMissingTaxonomyOptions: z.boolean().optional().default(false),
 });
 
 export interface ClientTaxonomyOptionDTO {
@@ -1496,6 +1536,8 @@ export interface ClientAnalysisScopeDTO {
   clients: Array<{
     id: string;
     name: string;
+    clientTypes: string[];
+    matchingScope: ClientMatchingScope;
     mappingTerms: string[];
     geographies: ClientTaxonomyOptionDTO[];
     industries: ClientTaxonomyOptionDTO[];
@@ -2519,6 +2561,8 @@ export const EXERCISE_FRAMEWORK_LABEL: Record<ExerciseFramework, string> = {
   "nist": "NIST CSF 2.0 + SP 800-84",
   "iso-sans": "ISO 27035 + SANS PICERL",
 };
+
+export const clientMatchingScopeSchema = z.enum(CLIENT_MATCHING_SCOPES);
 
 export const EXERCISE_SEVERITIES = ["LOW", "MODERATE", "HIGH", "CRITICAL"] as const;
 export type ExerciseSeverity = typeof EXERCISE_SEVERITIES[number];

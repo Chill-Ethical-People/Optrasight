@@ -94,6 +94,7 @@ export function CommunityIntegrationCard({
   const meta = META[kind];
   const Icon = meta.icon;
   const { toast } = useToast();
+  const [panelOpen, setPanelOpen] = useState(false);
   const [enabled, setEnabled] = useState(false);
   const [endpoint, setEndpoint] = useState("");
   const [collectionId, setCollectionId] = useState("");
@@ -108,7 +109,7 @@ export function CommunityIntegrationCard({
 
   const { data: settings, isLoading } = useQuery<CommunityIntegrationSettingsDTO>({
     queryKey: [path],
-    enabled: !readOnly,
+    enabled: !readOnly && panelOpen,
   });
   useEffect(() => {
     if (!settings) return;
@@ -169,11 +170,16 @@ export function CommunityIntegrationCard({
     onError: (error: Error) => toast({ title: "Lookup failed", description: error.message, variant: "destructive" }),
   });
   const configured = settings?.configured === true;
-  const status = !enabled
-    ? { label: "Disabled", tone: "border-border bg-muted/40 text-muted-foreground" }
-    : configured
-      ? { label: "Configured", tone: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" }
-      : { label: "Setup required", tone: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300" };
+  const status = !settings
+    ? { label: "Open to load", tone: "border-border bg-muted/40 text-muted-foreground" }
+    : !enabled
+      ? { label: "Disabled", tone: "border-border bg-muted/40 text-muted-foreground" }
+      : configured
+        ? {
+            label: "Configured",
+            tone: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+          }
+        : { label: "Setup required", tone: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300" };
   const needsEndpoint = kind === "taxii" || kind === "misp";
   const canSave =
     !readOnly &&
@@ -185,6 +191,8 @@ export function CommunityIntegrationCard({
 
   return (
     <ConnectorPanel
+      open={panelOpen}
+      onOpenChange={setPanelOpen}
       icon={<Icon size={18} />}
       title={meta.title}
       description={meta.description}
@@ -206,7 +214,12 @@ export function CommunityIntegrationCard({
           <Label htmlFor={`${kind}-enabled`} className="text-xs text-muted-foreground">
             Enable
           </Label>
-          <Switch id={`${kind}-enabled`} checked={enabled} onCheckedChange={setEnabled} disabled={readOnly} />
+          <Switch
+            id={`${kind}-enabled`}
+            checked={enabled}
+            onCheckedChange={setEnabled}
+            disabled={readOnly || !settings}
+          />
         </div>
       }
     >

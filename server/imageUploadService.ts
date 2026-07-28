@@ -89,7 +89,7 @@ export class ClientLogoUploadService {
       throw new UploadValidationError("logo is larger than 2MB", 413);
     }
 
-    let metadata: sharp.Metadata;
+    let metadata: Awaited<ReturnType<ReturnType<typeof sharp>["metadata"]>>;
     try {
       metadata = await sharp(source, {
         animated: false,

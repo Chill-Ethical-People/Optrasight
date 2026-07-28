@@ -43,19 +43,16 @@ export function resolveCapabilities(opts: {
   const unique = (items: Capability[]) => Array.from(new Set(items));
 
   if (opts.batchOne) {
-    return unique(accessMode === "guest" || role === "reviewer"
-      ? BATCH_ONE_REVIEW_CAPABILITIES
-      : BATCH_ONE_OPERATOR_CAPABILITIES);
+    return unique(
+      accessMode === "guest" || role === "reviewer" ? BATCH_ONE_REVIEW_CAPABILITIES : BATCH_ONE_OPERATOR_CAPABILITIES,
+    );
   }
 
   if (role === "admin" || role === "owner") return unique(FULL_PLATFORM_ADMIN_CAPABILITIES);
   return unique(BATCH_ONE_REVIEW_CAPABILITIES);
 }
 
-export function hasCapability(
-  capabilities: readonly Capability[] | undefined | null,
-  capability: Capability,
-): boolean {
+export function hasCapability(capabilities: readonly Capability[] | undefined | null, capability: Capability): boolean {
   return !!capabilities?.includes(capability);
 }
 
@@ -73,6 +70,7 @@ const BATCH_ONE_GUEST_API_ALLOW: Partial<Record<Method, Array<string | RegExp>>>
     "/api/v1/taxonomies",
     "/api/v1/client-profile",
     "/api/v1/client-profiles",
+    "/api/v1/client-profiles/bulk",
     /^\/api\/v1\/client-profiles\/[^/]+\/digests$/,
     /^\/api\/v1\/client-profiles\/[^/]+\/digests\/[^/]+\/email\.eml$/,
     /^\/api\/v1\/client-profiles\/[^/]+\/email-template\.(?:docx|eml)$/,
@@ -103,6 +101,7 @@ const BATCH_ONE_GUEST_API_ALLOW: Partial<Record<Method, Array<string | RegExp>>>
     "/api/v1/auth/logout",
     "/api/v1/auth/change-password",
     "/api/v1/auth/mfa/verify",
+    "/api/v1/auth/mfa/challenge",
     "/api/v1/osint/findings/ai-analyze",
     "/api/v1/osint/chat/triage",
     "/api/v1/osint/chat/deep-dive",
@@ -152,6 +151,7 @@ const BATCH_ONE_OPERATOR_API_ALLOW: Partial<Record<Method, Array<string | RegExp
     "/api/v1/integrations/kela/test",
     /^\/api\/v1\/integrations\/community\/[^/]+\/test$/,
     /^\/api\/v1\/client-profiles\/[^/]+\/email-logo$/,
+    /^\/api\/v1\/client-profiles\/[^/]+\/email-template\.docx$/,
     "/api/v1/client-taxonomy-options",
     /^\/api\/v1\/detection-rules\/[^/]+\/deploy$/,
     "/api/v1/ai/providers",
@@ -196,15 +196,9 @@ const BATCH_ONE_OPERATOR_API_ALLOW: Partial<Record<Method, Array<string | RegExp
   ],
 };
 
-export function isBatchOneApiAllowed(opts: {
-  method: string;
-  path: string;
-  accessMode?: AccessMode | null;
-}): boolean {
+export function isBatchOneApiAllowed(opts: { method: string; path: string; accessMode?: AccessMode | null }): boolean {
   const method = opts.method.toUpperCase() as Method;
   if (method === "HEAD" || method === "OPTIONS") return true;
-  const policy = opts.accessMode === "guest"
-    ? BATCH_ONE_GUEST_API_ALLOW
-    : BATCH_ONE_OPERATOR_API_ALLOW;
+  const policy = opts.accessMode === "guest" ? BATCH_ONE_GUEST_API_ALLOW : BATCH_ONE_OPERATOR_API_ALLOW;
   return (policy[method] ?? []).some((pattern) => matches(opts.path, pattern));
 }

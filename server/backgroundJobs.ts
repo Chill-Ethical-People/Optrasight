@@ -26,6 +26,7 @@
 import { storage } from "./storage";
 import { chatDeepDiveLiveDiagnostic, type ChatDeepDiveInputFinding } from "./aiClient";
 import { fetchSourcesBatch } from "./sourceFetch";
+import { runChatTriage, type ChatRangeKey } from "./osintChat";
 import type { ClientAnalysisScopeDTO, OsintFindingDTO } from "@shared/schema";
 
 const TICK_INTERVAL_MS = 60_000;
@@ -99,8 +100,30 @@ async function runDueClientDigestsForTenant(tid: string): Promise<void> {
   try {
     for (const client of due) {
       try {
+        const range: ChatRangeKey = client.digestCadence === "daily"
+          ? "1d"
+          : client.digestCadence === "weekly"
+            ? "7d"
+            : client.digestCadence === "biweekly"
+              ? "2w"
+              : "1m";
+        const triage = await runChatTriage(storage, {
+          tenantId: tid,
+          range,
+          analysisMode: "client_impact",
+          clientIds: [client.id],
+        });
+        const selection = triage.clientSelections?.find((item) => item.clientId === client.id);
+        if (!selection || selection.focusedFindingIds.length + selection.generalFindingIds.length === 0) {
+          console.log(`[client-digest] ${tid}/${client.id}: no material client-impact intelligence selected`);
+          continue;
+        }
         await storage.generateClientDigest(tid, client.id, {
           cadence: client.digestCadence,
+          assessmentSelection: {
+            focusedFindingIds: selection.focusedFindingIds,
+            generalFindingIds: selection.generalFindingIds,
+          },
           actor: "system",
         });
         console.log(`[client-digest] ${tid}/${client.id}: draft generated`);
@@ -185,7 +208,11 @@ async function runAutoAnalyzeForTenant(tid: string): Promise<void> {
 
     // Pre-fetch source bodies for the whole batch (concurrent under the hood
     // via sourceFetch's existing batching).
-    const fetched = await fetchSourcesBatch(batch.map((f: OsintFindingDTO) => f.url), { includeReferences: true, maxReferenceLinks: 5 });
+    const fetched = await fetchSourcesBatch(batch.map((f: OsintFindingDTO) => f.url), {
+      includeReferences: true,
+      maxReferenceLinks: 24,
+      maxReferenceDepth: 2,
+    });
     const sourceByIdx = new Map<number, string | null>();
     fetched.forEach((r, i) => sourceByIdx.set(i, r.content));
 

@@ -12,6 +12,8 @@ interface ConnectorPanelProps {
   children: ReactNode;
   iconClassName?: string;
   defaultOpen?: boolean;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 export function ConnectorPanel({
@@ -23,9 +25,11 @@ export function ConnectorPanel({
   children,
   iconClassName = "border-primary/20 bg-primary/10 text-primary",
   defaultOpen = false,
+  open,
+  onOpenChange,
 }: ConnectorPanelProps) {
   return (
-    <Collapsible.Root defaultOpen={defaultOpen} asChild>
+    <Collapsible.Root defaultOpen={defaultOpen} open={open} onOpenChange={onOpenChange} asChild>
       <Card className="group/connector overflow-hidden">
         <div className="flex items-center gap-3 px-5 py-4">
           <Collapsible.Trigger asChild>

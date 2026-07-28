@@ -25,6 +25,7 @@ function fmtTime(value: string | null | undefined): string {
 
 export function KelaIntegrationCard({ readOnly = false }: { readOnly?: boolean }) {
   const { toast } = useToast();
+  const [panelOpen, setPanelOpen] = useState(false);
   const [enabled, setEnabled] = useState(false);
   const [feedUrl, setFeedUrl] = useState("");
   const [authMode, setAuthMode] = useState<"bearer" | "x-api-key">("bearer");
@@ -34,7 +35,7 @@ export function KelaIntegrationCard({ readOnly = false }: { readOnly?: boolean }
 
   const { data: settings, isLoading } = useQuery<KelaIntegrationSettingsDTO>({
     queryKey: ["/api/v1/integrations/kela"],
-    enabled: !readOnly,
+    enabled: !readOnly && panelOpen,
   });
 
   useEffect(() => {
@@ -92,15 +93,22 @@ export function KelaIntegrationCard({ readOnly = false }: { readOnly?: boolean }
   });
 
   const configured = settings?.configured === true;
-  const status = !enabled
-    ? { label: "Disabled", tone: "border-border bg-muted/40 text-muted-foreground" }
-    : configured
-      ? { label: "Configured", tone: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" }
-      : { label: "Setup required", tone: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300" };
+  const status = !settings
+    ? { label: "Open to load", tone: "border-border bg-muted/40 text-muted-foreground" }
+    : !enabled
+      ? { label: "Disabled", tone: "border-border bg-muted/40 text-muted-foreground" }
+      : configured
+        ? {
+            label: "Configured",
+            tone: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+          }
+        : { label: "Setup required", tone: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300" };
   const canSave = !readOnly && !isLoading && !save.isPending && !!feedUrl && (!enabled || configured || !!apiKey);
 
   return (
     <ConnectorPanel
+      open={panelOpen}
+      onOpenChange={setPanelOpen}
       icon={<DatabaseZap size={18} />}
       title="KELA technical intelligence"
       description="Import compromised infrastructure and cybercrime context from a customer-licensed KELA STIX feed."
@@ -124,7 +132,7 @@ export function KelaIntegrationCard({ readOnly = false }: { readOnly?: boolean }
             id="kela-integration-enabled"
             checked={enabled}
             onCheckedChange={setEnabled}
-            disabled={readOnly}
+            disabled={readOnly || !settings}
             aria-label="Enable KELA ingestion"
           />
         </div>

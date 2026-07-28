@@ -1,0 +1,4 @@
+interface:
+  display_name: "Client Brief Drafting"
+  short_description: "Evidence-led client threat brief drafting"
+  default_prompt: "Use $client-brief-drafting to produce an evidence-led Client Brief for the specified audience and reporting period."

@@ -45,6 +45,7 @@ The internal authn model is intentionally simple but production-hardened enough 
 | Finding content (OSINT) | `osint_findings.*` | Public-source data — not sensitive. |
 | Portrait images | `data/portraits/*` | Curated assets or server-side AI output only. Browser-supplied portrait upload is disabled with HTTP 410. |
 | Client email logos | `data/client-email-logos/*` | Validated and normalized by the dedicated image upload service, then stored under server-generated object keys. |
+| Client email Word templates | Client Profile subject/body fields | `.docx` only, 5MB limit, CRC-checked ZIP package, bounded Word XML, supported-placeholder allowlist; the raw upload is not retained. |
 
 ## Upload validation
 

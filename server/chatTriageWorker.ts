@@ -7,6 +7,7 @@ type WorkerPayload = {
   analysisMode: "cirt" | "client_impact";
   clientIds: string[];
   actor: string;
+  digestCadence?: "daily" | "weekly" | "biweekly" | "monthly";
 };
 
 async function main() {
@@ -50,14 +51,17 @@ async function main() {
         }
         try {
           const profile = storage.getClientProfile(tenantId, selection.clientId);
-          const cadence =
+          const cadence = payload.digestCadence ?? (
             payload.range === "1d"
               ? "daily"
               : payload.range === "7d"
                 ? "weekly"
+                : payload.range === "2w"
+                  ? "biweekly"
                 : payload.range === "1m"
                   ? "monthly"
-                  : profile?.digestCadence;
+                  : profile?.digestCadence
+          );
           const digest = await storage.generateClientDigest(tenantId, selection.clientId, {
             cadence,
             assessmentSelection: {

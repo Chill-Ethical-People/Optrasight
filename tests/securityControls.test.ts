@@ -10,8 +10,37 @@ import {
   SESSION_IDLE_TIMEOUT_MS,
   sessionExpiryReason,
 } from "../server/storage";
+import { ApiError, isMfaChallengeError } from "../client/src/lib/queryClient";
+import { redactForLog } from "../server/logRedaction";
 
 describe("security controls", () => {
+  it("redacts MFA enrollment seeds and credential-bearing URLs from logs", () => {
+    const seed = "JBSWY3DPEHPK3PXP";
+    const redacted = redactForLog({
+      mfaSetup: {
+        otpauthUrl: `otpauth://totp/OptraSight:user@example.com?secret=${seed}&issuer=OptraSight`,
+        qrCodeDataUrl: `https://example.test/enroll?token=${seed}`,
+      },
+      profileUrl: `https://example.test/profile?secret=${seed}`,
+    });
+    const serialized = JSON.stringify(redacted);
+
+    expect(serialized).not.toContain(seed);
+    expect(redacted).toMatchObject({
+      mfaSetup: {
+        otpauthUrl: "[redacted]",
+        qrCodeDataUrl: "[redacted]",
+      },
+      profileUrl: "https://example.test/profile?secret=[redacted]",
+    });
+  });
+
+  it("recognizes the structured MFA login challenge", () => {
+    expect(isMfaChallengeError(new ApiError("MFA code required", 401, "MFA_REQUIRED"))).toBe(true);
+    expect(isMfaChallengeError(new ApiError("invalid credentials", 401))).toBe(false);
+    expect(isMfaChallengeError(new Error("MFA code required"))).toBe(false);
+  });
+
   it("keeps BatchOne-only routes and capabilities scoped", () => {
     expect(isBatchOneApiAllowed({ method: "GET", path: "/api/v1/threat-actors/tap-001/tenants", accessMode: "credentialed" })).toBe(false);
     expect(isBatchOneApiAllowed({ method: "POST", path: "/api/v1/osint/findings/email-draft", accessMode: "credentialed" })).toBe(false);

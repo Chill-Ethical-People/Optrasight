@@ -10,6 +10,7 @@ export interface AuthUser {
   passwordMustChange?: boolean;
   mfaEnabled?: boolean;
   mfaVerifiedAt?: string | null;
+  mfaSessionVerifiedAt?: string | null;
   access_mode?: "credentialed" | "guest";
   capabilities?: string[];
 }
@@ -185,21 +186,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = async (email: string, password: string, mfaCode?: string) => {
-    setLoading(true);
-    try {
-      const r = await apiRequest("POST", "/api/v1/auth/login", { email, password, mfaCode });
-      const data = await r.json();
-      setTok(data.access_token);
-      setAuthToken(data.access_token);
-      writeHistoryAuthToken(data.access_token);
-      const me = await apiRequest("GET", "/api/v1/me");
-      if (me.ok) {
-        const u = await me.json();
-        setUser(u);
-        setActiveTid(u.tenant?.id ?? null);
-      }
-    } finally {
-      setLoading(false);
+    // Do not toggle the provider's boot-time `loading` flag here. Doing so
+    // unmounts <Login> while a 401 MFA challenge is in flight, which discards
+    // the component's credentials -> MFA step transition.
+    const r = await apiRequest("POST", "/api/v1/auth/login", { email, password, mfaCode });
+    const data = await r.json();
+    setTok(data.access_token);
+    setAuthToken(data.access_token);
+    writeHistoryAuthToken(data.access_token);
+    const me = await apiRequest("GET", "/api/v1/me");
+    if (me.ok) {
+      const u = await me.json();
+      setUser(u);
+      setActiveTid(u.tenant?.id ?? null);
     }
   };
 

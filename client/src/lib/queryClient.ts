@@ -33,6 +33,10 @@ export class ApiError extends Error {
     this.name = "ApiError";
   }
 }
+
+export function isMfaChallengeError(error: unknown): boolean {
+  return error instanceof ApiError && error.code === "MFA_REQUIRED";
+}
 export function setAuthToken(t: string | null) {
   authToken = t;
 }

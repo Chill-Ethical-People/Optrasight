@@ -16,6 +16,7 @@ import {
   RadioTower,
   Users,
   ShieldCheck,
+  KeyRound,
   MailCheck,
   Settings2,
 } from "lucide-react";
@@ -360,33 +361,67 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           )}
           {collapsed ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className={`h-10 w-10 mx-auto flex ${signOutDisabled ? "cursor-not-allowed opacity-55 hover:opacity-70" : ""}`}
-                  onClick={handleSignOut}
-                  data-testid="button-logout"
-                  aria-label={signOutLabel}
-                >
-                  <LogOut size={16} />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="right">{signOutLabel}</TooltipContent>
-            </Tooltip>
+            <div className="space-y-1">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    asChild
+                    variant="ghost"
+                    size="icon"
+                    className="h-10 w-10 mx-auto flex"
+                  >
+                    <Link
+                      href="/account-security"
+                      data-testid="button-account-security"
+                      aria-label="Account security and MFA"
+                    >
+                      <KeyRound size={16} />
+                    </Link>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right">Account security and MFA</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className={`h-10 w-10 mx-auto flex ${signOutDisabled ? "cursor-not-allowed opacity-55 hover:opacity-70" : ""}`}
+                    onClick={handleSignOut}
+                    data-testid="button-logout"
+                    aria-label={signOutLabel}
+                  >
+                    <LogOut size={16} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right">{signOutLabel}</TooltipContent>
+              </Tooltip>
+            </div>
           ) : (
-            <Button
-              variant="ghost"
-              size="sm"
-              className={`w-full justify-start text-muted-foreground ${signOutDisabled ? "cursor-not-allowed opacity-55 hover:opacity-70" : ""}`}
-              onClick={handleSignOut}
-              data-testid="button-logout"
-              title={signOutLabel}
-            >
-              <LogOut size={14} className="mr-2" />
-              Sign out
-            </Button>
+            <div className="space-y-1">
+              <Button
+                asChild
+                variant="ghost"
+                size="sm"
+                className="w-full justify-start text-muted-foreground"
+              >
+                <Link href="/account-security" data-testid="button-account-security">
+                  <KeyRound size={14} className="mr-2" />
+                  Account security
+                </Link>
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className={`w-full justify-start text-muted-foreground ${signOutDisabled ? "cursor-not-allowed opacity-55 hover:opacity-70" : ""}`}
+                onClick={handleSignOut}
+                data-testid="button-logout"
+                title={signOutLabel}
+              >
+                <LogOut size={14} className="mr-2" />
+                Sign out
+              </Button>
+            </div>
           )}
         </div>
       </aside>
@@ -448,6 +483,17 @@ export function AppShell({ children }: { children: ReactNode }) {
                         </span>
                       </div>
                     </div>
+                    <Button
+                      asChild
+                      variant="ghost"
+                      size="sm"
+                      className="w-full justify-start text-muted-foreground"
+                    >
+                      <Link href="/account-security" data-testid="button-account-security-mobile">
+                        <KeyRound size={14} className="mr-2" />
+                        Account security
+                      </Link>
+                    </Button>
                     <Button
                       variant="ghost"
                       size="sm"
