@@ -43,19 +43,16 @@ export function resolveCapabilities(opts: {
   const unique = (items: Capability[]) => Array.from(new Set(items));
 
   if (opts.batchOne) {
-    return unique(accessMode === "guest" || role === "reviewer"
-      ? BATCH_ONE_REVIEW_CAPABILITIES
-      : BATCH_ONE_OPERATOR_CAPABILITIES);
+    return unique(
+      accessMode === "guest" || role === "reviewer" ? BATCH_ONE_REVIEW_CAPABILITIES : BATCH_ONE_OPERATOR_CAPABILITIES,
+    );
   }
 
   if (role === "admin" || role === "owner") return unique(FULL_PLATFORM_ADMIN_CAPABILITIES);
   return unique(BATCH_ONE_REVIEW_CAPABILITIES);
 }
 
-export function hasCapability(
-  capabilities: readonly Capability[] | undefined | null,
-  capability: Capability,
-): boolean {
+export function hasCapability(capabilities: readonly Capability[] | undefined | null, capability: Capability): boolean {
   return !!capabilities?.includes(capability);
 }
 
@@ -71,6 +68,13 @@ const BATCH_ONE_GUEST_API_ALLOW: Partial<Record<Method, Array<string | RegExp>>>
     "/api/v1/search",
     "/api/v1/auth/mfa/setup",
     "/api/v1/taxonomies",
+    "/api/v1/client-profile",
+    "/api/v1/client-profiles",
+    "/api/v1/client-profiles/bulk",
+    /^\/api\/v1\/client-profiles\/[^/]+\/digests$/,
+    /^\/api\/v1\/client-profiles\/[^/]+\/digests\/[^/]+\/email\.eml$/,
+    /^\/api\/v1\/client-profiles\/[^/]+\/email-template\.(?:docx|eml)$/,
+    "/api/v1/client-taxonomy-options",
     "/api/v1/ai/providers",
     "/api/v1/ai/assignments",
     "/api/v1/threat-actors",
@@ -78,25 +82,31 @@ const BATCH_ONE_GUEST_API_ALLOW: Partial<Record<Method, Array<string | RegExp>>>
     "/api/v1/threat-actors/portrait-generator/availability",
     /^\/api\/v1\/threat-actors\/[^/]+(?:\/full|\/export\.docx)?$/,
     "/api/v1/osint/findings",
+    "/api/v1/osint/findings/export.csv",
     /^\/api\/v1\/osint\/findings\/[^/]+$/,
     /^\/api\/v1\/osint\/findings\/[^/]+\/cirt-cache$/,
     "/api/v1/osint/sources",
     "/api/v1/osint/hunt-queries",
+    "/api/v1/detection-rules",
+    /^\/api\/v1\/detection-rules\/[^/]+$/,
     "/api/v1/osint/ai-jobs/history",
     /^\/api\/v1\/osint\/ai-jobs\/[^/]+$/,
     "/api/v1/ai-jobs/active",
     /^\/api\/v1\/ai-jobs\/[^/]+(?:\/full)?$/,
     "/api/v1/operations/audit",
     /^\/api\/v1\/exchange\/stix\/preview$/,
+    /^\/api\/v1\/exchange\/stix\/export$/,
   ],
   POST: [
     "/api/v1/auth/logout",
     "/api/v1/auth/change-password",
     "/api/v1/auth/mfa/verify",
+    "/api/v1/auth/mfa/challenge",
     "/api/v1/osint/findings/ai-analyze",
     "/api/v1/osint/chat/triage",
     "/api/v1/osint/chat/deep-dive",
     "/api/v1/osint/chat/converse",
+    /^\/api\/v1\/integrations\/community\/(?:urlscan|greynoise)\/lookup$/,
   ],
 };
 
@@ -115,19 +125,35 @@ const BATCH_ONE_OPERATOR_API_ALLOW: Partial<Record<Method, Array<string | RegExp
     /^\/api\/v1\/osint\/reanalyze-jobs\/[^/]+$/,
     "/api/v1/osint/dictionaries",
     "/api/v1/operations/audit",
+    "/api/v1/email-delivery/settings",
+    "/api/v1/integrations/x",
+    "/api/v1/integrations/kela",
+    /^\/api\/v1\/integrations\/community\/[^/]+$/,
     "/api/v1/scans",
   ],
   POST: [
     ...(BATCH_ONE_GUEST_API_ALLOW.POST ?? []),
     "/api/v1/osint/sources/bulk",
     "/api/v1/osint/findings/reanalyze",
-    "/api/v1/osint/scan",
     "/api/v1/osint/automation/fetch-now",
     "/api/v1/osint/automation/analyze-now",
     "/api/v1/osint/automation/reset-cache",
     "/api/v1/admin/osint/ingest",
     "/api/v1/osint/overview",
     "/api/v1/osint/hunt-queries",
+    "/api/v1/detection-rules",
+    "/api/v1/detection-rules/generate",
+    "/api/v1/client-profiles",
+    /^\/api\/v1\/client-profiles\/[^/]+\/digests\/generate$/,
+    /^\/api\/v1\/client-profiles\/[^/]+\/digests\/[^/]+\/send$/,
+    "/api/v1/email-delivery/test",
+    "/api/v1/integrations/x/test",
+    "/api/v1/integrations/kela/test",
+    /^\/api\/v1\/integrations\/community\/[^/]+\/test$/,
+    /^\/api\/v1\/client-profiles\/[^/]+\/email-logo$/,
+    /^\/api\/v1\/client-profiles\/[^/]+\/email-template\.docx$/,
+    "/api/v1/client-taxonomy-options",
+    /^\/api\/v1\/detection-rules\/[^/]+\/deploy$/,
     "/api/v1/ai/providers",
     /^\/api\/v1\/ai\/providers\/[^/]+\/test$/,
     "/api/v1/threat-actors",
@@ -141,15 +167,28 @@ const BATCH_ONE_OPERATOR_API_ALLOW: Partial<Record<Method, Array<string | RegExp
     /^\/api\/v1\/ai\/providers\/[^/]+$/,
     /^\/api\/v1\/admin\/platform-users\/[^/]+$/,
     "/api/v1/ai/assignments",
+    /^\/api\/v1\/detection-rules\/[^/]+\/validation$/,
+    "/api/v1/email-delivery/settings",
+    "/api/v1/integrations/x",
+    "/api/v1/integrations/kela",
+    /^\/api\/v1\/integrations\/community\/[^/]+$/,
   ],
   PATCH: [
     /^\/api\/v1\/osint\/findings\/[^/]+$/,
+    "/api/v1/client-profile",
+    "/api/v1/workspace/operating-mode",
+    /^\/api\/v1\/client-profiles\/[^/]+$/,
+    /^\/api\/v1\/detection-rules\/[^/]+$/,
+    /^\/api\/v1\/client-profiles\/[^/]+\/digests\/[^/]+$/,
     /^\/api\/v1\/threat-actors\/[^/]+$/,
     "/api/v1/osint/automation/settings",
   ],
   DELETE: [
     /^\/api\/v1\/ai\/providers\/[^/]+$/,
     /^\/api\/v1\/admin\/platform-users\/[^/]+$/,
+    /^\/api\/v1\/detection-rules\/[^/]+$/,
+    /^\/api\/v1\/client-profiles\/[^/]+$/,
+    /^\/api\/v1\/client-profiles\/[^/]+\/email-logo$/,
     /^\/api\/v1\/threat-actors\/[^/]+\/portrait$/,
     /^\/api\/v1\/threat-actors\/[^/]+$/,
     /^\/api\/v1\/threat-actors\/[^/]+\/(?:ttps|tools|campaigns|iocs|references)\/[^/]+$/,
@@ -157,15 +196,9 @@ const BATCH_ONE_OPERATOR_API_ALLOW: Partial<Record<Method, Array<string | RegExp
   ],
 };
 
-export function isBatchOneApiAllowed(opts: {
-  method: string;
-  path: string;
-  accessMode?: AccessMode | null;
-}): boolean {
+export function isBatchOneApiAllowed(opts: { method: string; path: string; accessMode?: AccessMode | null }): boolean {
   const method = opts.method.toUpperCase() as Method;
   if (method === "HEAD" || method === "OPTIONS") return true;
-  const policy = opts.accessMode === "guest"
-    ? BATCH_ONE_GUEST_API_ALLOW
-    : BATCH_ONE_OPERATOR_API_ALLOW;
+  const policy = opts.accessMode === "guest" ? BATCH_ONE_GUEST_API_ALLOW : BATCH_ONE_OPERATOR_API_ALLOW;
   return (policy[method] ?? []).some((pattern) => matches(opts.path, pattern));
 }

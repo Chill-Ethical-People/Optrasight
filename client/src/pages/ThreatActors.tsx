@@ -60,7 +60,8 @@ import {
   Tag, ListChecks, Activity, Calendar, ExternalLink, FileText,
   LayoutGrid, List as ListIcon, CheckCircle2, Clock, AlertCircle,
   Building2, GripVertical, X, Save, RotateCcw, MoreHorizontal,
-  Camera, Upload, RefreshCw, Info, PlusCircle, MinusCircle,
+  Camera, RefreshCw, Info, PlusCircle, MinusCircle,
+  ChevronRight, Filter, ArrowUpAZ, ArrowDownAZ,
 } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator,
@@ -299,10 +300,21 @@ function MetaCell({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
+function displayEnum(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+const ACTOR_NAME_COLLATOR = new Intl.Collator("en", { sensitivity: "base", numeric: true });
+
 // ---- Page ------------------------------------------------------------------
 export default function ThreatActors() {
   const [view, setView] = useState<"list" | "kanban">("list");
   const [statusFilter, setStatusFilter] = useState<"all" | TapStatus>("all");
+  const [industryFilter, setIndustryFilter] = useState("all");
+  const [sortOrder, setSortOrder] = useState<"name-asc" | "name-desc">("name-asc");
   const [clientFilter, setClientFilter] = useState<"all" | string>("all");
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -403,6 +415,17 @@ export default function ThreatActors() {
   const availableTenants = tagsResp?.available ?? [];
 
   const actors = data?.actors ?? [];
+  const industries = useMemo(() => {
+    const values = new Set<string>();
+    for (const actor of actors) {
+      for (const sector of actor.targetSectors) {
+        const normalized = sector.trim();
+        if (normalized) values.add(normalized);
+      }
+    }
+    return Array.from(values).sort(ACTOR_NAME_COLLATOR.compare);
+  }, [actors]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     let arr = actors;
@@ -421,8 +444,15 @@ export default function ThreatActors() {
         return tags.some((t) => t.tenantId === clientFilter);
       });
     }
-    return arr;
-  }, [actors, search, clientFilter, tagsByActor]);
+    if (industryFilter !== "all") {
+      const selectedIndustry = industryFilter.toLowerCase();
+      arr = arr.filter((a) => a.targetSectors.some((sector) => sector.toLowerCase() === selectedIndustry));
+    }
+    return [...arr].sort((left, right) => {
+      const result = ACTOR_NAME_COLLATOR.compare(left.primaryName, right.primaryName);
+      return sortOrder === "name-asc" ? result : -result;
+    });
+  }, [actors, search, clientFilter, tagsByActor, industryFilter, sortOrder]);
 
   return (
     <AppShell>
@@ -470,7 +500,9 @@ export default function ThreatActors() {
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <div className="relative w-full sm:w-auto">
+          <label htmlFor="tap-search" className="sr-only">Search threat actor profiles</label>
           <Input
+            id="tap-search"
             placeholder="Search by name / alias / MITRE id…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -479,7 +511,7 @@ export default function ThreatActors() {
           />
         </div>
         <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as any)}>
-          <SelectTrigger className="h-9 w-36" data-testid="select-status-filter">
+          <SelectTrigger className="h-9 w-36" data-testid="select-status-filter" aria-label="Filter by profile status">
             <SelectValue placeholder="Status" />
           </SelectTrigger>
           <SelectContent>
@@ -488,6 +520,30 @@ export default function ThreatActors() {
             <SelectItem value="reviewed">Reviewed</SelectItem>
             <SelectItem value="approved">Approved</SelectItem>
             <SelectItem value="archived">Archived</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={industryFilter} onValueChange={setIndustryFilter}>
+          <SelectTrigger className="h-9 w-44" data-testid="select-industry-filter" aria-label="Filter by industry">
+            <Filter size={13} className="mr-1.5 shrink-0 text-muted-foreground" />
+            <SelectValue placeholder="Industry" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All industries</SelectItem>
+            {industries.map((industry) => (
+              <SelectItem key={industry} value={industry}>{industry}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={sortOrder} onValueChange={(value) => setSortOrder(value as "name-asc" | "name-desc")}>
+          <SelectTrigger className="h-9 w-40" data-testid="select-actor-sort" aria-label="Sort threat actor profiles">
+            {sortOrder === "name-asc"
+              ? <ArrowUpAZ size={14} className="mr-1.5 shrink-0 text-muted-foreground" />
+              : <ArrowDownAZ size={14} className="mr-1.5 shrink-0 text-muted-foreground" />}
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="name-asc">Name A to Z</SelectItem>
+            <SelectItem value="name-desc">Name Z to A</SelectItem>
           </SelectContent>
         </Select>
         {!BATCH_ONE_RELEASE && (
@@ -538,7 +594,7 @@ export default function ThreatActors() {
       ) : filtered.length === 0 ? (
         <EmptyState onCreate={() => setCreateOpen(true)} />
       ) : view === "list" ? (
-        <div className="grid gap-3 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
+        <div className="space-y-2" role="list" aria-label="Threat actor profiles">
           {filtered.map((a) => (
             <TapCard
               key={a.id}
@@ -719,7 +775,7 @@ function ActorPortrait({
   portraitStatus?: "idle" | "generating" | "ready" | "failed";
   variant?: "circle" | "dossier";
   /** When true, render a hover-revealed camera button that opens a dropdown
-   *  with Upload · Regenerate · Remove. The button uses stopPropagation so it
+   *  with Regenerate and Remove. The button uses stopPropagation so it
    *  doesn't trigger the surrounding card's onClick. */
   editable?: boolean;
 }) {
@@ -868,9 +924,8 @@ function ActorPortrait({
   );
 }
 
-// v2.32.1 — small dropdown menu attached to the portrait circle. Lets the
-// analyst Upload an image / Regenerate the AI portrait / Remove the current
-// portrait. The trigger is a circular camera button anchored to the bottom-
+// Small dropdown menu attached to the portrait circle. Analysts can regenerate
+// or remove the current portrait. The trigger is anchored to the bottom-
 // right of the portrait. It's visible on hover (or always on touch devices)
 // and uses stopPropagation so the surrounding card click handler stays put.
 function PortraitActionMenu({
@@ -884,8 +939,7 @@ function PortraitActionMenu({
   });
   const portraitGeneratorUnavailable = portraitGenerator?.available === false;
   const aiDisabled = !aiAvailability.hasUsableProvider || portraitGeneratorUnavailable;
-  const fileRef = useRef<HTMLInputElement | null>(null);
-  const [busy, setBusy] = useState<"upload" | "regen" | "remove" | null>(null);
+  const [busy, setBusy] = useState<"regen" | "remove" | null>(null);
 
   const refreshActors = () => {
     // Both list and detail queries hang off /api/v1/threat-actors — invalidating
@@ -894,48 +948,11 @@ function PortraitActionMenu({
     queryClient.invalidateQueries({ queryKey: ["/api/v1/threat-actors", actorId] });
   };
 
-  const handleFile = async (file: File) => {
-    if (!/^image\/(png|jpe?g|webp|gif)$/i.test(file.type)) {
-      toast({ title: "Unsupported file type", description: "Use PNG, JPEG, WebP, or GIF.", variant: "destructive" });
-      return;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      toast({ title: "File too large", description: "Portrait images must be 5MB or smaller.", variant: "destructive" });
-      return;
-    }
-    setBusy("upload");
-    try {
-      // Read as base64 — keeps us on the existing JSON upload pattern so we
-      // don't need to introduce multer or multipart parsing on the server.
-      const contentBase64 = await new Promise<string>((resolve, reject) => {
-        const r = new FileReader();
-        r.onerror = () => reject(r.error);
-        r.onload = () => {
-          const result = String(r.result || "");
-          // result is `data:image/png;base64,AAAA...` — strip the prefix.
-          const comma = result.indexOf(",");
-          resolve(comma >= 0 ? result.slice(comma + 1) : result);
-        };
-        r.readAsDataURL(file);
-      });
-      await apiRequest("POST", `/api/v1/threat-actors/${actorId}/portrait/upload`, {
-        fileName: file.name,
-        contentBase64,
-      });
-      refreshActors();
-      toast({ title: "Portrait uploaded", description: file.name });
-    } catch (e: any) {
-      toast({ title: "Upload failed", description: String(e?.message ?? e), variant: "destructive" });
-    } finally {
-      setBusy(null);
-    }
-  };
-
   const handleRegen = async () => {
     if (portraitGeneratorUnavailable) {
       toast({
         title: "Portrait generator unavailable",
-        description: portraitGenerator?.message ?? portraitGenerator?.installHint ?? "Install asi-generate-image or upload a portrait image.",
+        description: portraitGenerator?.message ?? portraitGenerator?.installHint ?? "Install or expose the configured image generator.",
         variant: "destructive",
       });
       return;
@@ -975,19 +992,6 @@ function PortraitActionMenu({
 
   return (
     <>
-      <input
-        ref={fileRef}
-        type="file"
-        accept="image/png,image/jpeg,image/webp,image/gif"
-        className="sr-only"
-        onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) handleFile(f);
-          // Reset so selecting the same file twice still fires onChange.
-          e.target.value = "";
-        }}
-        data-testid={`input-portrait-file-${actorId}`}
-      />
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button
@@ -1016,12 +1020,6 @@ function PortraitActionMenu({
           className="w-52"
           onClick={(e) => e.stopPropagation()}
         >
-          <DropdownMenuItem
-            onClick={(e) => { e.stopPropagation(); fileRef.current?.click(); }}
-            data-testid={`menuitem-portrait-upload-${actorId}`}
-          >
-            <Upload size={14} className="mr-2" /> Upload image…
-          </DropdownMenuItem>
           <DropdownMenuItem
             onClick={(e) => { e.stopPropagation(); handleRegen(); }}
             disabled={aiDisabled}
@@ -1070,108 +1068,78 @@ const TapCard = memo(function TapCard({
 
   return (
     <Card
-      className="os-tap-card p-4 hover:shadow-md transition-shadow cursor-pointer relative"
+      role="listitem"
+      tabIndex={0}
+      className="os-tap-card cursor-pointer p-3 transition-colors hover:border-primary/35 hover:bg-primary/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
       onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpen();
+        }
+      }}
       data-testid={`card-tap-${actor.id}`}
     >
-      {/* Top row: profile id (left) + last-updated stamp + status (right) */}
-      <div className="os-tap-card-top flex items-start justify-between gap-2 mb-3">
-        <div className="min-w-0">
-          <div className="text-[9px] uppercase text-muted-foreground">Dossier</div>
-          <div className="text-[10px] font-mono text-muted-foreground">{actor.profileId}</div>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-mono text-muted-foreground/80 tabular-nums" title="Last updated">
-            {formatStamp(actor.updatedAt)}
-          </span>
-          <Badge className={cn("text-[10px]", TAP_STATUS_BADGE[actor.status])}>{actor.status}</Badge>
-        </div>
-      </div>
-
-      <div className="mb-3 flex items-start gap-3">
-        <div className="shrink-0">
-            <ActorPortrait
-              name={actor.primaryName}
-              threatLevel={actor.threatLevel}
-              status={actor.status}
-              portraitUrl={actor.portraitUrl}
-              portraitStatus={actor.portraitStatus}
-              actorId={actor.id}
-              size={64}
-              editable={!STATIC_DEMO_MODE}
-            />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="os-tap-card-name font-semibold leading-tight truncate" data-testid={`text-tap-name-${actor.id}`}>{actor.primaryName}</div>
-          <div className="mt-1 flex flex-wrap items-center gap-1.5">
-            {actor.mitreGroupId && (
-              <span className="font-mono text-[11px] text-muted-foreground">{actor.mitreGroupId}</span>
-            )}
-            <span className="text-[10px] uppercase text-muted-foreground">{ACTOR_TYPE_LABEL[actor.actorType]}</span>
-          </div>
-          {actor.aliases.length > 0 && (
-            <div className="os-tap-alias-row mt-2 flex flex-wrap gap-1">
-              {actor.aliases.slice(0, 3).map((a) => (
-                <Badge key={a} variant="outline" className="text-[10px] font-normal">{a}</Badge>
-              ))}
-              {actor.aliases.length > 3 && (
-                <Badge variant="outline" className="text-[10px] font-normal">+{actor.aliases.length - 3}</Badge>
-              )}
+      <div className="grid items-center gap-3 md:grid-cols-[minmax(230px,1.05fr)_minmax(260px,1.45fr)_minmax(180px,.75fr)_120px_20px]">
+        <div className="flex min-w-0 items-center gap-3">
+          <ActorPortrait
+            name={actor.primaryName}
+            threatLevel={actor.threatLevel}
+            status={actor.status}
+            portraitUrl={actor.portraitUrl}
+            portraitStatus={actor.portraitStatus}
+            actorId={actor.id}
+            size={52}
+            editable={!STATIC_DEMO_MODE}
+          />
+          <div className="min-w-0">
+            <div className="truncate font-semibold leading-tight" data-testid={`text-tap-name-${actor.id}`}>{actor.primaryName}</div>
+            <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+              <span className="shrink-0 font-mono">{actor.mitreGroupId || actor.profileId}</span>
+              <span aria-hidden>·</span>
+              <span className="truncate">{ACTOR_TYPE_LABEL[actor.actorType]}</span>
             </div>
-          )}
+            {actor.aliases.length > 0 && (
+              <div className="mt-1 truncate text-[11px] text-muted-foreground">
+                Also known as {actor.aliases.slice(0, 2).join(", ")}{actor.aliases.length > 2 ? ` +${actor.aliases.length - 2}` : ""}
+              </div>
+            )}
+          </div>
         </div>
-      </div>
 
-      {(actor.targetSectors.length > 0 || actor.targetRegions.length > 0) && (
-        <div className="mb-3 flex flex-wrap gap-1">
-          {actor.targetSectors.slice(0, 2).map((sector) => (
-            <Badge key={sector} variant="outline" className="os-tap-scope-chip">{sector}</Badge>
-          ))}
-          {actor.targetRegions.slice(0, 2).map((region) => (
-            <Badge key={region} variant="outline" className="os-tap-scope-chip">{region}</Badge>
-          ))}
+        <div className="min-w-0 border-t pt-2 md:border-l md:border-t-0 md:pl-3 md:pt-0">
+          <div className="flex flex-wrap gap-1">
+            {actor.targetSectors.slice(0, 2).map((sector) => (
+              <Badge key={sector} variant="outline" className="os-tap-scope-chip">{sector}</Badge>
+            ))}
+            {actor.targetRegions.slice(0, 1).map((region) => (
+              <Badge key={region} variant="outline" className="os-tap-scope-chip">{region}</Badge>
+            ))}
+            {actor.targetSectors.length + actor.targetRegions.length > 3 && (
+              <Badge variant="outline" className="os-tap-scope-chip">+{actor.targetSectors.length + actor.targetRegions.length - 3}</Badge>
+            )}
+          </div>
+          <p className="mt-1.5 line-clamp-2 text-[11px] leading-snug text-muted-foreground" data-testid={`note-tap-dossier-context-${actor.id}`}>
+            {dossierHint}
+          </p>
+          {!BATCH_ONE_RELEASE && <div className="mt-1.5"><TenantTagsRow tags={tags} compact /></div>}
         </div>
-      )}
 
-      {!BATCH_ONE_RELEASE && (
-        <div className="mb-3">
-          <TenantTagsRow tags={tags} />
+        <div className="flex flex-wrap items-center gap-1.5 md:border-l md:pl-3">
+          <Badge className={cn("text-[10px]", THREAT_LEVEL_BADGE[actor.threatLevel])}>{displayEnum(actor.threatLevel)}</Badge>
+          <Badge className={cn("text-[10px]", TLP_BADGE[actor.tlp])}>TLP {displayEnum(actor.tlp)}</Badge>
+          <Badge className={cn("text-[10px]", TAP_STATUS_BADGE[actor.status])}>{displayEnum(actor.status)}</Badge>
         </div>
-      )}
 
-      <div className="grid grid-cols-3 gap-2 text-xs">
-        <div className="os-tap-meta-cell">
-          <div className="text-[9px] uppercase tracking-wider text-muted-foreground">Threat</div>
-          <Badge className={cn("text-[10px] mt-0.5", THREAT_LEVEL_BADGE[actor.threatLevel])}>{actor.threatLevel}</Badge>
+        <div className="text-[11px] text-muted-foreground md:border-l md:pl-3">
+          <div className="tabular-nums" title={formatStamp(actor.updatedAt)}>{relativeTime(actor.updatedAt)}</div>
+          <div className={cn("mt-1 inline-flex items-center gap-1", isEnriched ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400")}>
+            {isEnriched ? <CheckCircle2 size={11} /> : <Clock size={11} />}
+            {isEnriched ? `Enriched · v${actor.version}` : "Needs enrichment"}
+          </div>
         </div>
-        <div className="os-tap-meta-cell">
-          <div className="text-[9px] uppercase tracking-wider text-muted-foreground">TLP</div>
-          <Badge className={cn("text-[10px] mt-0.5", TLP_BADGE[actor.tlp])}>{actor.tlp}</Badge>
-        </div>
-        <div className="os-tap-meta-cell">
-          <div className="text-[9px] uppercase tracking-wider text-muted-foreground">Updated</div>
-          <div className="text-[11px] mt-0.5 truncate tabular-nums">{relativeTime(actor.updatedAt)}</div>
-        </div>
-      </div>
 
-      <div
-        className="os-tap-triage-note mt-3 rounded-md border border-primary/15 bg-primary/5 px-2.5 py-2 text-[11px] leading-snug text-muted-foreground"
-        data-testid={`note-tap-dossier-context-${actor.id}`}
-      >
-        <span className="font-medium text-foreground">Analyst context: </span>{dossierHint}
-      </div>
-
-      <div className="os-tap-card-footer mt-3 pt-3 border-t flex items-center justify-between text-[11px] text-muted-foreground">
-        <span>v{actor.version} · {relativeTime(actor.updatedAt)}</span>
-        {isEnriched ? (
-          <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
-            <CheckCircle2 size={11} /> AI-enriched
-          </span>
-        ) : (
-          <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
-            <Clock size={11} /> Shell — needs enrichment
-          </span>
-        )}
+        <ChevronRight className="hidden text-muted-foreground md:block" size={16} aria-hidden />
       </div>
     </Card>
   );
@@ -1798,52 +1766,34 @@ function TapDossierAside({ a }: { a: ThreatActorFullDTO }) {
     : `${ruleCount} mapped rule${ruleCount === 1 ? "" : "s"} in profile`;
 
   return (
-    <div className="border-b bg-background/80 p-4">
-      <div className="flex flex-col items-center text-center">
-        <ActorPortrait
-          name={a.primaryName}
-          threatLevel={a.threatLevel}
-          status={a.status}
-          portraitUrl={a.portraitUrl}
-          portraitStatus={a.portraitStatus}
-          actorId={a.id}
-          size={168}
-          variant="dossier"
-          editable={!STATIC_DEMO_MODE}
-        />
-        <div className="mt-3 font-semibold leading-tight">{a.primaryName}</div>
-        <div className="mt-1 text-[11px] text-muted-foreground font-mono">
-          {a.mitreGroupId || a.profileId}
+    <div className="border-b bg-background/80 p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-xs font-semibold">Operational snapshot</div>
+          <div className="mt-1 text-[11px] text-muted-foreground">Coverage and analyst priority</div>
         </div>
-        <div className="mt-3 flex flex-wrap justify-center gap-1.5">
-          <Badge className={cn("text-[10px]", THREAT_LEVEL_BADGE[a.threatLevel])}>{a.threatLevel}</Badge>
-          <Badge className={cn("text-[10px]", TLP_BADGE[a.tlp])}>TLP:{a.tlp}</Badge>
-          <Badge variant="outline" className="text-[10px]">WEP {a.wepConfidence}</Badge>
-        </div>
+        <Badge variant="outline" className="text-[10px]">WEP {displayEnum(a.wepConfidence)}</Badge>
       </div>
 
-      <div className="mt-4 grid grid-cols-3 gap-2">
+      <div className="mt-3 rounded-md border-l-2 border-primary bg-primary/5 px-2.5 py-2">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] text-muted-foreground">Analyst priority</span>
+          <span className="text-xs font-semibold text-primary">{analystPriority}</span>
+        </div>
+        <div className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{priorityReason}</div>
+      </div>
+
+      <div className="mt-3 grid grid-cols-3 gap-1.5">
         <TapAsideMetric label="TTPs" value={a.ttps.length} />
         <TapAsideMetric label="Rules" value={ruleCount} />
         <TapAsideMetric label="Sources" value={sourceCount} />
+        <TapAsideMetric label="Campaigns" value={activeCampaigns} />
+        <TapAsideMetric label="IOCs" value={a.iocs.length} />
+        <TapAsideMetric label="Gaps" value={uncovered} />
       </div>
 
-      <div className="mt-4 space-y-3 text-xs">
-        <div>
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Analyst lens</div>
-          <div className="rounded-lg border bg-muted/30 p-2 leading-relaxed text-muted-foreground">
-            Use identity cautiously, prioritize TTPs for hunting, then compare techniques against detection coverage.
-          </div>
-        </div>
-        <div>
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Analyst priority</div>
-          <div className="rounded-lg border border-primary/15 bg-primary/5 p-2">
-            <div className="font-semibold text-primary">{analystPriority}</div>
-            <div className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">{priorityReason}</div>
-          </div>
-        </div>
-        <div>
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Top tactics</div>
+      <div className="mt-3 text-xs">
+        <div className="mb-1 text-[11px] font-medium text-muted-foreground">Top tactics</div>
           {topTactics.length === 0 ? (
             <div className="text-muted-foreground italic">No ATT&CK tactics mapped.</div>
           ) : (
@@ -1855,11 +1805,6 @@ function TapDossierAside({ a }: { a: ThreatActorFullDTO }) {
               ))}
             </div>
           )}
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <TapAsideMetric label="Campaigns" value={activeCampaigns} />
-          <TapAsideMetric label="IOCs" value={a.iocs.length} />
-        </div>
       </div>
     </div>
   );
@@ -1867,9 +1812,9 @@ function TapDossierAside({ a }: { a: ThreatActorFullDTO }) {
 
 function TapAsideMetric({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="rounded-lg border bg-card/70 px-2 py-2 text-center">
-      <div className="text-sm font-semibold">{value}</div>
-      <div className="text-[9px] uppercase tracking-wider text-muted-foreground">{label}</div>
+    <div className="rounded-md border bg-card/70 px-1.5 py-1.5 text-center">
+      <div className="text-xs font-semibold tabular-nums">{value}</div>
+      <div className="text-[10px] text-muted-foreground">{label}</div>
     </div>
   );
 }
@@ -1877,7 +1822,7 @@ function TapAsideMetric({ label, value }: { label: string; value: React.ReactNod
 function TapTabContextHeader({ activeTab, a }: { activeTab: string; a: ThreatActorFullDTO }) {
   const meta = TAB_CONTEXT[activeTab] ?? TAB_CONTEXT.exec;
   const contextStats: Record<string, React.ReactNode> = {
-    exec: `${a.threatLevel} · ${a.status}`,
+    exec: `${displayEnum(a.threatLevel)} · ${displayEnum(a.status)}`,
     identity: `${a.aliases.length} aliases`,
     victim: `${a.targetSectors.length} sectors · ${a.targetRegions.length} regions`,
     relevance: `${a.relevantTenants?.length ?? 0} clients`,
@@ -1898,20 +1843,16 @@ function TapTabContextHeader({ activeTab, a }: { activeTab: string; a: ThreatAct
   };
 
   return (
-    <div className="mb-4 rounded-xl border bg-card/80 p-4 shadow-sm">
-      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+    <div className="mb-4 flex flex-col gap-2 border-b pb-3 md:flex-row md:items-start md:justify-between">
+      <div className="flex min-w-0 items-start gap-3">
+        <span className="mt-1 h-8 w-0.5 shrink-0 rounded-full bg-gradient-to-b from-primary to-cyan-400" aria-hidden />
         <div className="min-w-0">
-          <div className="text-[10px] uppercase tracking-wider text-primary font-semibold">Threat actor dossier</div>
-          <h3 className="mt-1 text-base font-semibold">{meta.title}</h3>
-          <p className="mt-1 text-sm text-muted-foreground leading-relaxed">{meta.purpose}</p>
+          <h3 className="text-sm font-semibold">{meta.title}</h3>
+          <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{meta.purpose}</p>
+          <p className="mt-1 text-[11px] text-muted-foreground"><span className="font-medium text-foreground">Analyst principle:</span> {meta.principle}</p>
         </div>
-        <Badge variant="outline" className="shrink-0 font-mono text-[10px]">
-          {contextStats[activeTab] ?? a.profileId}
-        </Badge>
       </div>
-      <div className="mt-3 border-t pt-3 text-xs text-muted-foreground">
-        <span className="font-medium text-foreground">Profiling principle:</span> {meta.principle}
-      </div>
+      <Badge variant="outline" className="shrink-0 self-start font-mono text-[10px]">{contextStats[activeTab] ?? a.profileId}</Badge>
     </div>
   );
 }
@@ -2190,7 +2131,7 @@ function DetailSheet({ actorId, onClose }: { actorId: string | null; onClose: ()
 
   return (
     <Sheet open={!!actorId} onOpenChange={(v) => !v && onClose()}>
-      <SheetContent side="right" hideClose className="w-full sm:w-[720px] lg:w-[1120px] xl:w-[1240px] sm:max-w-none lg:max-w-none p-0 overflow-y-auto">
+      <SheetContent side="right" hideClose className="w-full p-0 sm:w-[94vw] sm:max-w-[1120px] xl:max-w-[1240px] overflow-y-auto">
         {/* NEVER add `relative` to SheetContent — wrap in a relative container instead. */}
         <div className="relative min-h-full">
           {isLoading || !full ? (
@@ -2207,8 +2148,8 @@ function DetailSheet({ actorId, onClose }: { actorId: string | null; onClose: ()
                   are hidden in edit mode (they were disabled anyway). View mode
                   surfaces Re-enrich + AI Setup as primary, with a More overflow
                   menu housing the export and exercise-generation actions. */}
-              <div className="sticky top-0 z-20 border-b bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-950 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-                <div className="px-5 sm:px-6 py-4 flex items-start gap-4">
+              <div className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur">
+                <div className="flex flex-wrap items-start gap-3 px-4 py-3 sm:flex-nowrap sm:px-5">
                   <div className="shrink-0">
                     <ActorPortrait
                       name={full.primaryName}
@@ -2217,15 +2158,15 @@ function DetailSheet({ actorId, onClose }: { actorId: string | null; onClose: ()
                       portraitUrl={full.portraitUrl}
                       portraitStatus={full.portraitStatus}
                       actorId={full.id}
-                      size={64}
+                      size={48}
                       editable={!detailReadOnly}
                     />
                   </div>
                   {/* Title block — flexes to absorb remaining width */}
-                  <SheetHeader className="space-y-2 text-left flex-1 min-w-0">
+                  <SheetHeader className="min-w-0 flex-1 space-y-1 text-left">
                     <div className="min-w-0">
                       <div className="font-mono text-[10px] text-muted-foreground">{full.profileId} · v{full.version}</div>
-                      <SheetTitle className="text-xl truncate" data-testid="text-detail-name">{full.primaryName}</SheetTitle>
+                      <SheetTitle className="truncate text-lg" data-testid="text-detail-name">{full.primaryName}</SheetTitle>
                       {full.aliases.length > 0 && (
                         <SheetDescription className="text-xs truncate">
                           aka {full.aliases.join(" · ")}
@@ -2237,16 +2178,18 @@ function DetailSheet({ actorId, onClose }: { actorId: string | null; onClose: ()
                   </SheetHeader>
 
                   {/* Action cluster — fixed to right; single row at lg+, wraps gracefully below. */}
-                  <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end max-w-[60%]">
+                  <div className="flex w-full shrink-0 flex-wrap items-center justify-start gap-1.5 border-t pt-2 sm:w-auto sm:max-w-[60%] sm:justify-end sm:border-t-0 sm:pt-0">
                     {!editMode ? (
                       <>
                         {/* Primary AI actions — kept inline for fast access */}
-                        <ProviderPicker
-                          providers={providers}
-                          value={overrideProviderId}
-                          onChange={setOverrideProviderId}
-                          disabled={detailReadOnly || enrich.isPending || enrichJobRunning || aiDisabled}
-                        />
+                        <div className="hidden sm:block">
+                          <ProviderPicker
+                            providers={providers}
+                            value={overrideProviderId}
+                            onChange={setOverrideProviderId}
+                            disabled={detailReadOnly || enrich.isPending || enrichJobRunning || aiDisabled}
+                          />
+                        </div>
                         <Button
                           size="sm"
                           onClick={() => {
@@ -2390,12 +2333,12 @@ function DetailSheet({ actorId, onClose }: { actorId: string | null; onClose: ()
                 <div className="lg:hidden">
                   <TabRailCompact activeTab={activeTab} onSelect={setActiveTab} />
                 </div>
-                <div className="lg:grid lg:grid-cols-[260px_1fr] lg:gap-0">
-                  <aside className="hidden lg:block border-r bg-muted/30 sticky top-[104px] self-start max-h-[calc(100vh-104px)] overflow-y-auto">
+                <div className="lg:grid lg:grid-cols-[220px_1fr] lg:gap-0">
+                  <aside className="hidden lg:block border-r bg-muted/20 sticky top-[84px] self-start max-h-[calc(100vh-84px)] overflow-y-auto">
                     <TapDossierAside a={full} />
                     <TabRail activeTab={activeTab} onSelect={setActiveTab} />
                   </aside>
-                  <div className="px-6 py-4 min-w-0">
+                  <div className="min-w-0 px-4 py-4 sm:px-5">
                     <TapTabContextHeader activeTab={activeTab} a={full} />
                     <TabsContent value="exec"><ExecTab a={full} /></TabsContent>
                     <TabsContent value="identity"><IdentityTab a={full} /></TabsContent>
@@ -2438,14 +2381,30 @@ function DetailSheet({ actorId, onClose }: { actorId: string | null; onClose: ()
 function HeaderTagStrip({ a }: { a: ThreatActorFullDTO }) {
   const { editMode } = useEditCtx();
   if (!editMode) {
+    const actorType = ACTOR_TYPE_LABEL[a.actorType];
+    const showActorType = actorType !== "Unknown";
+    const sponsorship = displayEnum(a.sponsorship);
+    const showSponsorship = !["Unknown", "None"].includes(sponsorship);
     return (
-      <div className="flex flex-wrap items-center gap-1.5 pt-1">
-        <Badge className={cn("text-[10px]", TAP_STATUS_BADGE[a.status])}>{a.status}</Badge>
-        <Badge className={cn("text-[10px]", THREAT_LEVEL_BADGE[a.threatLevel])}>{a.threatLevel}</Badge>
-        <Badge className={cn("text-[10px]", TLP_BADGE[a.tlp])}>TLP:{a.tlp}</Badge>
-        <Badge variant="outline" className="text-[10px]">{ACTOR_TYPE_LABEL[a.actorType]}</Badge>
-        <Badge variant="outline" className="text-[10px]">{a.sponsorship}</Badge>
-        <Badge variant="outline" className="text-[10px]">Admiralty {a.admiraltySource}/{a.admiraltyInfo} · WEP {a.wepConfidence}</Badge>
+      <div className="flex flex-wrap items-center gap-2 pt-1 text-[11px]">
+        <div className="flex items-center gap-1.5" aria-label="Profile posture">
+          <Badge className={cn("h-6 px-2 text-[10px]", TAP_STATUS_BADGE[a.status])}>{displayEnum(a.status)}</Badge>
+          <Badge className={cn("h-6 px-2 text-[10px]", THREAT_LEVEL_BADGE[a.threatLevel])}>{displayEnum(a.threatLevel)} risk</Badge>
+          <Badge className={cn("h-6 px-2 text-[10px]", TLP_BADGE[a.tlp])}>TLP {displayEnum(a.tlp)}</Badge>
+        </div>
+        {(showActorType || showSponsorship) && (
+          <div className="hidden items-center gap-1.5 border-l pl-2 text-muted-foreground sm:flex">
+            {showActorType && <span>{actorType}</span>}
+            {showActorType && showSponsorship && <span aria-hidden>·</span>}
+            {showSponsorship && <span>{sponsorship}</span>}
+          </div>
+        )}
+        <div className="hidden items-center gap-1.5 border-l pl-2 text-muted-foreground lg:flex" aria-label="Assessment confidence">
+          <Shield size={12} className="text-primary" aria-hidden />
+          <span>Admiralty {a.admiraltySource}/{a.admiraltyInfo}</span>
+          <span aria-hidden>·</span>
+          <span>WEP {displayEnum(a.wepConfidence)}</span>
+        </div>
       </div>
     );
   }
@@ -2867,6 +2826,20 @@ function EText({
   if (!ctx.editMode) {
     return <MetaCell label={label} value={v as any} />;
   }
+  if (type === "text") {
+    return (
+      <div>
+        <EFieldLabel help={help}>{label}</EFieldLabel>
+        <InlineEditableText
+          value={v == null ? "" : String(v)}
+          placeholder={placeholder ?? `Enter ${label.toLowerCase()}`}
+          onChange={(next) => ctx.set({ [k]: next || null } as EditDraft)}
+          testId={`edit-${String(k)}`}
+          singleLine
+        />
+      </div>
+    );
+  }
   return (
     <div>
       <EFieldLabel help={help}>{label}</EFieldLabel>
@@ -2876,9 +2849,9 @@ function EText({
         placeholder={placeholder}
         onChange={(e) => {
           const raw = e.target.value;
-          let next: any;
-          if (type === "number") next = raw.trim() === "" ? null : Number(raw);
-          else next = raw === "" ? null : raw;
+          const next = type === "number"
+            ? raw.trim() === "" ? null : Number(raw)
+            : raw === "" ? null : raw;
           ctx.set({ [k]: next } as EditDraft);
         }}
         data-testid={`edit-${String(k)}`}
@@ -2887,7 +2860,71 @@ function EText({
   );
 }
 
-/** Multi-line prose textarea. */
+function InlineEditableText({
+  value, placeholder, onChange, testId, singleLine = false, minRows = 4, help,
+}: {
+  value: string;
+  placeholder: string;
+  onChange: (value: string) => void;
+  testId: string;
+  singleLine?: boolean;
+  minRows?: number;
+  help?: string;
+}) {
+  const elementRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const element = elementRef.current;
+    if (!element || document.activeElement === element) return;
+    if ((element.innerText ?? "") !== value) element.innerText = value;
+  }, [value]);
+
+  const commitDomValue = (element: HTMLDivElement) => {
+    const raw = element.innerText.replace(/\u00a0/g, " ");
+    const next = singleLine ? raw.replace(/[\r\n]+/g, " ").trim() : raw.trim();
+    if (singleLine && element.innerText !== next) element.innerText = next;
+    onChange(next);
+  };
+
+  return (
+    <div className="group/edit relative">
+      <div
+        ref={elementRef}
+        role="textbox"
+        aria-multiline={!singleLine}
+        aria-label={placeholder}
+        aria-description={help}
+        contentEditable
+        suppressContentEditableWarning
+        data-placeholder={placeholder}
+        data-testid={testId}
+        onInput={(event) => commitDomValue(event.currentTarget)}
+        onBlur={(event) => commitDomValue(event.currentTarget)}
+        onKeyDown={(event) => {
+          if (singleLine && event.key === "Enter") {
+            event.preventDefault();
+            event.currentTarget.blur();
+          }
+        }}
+        className={cn(
+          "rounded-md border border-dashed border-primary/35 bg-primary/[0.025] px-2.5 py-2 pr-8 text-sm leading-relaxed outline-none transition-colors",
+          "empty:before:pointer-events-none empty:before:text-muted-foreground/70 empty:before:content-[attr(data-placeholder)]",
+          "hover:border-primary/60 hover:bg-primary/[0.04] focus:border-primary focus:bg-background focus:ring-2 focus:ring-primary/15",
+          singleLine
+            ? "min-h-9 whitespace-nowrap overflow-x-auto"
+            : minRows >= 5 ? "min-h-[7rem] whitespace-pre-wrap" : "min-h-[5.5rem] whitespace-pre-wrap",
+        )}
+      />
+      <Pencil
+        size={13}
+        className="pointer-events-none absolute right-2.5 top-2.5 text-primary/55 transition-colors group-focus-within/edit:text-primary"
+        aria-hidden
+      />
+    </div>
+  );
+}
+
+/** Multi-line prose edited directly in its displayed surface. */
 function ETextarea({
   a, k, label, rows = 4, placeholder, help,
 }: { a: ThreatActorFullDTO; k: keyof ThreatActorFullDTO; label: string; rows?: number; placeholder?: string; help?: string }) {
@@ -2898,16 +2935,14 @@ function ETextarea({
     return <ProsePara text={v as any} />;
   }
   return (
-    <div>
-      <EFieldLabel help={help}>{label}</EFieldLabel>
-      <Textarea
-        value={(v as string | null | undefined) ?? ""}
-        rows={rows}
-        placeholder={placeholder}
-        onChange={(e) => ctx.set({ [k]: e.target.value === "" ? null : e.target.value } as EditDraft)}
-        data-testid={`edit-${String(k)}`}
-      />
-    </div>
+    <InlineEditableText
+      value={(v as string | null | undefined) ?? ""}
+      placeholder={placeholder ?? `Enter ${label.toLowerCase()}`}
+      onChange={(next) => ctx.set({ [k]: next || null } as EditDraft)}
+      testId={`edit-${String(k)}`}
+      minRows={rows}
+      help={help}
+    />
   );
 }
 
@@ -3623,7 +3658,7 @@ function ExecTab({ a }: { a: ThreatActorFullDTO }) {
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4 pt-2 border-t">
         {editMode
           ? <ESelect a={a} k="threatLevel" label="Threat level" options={THREAT_LEVELS} />
-          : <MetaCell label="Threat level" value={<Badge className={cn(THREAT_LEVEL_BADGE[a.threatLevel])}>{a.threatLevel}</Badge>} />}
+          : <MetaCell label="Threat level" value={<Badge className={cn(THREAT_LEVEL_BADGE[a.threatLevel])}>{displayEnum(a.threatLevel)}</Badge>} />}
         <EBool a={a} k="sectorActivelyTargeted" label="Sector actively targeted" />
         <ESelect
           a={a}
@@ -3875,11 +3910,11 @@ function CoverageBadge({ coverage }: { coverage?: TtpCoverage }) {
 
 function DiamondTab({ a }: { a: ThreatActorFullDTO }) {
   const { editMode } = useEditCtx();
-  const cells: Array<{ title: string; icon: React.ReactNode; k: keyof ThreatActorFullDTO; data: any }> = [
-    { title: "Adversary", icon: <Skull size={14} className="text-red-500" />, k: "diamondAdversary", data: a.diamondAdversary },
-    { title: "Capability", icon: <Sparkles size={14} className="text-amber-500" />, k: "diamondCapability", data: a.diamondCapability },
-    { title: "Infrastructure", icon: <Network size={14} className="text-blue-500" />, k: "diamondInfrastructure", data: a.diamondInfrastructure },
-    { title: "Victim", icon: <Target size={14} className="text-emerald-500" />, k: "diamondVictim", data: a.diamondVictim },
+  const cells: Array<{ title: string; icon: React.ReactNode; k: keyof ThreatActorFullDTO }> = [
+    { title: "Adversary", icon: <Skull size={14} className="text-red-500" />, k: "diamondAdversary" },
+    { title: "Capability", icon: <Sparkles size={14} className="text-amber-500" />, k: "diamondCapability" },
+    { title: "Infrastructure", icon: <Network size={14} className="text-blue-500" />, k: "diamondInfrastructure" },
+    { title: "Victim", icon: <Target size={14} className="text-emerald-500" />, k: "diamondVictim" },
   ];
   if (!editMode) {
     return (
@@ -4612,7 +4647,7 @@ function buildStix(a: ThreatActorFullDTO) {
 }
 
 function stixPatternFor(i: ThreatActorIocDTO): string {
-  const v = i.value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  const v = i.value.replaceAll("\\", "\\\\").replaceAll("'", "\\'");
   switch (i.iocType) {
     case "ipv4":   return `[ipv4-addr:value = '${v}']`;
     case "ipv6":   return `[ipv6-addr:value = '${v}']`;

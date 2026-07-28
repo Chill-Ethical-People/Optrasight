@@ -7,7 +7,7 @@ interface LogoProps {
   ringColor?: string;
 }
 
-const SMOOTH_MARK_SRC = `${import.meta.env.BASE_URL}brand/optrasight-smooth-mark-light-256.png`;
+const SMOOTH_MARK_SRC = `${import.meta.env.BASE_URL}brand/optrasight-smooth-mark-light-256.png?v=20260719d`;
 
 /** Shared OptraSight mark.
  *

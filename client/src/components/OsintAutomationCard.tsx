@@ -179,7 +179,7 @@ export default function OsintAutomationCard() {
             <div className="space-y-1">
               <Label className="text-sm font-medium">Auto-fetch new intel</Label>
               <p className="text-xs text-muted-foreground">
-                Pulls the workspace's monitored sources every interval. Same logic as the manual <em>Scan now</em> button.
+                Pulls the workspace's monitored sources on the configured schedule.
               </p>
             </div>
             <Switch

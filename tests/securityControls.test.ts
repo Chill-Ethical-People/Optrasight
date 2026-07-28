@@ -1,7 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { rootCertificates } from "node:tls";
+import { afterEach, describe, expect, it } from "vitest";
 import { hasCapability, isBatchOneApiAllowed, resolveCapabilities } from "../shared/accessPolicy";
 import { extractReferencedUrlsForTest, isPrivateOrReservedAddress, isSafeSourceFetchUrl } from "../server/sourceFetch";
-import { aiProviderBaseUrlSyncFailure, validateAiProviderBaseUrl } from "../server/aiProviderSecurity";
+import {
+  aiProviderBaseUrlSyncFailure,
+  resolveLocalAiTlsConfig,
+  validateAiProviderBaseUrl,
+} from "../server/aiProviderSecurity";
+import { aiProviderProtocolArgs } from "../server/httpClient";
 import { isChatbotCodeDevelopmentRequest, runChatConverse } from "../server/osintChat";
 import {
   ADMIN_SESSION_ABSOLUTE_MS,
@@ -10,8 +19,46 @@ import {
   SESSION_IDLE_TIMEOUT_MS,
   sessionExpiryReason,
 } from "../server/storage";
+import { ApiError, isMfaChallengeError } from "../client/src/lib/queryClient";
+import { redactForLog } from "../server/logRedaction";
+
+let temporaryLocalAiDirectory: string | null = null;
+
+afterEach(() => {
+  delete process.env.OPTRASIGHT_ALLOW_LOCAL_AI;
+  delete process.env.OPTRASIGHT_LOCAL_AI_CA_CERT;
+  if (temporaryLocalAiDirectory) rmSync(temporaryLocalAiDirectory, { force: true, recursive: true });
+  temporaryLocalAiDirectory = null;
+});
 
 describe("security controls", () => {
+  it("redacts MFA enrollment seeds and credential-bearing URLs from logs", () => {
+    const seed = "JBSWY3DPEHPK3PXP";
+    const redacted = redactForLog({
+      mfaSetup: {
+        otpauthUrl: `otpauth://totp/OptraSight:user@example.com?secret=${seed}&issuer=OptraSight`,
+        qrCodeDataUrl: `https://example.test/enroll?token=${seed}`,
+      },
+      profileUrl: `https://example.test/profile?secret=${seed}`,
+    });
+    const serialized = JSON.stringify(redacted);
+
+    expect(serialized).not.toContain(seed);
+    expect(redacted).toMatchObject({
+      mfaSetup: {
+        otpauthUrl: "[redacted]",
+        qrCodeDataUrl: "[redacted]",
+      },
+      profileUrl: "https://example.test/profile?secret=[redacted]",
+    });
+  });
+
+  it("recognizes the structured MFA login challenge", () => {
+    expect(isMfaChallengeError(new ApiError("MFA code required", 401, "MFA_REQUIRED"))).toBe(true);
+    expect(isMfaChallengeError(new ApiError("invalid credentials", 401))).toBe(false);
+    expect(isMfaChallengeError(new Error("MFA code required"))).toBe(false);
+  });
+
   it("keeps BatchOne-only routes and capabilities scoped", () => {
     expect(isBatchOneApiAllowed({ method: "GET", path: "/api/v1/threat-actors/tap-001/tenants", accessMode: "credentialed" })).toBe(false);
     expect(isBatchOneApiAllowed({ method: "POST", path: "/api/v1/osint/findings/email-draft", accessMode: "credentialed" })).toBe(false);
@@ -56,6 +103,59 @@ describe("security controls", () => {
     expect(aiProviderBaseUrlSyncFailure("https://localhost")).toBe("AI provider base URL cannot target local or internal hosts.");
     expect(aiProviderBaseUrlSyncFailure("https://api.openai.com")).toBeNull();
     expect(await validateAiProviderBaseUrl("openai", "https://127.0.0.1")).toBe("AI provider base URL cannot target private or reserved IP space.");
+  });
+
+  it("scopes local-network AI access to Ollama behind the explicit runtime gate", async () => {
+    process.env.OPTRASIGHT_ALLOW_LOCAL_AI = "1";
+
+    expect(aiProviderBaseUrlSyncFailure("http://127.0.0.1:11434", "ollama")).toBeNull();
+    expect(aiProviderBaseUrlSyncFailure("https://192.168.10.20:11434", "ollama")).toBeNull();
+    expect(aiProviderBaseUrlSyncFailure("https://[fd00::20]:11434", "ollama")).toBeNull();
+    expect(await validateAiProviderBaseUrl("ollama", "https://model-gateway.internal:8443")).toBeNull();
+    expect(aiProviderProtocolArgs("http://127.0.0.1:11434", "ollama")).toEqual([
+      "--proto",
+      "=http,https",
+      "--proto-redir",
+      "=https",
+    ]);
+
+    expect(aiProviderBaseUrlSyncFailure("http://127.0.0.1:11434", "openai")).toBe(
+      "AI provider base URL must use HTTPS.",
+    );
+    expect(aiProviderBaseUrlSyncFailure("https://192.168.10.20", "openai")).toBe(
+      "AI provider base URL cannot target private or reserved IP space.",
+    );
+    expect(aiProviderBaseUrlSyncFailure("http://169.254.169.254/latest/meta-data", "ollama")).toBe(
+      "AI provider base URL must use HTTPS.",
+    );
+    expect(aiProviderProtocolArgs("http://127.0.0.1:11434", "openai")).toEqual([
+      "--proto",
+      "=https",
+      "--proto-redir",
+      "=https",
+    ]);
+  });
+
+  it("accepts only an absolute, bounded PEM trust bundle for local Ollama HTTPS", () => {
+    process.env.OPTRASIGHT_ALLOW_LOCAL_AI = "1";
+    process.env.OPTRASIGHT_LOCAL_AI_CA_CERT = "relative/private-ca.pem";
+    expect(resolveLocalAiTlsConfig("ollama", "https://127.0.0.1:11434").error).toContain("absolute path");
+
+    temporaryLocalAiDirectory = mkdtempSync(join(tmpdir(), "optrasight-local-ai-"));
+    const caPath = join(temporaryLocalAiDirectory, "private-ca.pem");
+    writeFileSync(caPath, `${rootCertificates[0]}\n`, "utf8");
+    process.env.OPTRASIGHT_LOCAL_AI_CA_CERT = caPath;
+    expect(resolveLocalAiTlsConfig("ollama", "https://127.0.0.1:11434")).toEqual({ caCertPath: caPath });
+    expect(resolveLocalAiTlsConfig("openai", "https://127.0.0.1:11434")).toEqual({});
+
+    writeFileSync(
+      caPath,
+      "-----BEGIN CERTIFICATE-----\nVGVzdCBjZXJ0aWZpY2F0ZQ==\n-----END CERTIFICATE-----\n",
+      "utf8",
+    );
+    expect(resolveLocalAiTlsConfig("ollama", "https://127.0.0.1:11434").error).toContain(
+      "invalid X.509 certificate",
+    );
   });
 
   it("expires sessions by absolute and idle lifetime", () => {

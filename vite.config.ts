@@ -12,10 +12,21 @@ export default defineConfig({
     },
   },
   root: path.resolve(import.meta.dirname, "client"),
+  // Local verification can reuse the existing public asset library instead of
+  // recopying ~200 MB of portraits through an iCloud-backed workspace.
+  publicDir: process.env.OPTRASIGHT_SKIP_PUBLIC_COPY === "1"
+    ? false
+    : path.resolve(import.meta.dirname, "client", "public"),
   base: "./",
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    rollupOptions: {
+      // Keep module reads bounded on APFS/iCloud-backed workspaces. Rollup's
+      // high default concurrency can otherwise stall while opening hundreds
+      // of dependency files at once.
+      maxParallelFileOps: Number(process.env.OPTRASIGHT_BUILD_FILE_OPS || 32),
+    },
   },
   server: {
     fs: {

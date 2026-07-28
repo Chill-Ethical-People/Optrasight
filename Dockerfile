@@ -25,6 +25,7 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=5000
+ENV OPTRASIGHT_DB_PATH=/app/data/data.db
 # Strict mode on by default — refuse mock fallbacks. Override at run time.
 ENV OPTRASIGHT_STRICT=1
 
@@ -33,7 +34,7 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/package.json ./
 COPY --from=builder /app/node_modules ./node_modules
 
-# Persist SQLite + portrait uploads outside the container.
+# Persist the workspace database, secrets, portraits, and client assets.
 VOLUME ["/app/data"]
 
 EXPOSE 5000

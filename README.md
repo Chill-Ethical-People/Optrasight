@@ -2,7 +2,7 @@
   <img src="client/public/brand/optrasight-logo-lockup-light-surface.svg" alt="OptraSight logo" width="440">
 </p>
 
-<p align="center">Open-source cyber threat intelligence workstation for OSINT triage, Threat Actor Profiles, AI-assisted analysis, and hunt-query generation.</p>
+<p align="center">Open-source cyber threat intelligence workstation for client-aware OSINT triage, Threat Actor Profiles, detection engineering, and analyst-reviewed delivery.</p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0"></a>
@@ -13,13 +13,15 @@
   <a href="https://snyk.io/test/github/Chill-Ethical-People/Optrasight"><img src="https://snyk.io/test/github/Chill-Ethical-People/Optrasight/badge.svg" alt="Known Vulnerabilities"></a>
 </p>
 
-OptraSight Batch One is an open-source cyber threat intelligence (CTI) workstation for security analysts, threat-intelligence teams, detection engineers, and managed security service providers. It connects open-source intelligence (OSINT) monitoring, evidence review, Threat Actor Profiles, AI-assisted triage, and defensive hunt-query drafting in one local analyst workspace.
+> **BatchTwo beta:** this branch is intended for functional evaluation and security review. Batch One on `main` remains the stable public release.
+
+OptraSight BatchTwo is an open-source cyber threat intelligence (CTI) workstation for security analysts, threat-intelligence teams, detection engineers, and managed security service providers. It connects open-source intelligence monitoring, evidence review, client-aware triage, Threat Actor Profiles, detection-rule management, and analyst-approved client delivery in one local workspace.
 
 The core workflow is simple: collect public threat signals, review the evidence, enrich actor context, draft hunt logic for SIEM and detection platforms, and keep source traceability visible from intake to action.
 
 Before running a downloaded release archive, verify its checksum and signature with [VERIFYING.md](./VERIFYING.md).
 
-This release is deliberately focused: a clean, inspectable workstation for open-source intelligence review and threat-actor analysis. It is built to be useful on day one, while leaving the product room to grow through future public releases.
+This beta extends the focused Batch One workstation with multiple Client Profiles, client-impact assessment, Client Briefs, detection-rule lifecycle management, and connector administration. AI output remains advisory: analysts control severity, client relevance, assessments, approvals, and outbound email delivery.
 
 Static demo site: [chill-ethical-people.github.io/Optrasight](https://chill-ethical-people.github.io/Optrasight/).
 
@@ -37,71 +39,77 @@ Watch the Batch One workflow from OSINT signal to Threat Actor Profile, hunt-que
 
 ## Product Screenshots
 
-| Intel Inbox | Threat Actor Profiles |
-| --- | --- |
+| Intel Inbox                                                                                                                                              | Threat Actor Profiles                                                                                                                                                                  |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | ![OptraSight Intel Inbox showing OSINT findings, source context, and analyst triage controls](client/public/screenshots/optrasight-intel-inbox-dark.png) | ![OptraSight Actor Observatory showing threat actor profiles, portraits, priority, aliases, and evidence context](client/public/screenshots/optrasight-threat-actor-profiles-dark.png) |
 
-| Threat Actor Profile Detail | AI Setup |
-| --- | --- |
+| Threat Actor Profile Detail                                                                                                                                                                    | AI Setup                                                                                                                                           |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | ![OptraSight Threat Actor Profile detail dossier with actor identity, evidence, aliases, and investigation context](client/public/screenshots/optrasight-threat-actor-profile-detail-dark.png) | ![OptraSight AI Setup showing bring-your-own-provider configuration for analyst workflows](client/public/screenshots/optrasight-ai-setup-dark.png) |
 
 ## Repository Summary
 
-| Field | Details |
-| --- | --- |
-| Product category | Open-source CTI workstation, OSINT triage tool, threat actor profile manager, AI-assisted threat-intelligence workspace |
-| Primary users | SOC analysts, CTI analysts, detection engineers, incident-response teams, MSSP analysts, security researchers |
-| Core workflow | OSINT finding -> evidence review -> actor context -> hunt-query draft -> analyst action |
-| AI posture | Bring your own provider key; strict mode surfaces real provider errors instead of mock output |
-| Data posture | Public seed data ships in git; runtime databases, API keys, uploaded portraits, and secrets stay local |
-| Deployment model | Local Express + React app backed by SQLite |
+| Field            | Details                                                                                                                         |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Product category | Open-source CTI workstation, client-aware OSINT triage tool, threat actor profile manager, and detection-rule workspace         |
+| Primary users    | SOC analysts, CTI analysts, detection engineers, incident-response teams, MSSP analysts, security researchers                   |
+| Core workflow    | OSINT finding -> evidence review -> client/CIRT triage -> analyst assessment -> detection or client brief                       |
+| AI posture       | Bring your own provider key; strict mode surfaces real provider errors instead of mock output                                   |
+| Data posture     | Sanitized seed data and curated portraits ship in git; runtime databases, generated portraits, API keys, and secrets stay local |
+| Deployment model | Local Express + React app backed by SQLite                                                                                      |
 
 OptraSight is relevant if you are searching for:
 
 - an open-source threat intelligence platform for OSINT triage;
 - a cyber threat intelligence tool for threat actor profiles and actor dossiers;
-- an AI-assisted SOC analyst workstation that keeps evidence traceability visible;
+- an AI-assisted SOC analyst workstation that keeps evidence traceability and human approval visible;
 - a hunt-query generator for Splunk SPL, Elastic KQL, Microsoft Sentinel KQL, Google Chronicle YARA-L, Palo Alto Cortex XQL, Sigma, and YARA;
 - a local-first security operations tool for evaluating public threat reports, indicators, tactics, techniques, procedures, and analyst notes.
 
 ## Use Cases
 
-- Triage public OSINT findings with source context, severity, ATT&CK scope, affected technology, and analyst notes in one workflow.
+- Triage public OSINT findings with source context, severity, ATT&CK scope, affected technology, client relevance, and analyst assessment in one workflow.
 - Maintain Threat Actor Profiles with aliases, campaigns, indicators, tactics, techniques, procedures, confidence drivers, evidence references, and dossier exports.
 - Use configured AI providers to assist with finding analysis, CIRT-style triage, deep-dive review, actor enrichment, and hunt-query drafting.
-- Draft defensive hunt logic for Splunk SPL, Elastic KQL, Microsoft Sentinel KQL, Google Chronicle YARA-L, Palo Alto Cortex XQL, Sigma, and YARA.
+- Manage evidence-linked detection rules and compiled hunt logic for Splunk SPL, Elastic KQL, Microsoft Sentinel KQL, Google Chronicle YARA-L, Palo Alto Cortex XQL, Sigma, and YARA.
+- Maintain multiple Client Profiles and draft severity-structured client briefs from analyst-approved intelligence.
 - Evaluate a local-first CTI workstation with sanitized public seed data, watermarked actor portraits, no bundled secrets, and strict provider error handling.
 
 ## Key Capabilities
 
-Batch One focuses on the analyst workflow from signal intake to defense-ready output:
+BatchTwo beta focuses on the analyst workflow from signal intake to reviewed operational output:
 
 - **Intel Inbox** for parsed OSINT findings, source review, AI triage, CIRT-style deep dive, and finding-level analysis.
 - **Actor Observatory** for Threat Actor Profiles, actor aliases, TTPs, IOCs, campaigns, evidence, portraits, and exports.
-- **Hunting queries** generated from selected intelligence for defensive validation across common SIEM and detection languages.
-- **AI Setup** for your own DeepSeek, OpenAI, Anthropic, or Google Gemini provider keys.
+- **Detection Rules** for evidence-linked Sigma sources, compiled platform queries, validation, lifecycle review, client scope, and deployment state.
+- **Client Profiles** for multiple protected organizations, CSV bulk creation, canonical geography/industry/technology scope, aliases, subsidiaries, notification settings, and service-type-aware AI matching.
+- **Client Briefs** for client-impact AI triage, analyst review, editable green-accented email drafts, placeholder-driven Word template upload, Word/EML export, and controlled SMTP delivery.
+- **Workspace Setup** for MSS mode or Individual mode; client-specific modules are hidden in Individual mode.
+- **Integration Center** for AI providers, email delivery, X/FalconFeeds, KELA, and selected community enrichment connectors.
+- **Account-aware model selection** that discovers models exposed by a configured provider without silently changing production assignments.
+- **AI Setup** for your own DeepSeek, OpenAI, Anthropic, Google Gemini, or Kimi provider keys.
 - **Job Control** for background AI and ingestion work.
 - **Platform Users** for local admin and reviewer accounts.
 
-## Release Scope
+## Beta Scope
 
-Batch One is intentionally focused on the analyst workstation experience: Intel Inbox, Actor Observatory, Threat Actor Profiles, Hunting Queries, AI Setup, Job Control, and local platform access controls. It is designed to be useful as a public open-source release while keeping the operating surface clear, inspectable, and easy to run locally.
+BatchTwo retains the Batch One Intel Inbox and Actor Observatory, then adds client-aware operations and detection engineering. The beta surface includes Client Profiles, Client Briefs, Detection Rules, Workspace Setup, Integration Center, Job Control, and local platform access controls.
 
-Some broader platform capabilities are outside this public release. Rather than exposing every internal module or future direction, this repository keeps the Batch One boundary simple: threat-intelligence intake, actor analysis, and evidence-led hunting workflows.
+Broader Full Platform capabilities such as attack-surface management, investigations, tabletop exercises, tenant switching, and enterprise reporting remain outside this beta unless explicitly promoted through a later release decision.
 
-Follow the repository for future public releases as the project expands its evidence-led security operations workflows.
+This branch is for testing, issue reporting, and design validation. Do not use beta builds as an unattended production mailer or autonomous decision system.
 
 ## Quick Start
 
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/Chill-Ethical-People/Optrasight.git
+git clone --branch beta-testing https://github.com/Chill-Ethical-People/Optrasight.git
 cd Optrasight
 npm install
 ```
 
-### 2. Restore the public BatchOne dataset
+### 2. Restore the public seed dataset
 
 ```bash
 npm run db:restore-public
@@ -115,7 +123,7 @@ data/public/optrasight-threat-actors-public.db
 data/public/portraits/
 ```
 
-The restore step copies public threat-intel findings, Threat Actor Profiles, and watermarked Threat Actor Profile portraits into local runtime paths. It does **not** restore API keys or private secrets.
+The restore step copies sanitized public threat-intel findings, Threat Actor Profiles, and watermarked Threat Actor Profile portraits into local runtime paths. It does **not** restore client data, AI history, analyst assessments, API keys, email credentials, or private secrets.
 
 If you intentionally want to rebuild an existing local runtime database:
 
@@ -139,18 +147,41 @@ http://localhost:5000
 
 These credentials are public knowledge and exist only for local first-run access. Rotate, disable, or delete them before using OptraSight with real data.
 
-| Role | Email | Temporary password |
-| --- | --- | --- |
-| Platform admin | `admin@cep.com` | `ChangeMe!2026Admin` |
+| Role               | Email              | Temporary password    |
+| ------------------ | ------------------ | --------------------- |
+| Platform admin     | `admin@cep.com`    | `ChangeMe!2026Admin`  |
 | Read-only reviewer | `reviewer@cep.com` | `ChangeMe!2026Review` |
 
 Seed accounts must change the temporary password and enroll MFA before platform functions unlock.
+Enrolled accounts also require MFA assurance for each authenticated session; the permanent `/#/account-security` route remains available after first-time setup.
+
+### Windows persistent installation
+
+For a Windows host that should run OptraSight automatically in the background, open
+PowerShell as Administrator from the extracted release and run:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\scripts\install-optrasight-windows.ps1
+```
+
+The installer prompts for the source and installation folders, preserves and verifies
+existing runtime data before replacing old code, registers the startup and health-check
+tasks, adds a subnet-scoped firewall rule, and writes troubleshooting logs. See
+[DEPLOYMENT.md](./DEPLOYMENT.md#windows-background-service-installation) for backup,
+diagnostic, and non-interactive commands.
 
 ### 5. Add your AI provider key
 
-Open `/#/ai-setup` and add your own AI provider key. OptraSight supports live routing for DeepSeek, OpenAI, Anthropic, and Google Gemini.
+Open `/#/ai-setup` and add your own AI provider key. OptraSight supports live routing for DeepSeek, OpenAI, Anthropic, Google Gemini, Kimi, and self-hosted Ollama.
+
+Provider- and exact-model prompt tuning is centralized in `server/prompts/ai-prompts.json`. The registry applies auditable global and per-task overlays while each task keeps its validation and security baseline next to the implementation.
+
+The provider editor shows curated current defaults for new connections and queries the configured account for its available models when editing an existing connection. Model changes are explicit and must pass a live connection test before they can be routed to production AI tasks; OptraSight does not silently upgrade an assigned model.
 
 AI provider keys are stored separately from public seed data. They are not bundled with the repository and are not restored from the public seed data. When strict mode is enabled, unavailable or misconfigured providers return real setup errors instead of silent mock output.
+
+Local Ollama access is disabled by default. To connect an administrator-approved loopback or private-network model host, set `OPTRASIGHT_ALLOW_LOCAL_AI=1`. HTTPS endpoints issued by a private CA can additionally use `OPTRASIGHT_LOCAL_AI_CA_CERT` with an absolute path to the CA PEM bundle. OptraSight passes that bundle only to the local Ollama transport and continues to verify the certificate chain and hostname; it never disables TLS verification globally. See [DEPLOYMENT.md](./DEPLOYMENT.md#local-llm-tls).
 
 ## What Ships In Git
 
@@ -191,7 +222,21 @@ Inspect and maintain Threat Actor Profiles with aliases, sector and region targe
 
 ### Hunting Queries
 
-Generate defensive hunt queries from selected intelligence. The goal is practical validation content that remains linked to source findings and actor context.
+Generate defensive hunt queries from selected intelligence and manage them in Detection Rules. The goal is practical validation content that remains linked to source findings, actor context, validation state, and deployment targets.
+
+### Client Operations
+
+In MSS mode, maintain multiple Client Profiles and assess intelligence against pseudonymized geography, industry, technology, alias, and subsidiary context. Analysts can review AI suggestions, change severity and relevance, edit client-ready drafts, export Word or EML, and explicitly approve delivery. Individual mode hides client-specific workflows.
+
+Client matching adapts to service coverage: TI profiles use a broader strategic and tactical CTI lens; MSS, MDR, and CIR profiles prioritize operational exposure and detection relevance; combined profiles use a hybrid lens; other profiles use an advisory lens. Client Profiles can be bulk-created from the CSV template downloaded directly from the page header or bulk-import dialog, with taxonomy labels resolved to canonical IDs. Client Briefs exposes the full drafting guide as an in-console popup and downloadable Markdown reference.
+
+Each Client Profile owns its email subject/body template, recipient list, cadence, and optional branding. Administrators can upload a placeholder-driven Word template or edit the template directly; generated drafts remain analyst-reviewable and are never auto-sent. CSV bulk import is limited to 100 profiles per request and validates canonical taxonomy, service-aware scope limits, email addresses, and duplicate names before persistence.
+
+### AI prompt tuning
+
+The central, version-controlled AI tuning file is `server/prompts/ai-prompts.json`. Configure global, task, provider, and exact-model instructions there. `server/promptRegistry.ts` owns deterministic prompt resolution, while `server/prompts/README.md` documents precedence and safe use of `append` versus `replace`. Restart the backend after changing the JSON registry.
+
+Reusable Client Brief AI assets are documented under `ai-assets/client-brief/`: the validated Skill lives at `skills/client-brief-drafting/`, alongside a Gemini Gem configuration and a provider-neutral RAG corpus generated from the canonical drafting guide with `npm run rag:client-brief`.
 
 ### Analyst Chat
 
@@ -202,15 +247,17 @@ Use the floating analyst chat for general security questions, threat-intel reaso
 - **Authorized use only:** use OptraSight only for defensive security work on systems, data, and sources you are allowed to assess.
 - **Strict mode:** production blocks silent mock fallbacks and surfaces provider/configuration errors.
 - **No bundled secrets:** AI keys and secret databases are not committed.
+- **Human approval:** AI-selected client relevance, assessments, rules, and email drafts remain subject to analyst review.
+- **Upload boundary:** browser-supplied threat-actor portraits are disabled; client logos pass through validated, rate-limited, server-keyed storage.
 - **No durable browser storage:** the app avoids localStorage, sessionStorage, IndexedDB, cookies, and URL tokens for session/application state.
 - **Server-side session expiry:** bearer sessions are validated against the server database.
 
 Default session lifetimes:
 
-| Account type | Idle timeout | Absolute timeout |
-| --- | ---: | ---: |
-| Platform admin | 1 hour | 12 hours |
-| Read-only reviewer / non-admin | 12 hours | 24 hours |
+| Account type                   | Idle timeout | Absolute timeout |
+| ------------------------------ | -----------: | ---------------: |
+| Platform admin                 |       1 hour |         12 hours |
+| Read-only reviewer / non-admin |     12 hours |         24 hours |
 
 Override with:
 
@@ -229,7 +276,7 @@ Report security issues through the process in [SECURITY.md](./SECURITY.md). Plea
 npm run dev                # start local Express + Vite development server
 npm run build              # build production client/server bundle
 npm start                  # run the built server
-npm run db:restore-public  # create local data.db from public BatchOne seed assets
+npm run db:restore-public  # create local data.db from sanitized public seed assets
 npm run setup:batchone     # compatibility alias for the same restore workflow
 npm run db:export-public   # export sanitized public seed DBs from a populated workspace
 npm run lint               # ESLint
@@ -262,16 +309,17 @@ When `NODE_ENV=production`, strict mode is enabled by default. Missing AI provid
 
 ## Environment Variables
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `NODE_ENV` | `development` | Switches development/production behavior. |
-| `PORT` | `5000` | HTTP listen port. |
-| `OPTRASIGHT_STRICT` | `1` in production | Blocks mock fallback paths and surfaces real missing-provider/upstream errors. |
-| `OPTRASIGHT_AI_LIVE` | `1` | Emergency live-AI kill switch for offline development. |
-| `OPTRASIGHT_ADMIN_SESSION_IDLE_MS` | `3600000` | Admin idle session timeout. |
-| `OPTRASIGHT_ADMIN_SESSION_ABSOLUTE_MS` | `43200000` | Admin absolute session lifetime. |
-| `OPTRASIGHT_SESSION_IDLE_MS` | `43200000` | Reviewer/non-admin idle session timeout. |
-| `OPTRASIGHT_SESSION_ABSOLUTE_MS` | `86400000` | Reviewer/non-admin absolute session lifetime. |
+| Variable                               | Default           | Purpose                                                                                     |
+| -------------------------------------- | ----------------- | ------------------------------------------------------------------------------------------- |
+| `NODE_ENV`                             | `development`     | Switches development/production behavior.                                                   |
+| `PORT`                                 | `5000`            | HTTP listen port.                                                                           |
+| `OPTRASIGHT_STRICT`                    | `1` in production | Blocks mock fallback paths and surfaces real missing-provider/upstream errors.              |
+| `OPTRASIGHT_AI_LIVE`                   | `1`               | Emergency live-AI kill switch for offline development.                                      |
+| `X_BEARER_TOKEN`                       | unset             | Optional X API v2 bearer token for authenticated FalconFeeds.io ransomware-alert ingestion. |
+| `OPTRASIGHT_ADMIN_SESSION_IDLE_MS`     | `3600000`         | Admin idle session timeout.                                                                 |
+| `OPTRASIGHT_ADMIN_SESSION_ABSOLUTE_MS` | `43200000`        | Admin absolute session lifetime.                                                            |
+| `OPTRASIGHT_SESSION_IDLE_MS`           | `43200000`        | Reviewer/non-admin idle session timeout.                                                    |
+| `OPTRASIGHT_SESSION_ABSOLUTE_MS`       | `86400000`        | Reviewer/non-admin absolute session lifetime.                                               |
 
 ## Repository Map
 
@@ -279,7 +327,7 @@ When `NODE_ENV=production`, strict mode is enabled by default. Missing AI provid
 client/                 React, Vite, Tailwind, shadcn/Radix UI
 server/                 Express API, SQLite storage, AI dispatch, OSINT ingestion
 shared/                 Shared schema, DTOs, validation, access policy
-data/public/            Sanitized public BatchOne seed DBs and portraits
+data/public/            Sanitized public seed DBs and portraits used by BatchTwo beta
 scripts/                Public DB restore/export and release safety helpers
 spec/                   API and connector metadata snapshots
 tests/                  Security and regression tests
@@ -291,8 +339,8 @@ Read [CONTRIBUTING.md](./CONTRIBUTING.md) before opening a pull request.
 
 Useful guardrails:
 
-- Keep BatchOne scoped to Intel Inbox, Actor Observatory, AI Setup, Job Control, Platform Users, and supporting APIs.
-- Do not expand the release surface without an explicit BatchOne scope decision.
+- Keep BatchTwo beta scoped to the modules documented above.
+- Do not reintroduce Full Platform modules without an explicit release decision.
 - Use `apiRequest` on the client rather than raw `fetch`.
 - Keep long AI work asynchronous and visible in Job Control.
 - Do not commit runtime databases, secret stores, generated screenshots, logs, or uploaded private portraits.

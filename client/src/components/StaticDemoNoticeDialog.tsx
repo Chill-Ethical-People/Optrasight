@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { Eye, LockKeyhole, Route } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { STATIC_DEMO_MODE } from "@/lib/staticDemoApi";
 import {
@@ -75,13 +82,17 @@ export function StaticDemoNoticeDialog() {
           </div>
           <DialogTitle>Static review workspace</DialogTitle>
           <DialogDescription>
-            This public workspace is read-only. Interactive controls are shown to demonstrate the Batch One operating model, but actions that require a live server, database writes, provider keys, or background jobs are restricted in this static preview.
+            This public workspace is read-only. Interactive controls are shown to demonstrate the Batch One operating
+            model, but actions that require a live server, database writes, provider keys, or background jobs are
+            restricted in this static preview.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3 text-sm">
           <div className="rounded-md border border-primary/20 bg-primary/5 p-3">
-            <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-primary">{detail.action ?? copy.label}</div>
+            <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-primary">
+              {detail.action ?? copy.label}
+            </div>
             <p className="leading-6 text-muted-foreground">{copy.message}</p>
           </div>
           <div className="rounded-md border bg-muted/25 p-3">
@@ -89,7 +100,9 @@ export function StaticDemoNoticeDialog() {
               <Route size={13} className="text-primary" /> Suggested review path
             </div>
             <p className="leading-6 text-muted-foreground">
-              Start in Intel Inbox, inspect OSINT findings, open completed CIRT triage and deep-dive job examples, review generated hunt queries, browse Actor Observatory, then check AI Setup and Platform Users as read-only administration surfaces.
+              Start in Intel Inbox, inspect OSINT findings, open completed CIRT triage and deep-dive job examples,
+              review generated hunt queries, browse Actor Observatory, then check AI Setup and Platform Users as
+              read-only administration surfaces.
             </p>
           </div>
         </div>

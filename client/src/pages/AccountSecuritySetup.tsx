@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import QRCode from "qrcode";
-import { CheckCircle2, Copy, KeyRound, Loader2, Lock, ShieldCheck } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Copy, KeyRound, Loader2, Lock, ShieldCheck } from "lucide-react";
 import { Logo } from "@/components/Logo";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -56,10 +56,13 @@ export default function AccountSecuritySetup() {
   const checks = useMemo(() => passwordChecks(newPassword, currentPassword), [currentPassword, newPassword]);
   const passwordValid = checks.every((check) => check.ok) && newPassword === confirmPassword;
   const needsPassword = !!user?.passwordMustChange;
-  const needsMfa = !user?.mfaEnabled;
+  const needsMfaEnrollment = !user?.mfaEnabled;
+  const needsMfaChallenge = !!user?.mfaEnabled && !user?.mfaSessionVerifiedAt;
+  const needsMfa = needsMfaEnrollment || needsMfaChallenge;
+  const setupComplete = !needsPassword && !needsMfa;
 
   useEffect(() => {
-    if (!needsMfa) return;
+    if (!needsMfaEnrollment) return;
     let cancelled = false;
     apiRequest("GET", "/api/v1/me?mfaSetup=1")
       .then((r) => readJson<MeWithMfaSetup>(r))
@@ -80,7 +83,7 @@ export default function AccountSecuritySetup() {
       })
       .catch((err) => toast({ variant: "destructive", title: "MFA setup failed", description: String(err.message ?? err) }));
     return () => { cancelled = true; };
-  }, [needsMfa, toast]);
+  }, [needsMfaEnrollment, toast]);
 
   const changePassword = async (event: FormEvent) => {
     event.preventDefault();
@@ -105,11 +108,21 @@ export default function AccountSecuritySetup() {
     event.preventDefault();
     setMfaBusy(true);
     try {
-      const r = await apiRequest("POST", "/api/v1/auth/mfa/verify", { code: mfaCode });
+      const endpoint = needsMfaEnrollment
+        ? "/api/v1/auth/mfa/verify"
+        : "/api/v1/auth/mfa/challenge";
+      const r = await apiRequest("POST", endpoint, { code: mfaCode });
       if (!r.ok) throw new Error(await r.text());
       const updated = await refreshMe();
-      toast({ title: "MFA enabled", description: "Your account security setup is complete." });
-      if (!updated?.passwordMustChange && updated?.mfaEnabled) window.location.hash = "#/";
+      toast({
+        title: needsMfaEnrollment ? "MFA enabled" : "MFA verified",
+        description: needsMfaEnrollment
+          ? "Your account security setup is complete."
+          : "This session now has MFA assurance.",
+      });
+      if (!updated?.passwordMustChange && updated?.mfaEnabled && updated?.mfaSessionVerifiedAt) {
+        window.location.hash = "#/";
+      }
     } catch (err: any) {
       toast({ variant: "destructive", title: "MFA verification failed", description: String(err.message ?? err) });
     } finally {
@@ -133,6 +146,11 @@ export default function AccountSecuritySetup() {
             <div className="text-xs text-muted-foreground">Account security setup</div>
           </div>
           <div className="flex-1" />
+          {setupComplete ? (
+            <Button variant="ghost" size="sm" onClick={() => { window.location.hash = "#/osint"; }}>
+              <ArrowLeft size={14} className="mr-1.5" /> Back to platform
+            </Button>
+          ) : null}
           <Button variant="outline" size="sm" onClick={logout}>Sign out</Button>
         </div>
 
@@ -142,9 +160,11 @@ export default function AccountSecuritySetup() {
               <ShieldCheck size={18} />
             </div>
             <div>
-              <div className="text-lg font-semibold">Secure your OptraSight account</div>
+              <div className="text-lg font-semibold">{setupComplete ? "Account security" : "Secure your OptraSight account"}</div>
               <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-                Seed and reset accounts must use a complex password and MFA before platform functions unlock.
+                {setupComplete
+                  ? "Your password and authenticator protect access to this OptraSight account."
+                  : "Seed and reset accounts must use a complex password and MFA before platform functions unlock."}
               </p>
             </div>
           </div>
@@ -185,25 +205,33 @@ export default function AccountSecuritySetup() {
           <Card className="os-card p-5">
             <div className="mb-4 flex items-center gap-2">
               {needsMfa ? <KeyRound size={17} className="text-primary" /> : <CheckCircle2 size={17} className="text-emerald-500" />}
-              <div className="font-semibold">2. Enroll MFA</div>
+              <div className="font-semibold">
+                {needsMfaEnrollment ? "2. Enroll MFA" : needsMfaChallenge ? "2. Verify MFA" : "2. MFA protection"}
+              </div>
             </div>
             {needsMfa ? (
               <form onSubmit={verifyMfa} className="space-y-3">
-                <div className="flex flex-col gap-3 sm:flex-row">
-                  <div className="flex h-[228px] w-[228px] shrink-0 items-center justify-center rounded-md border bg-white p-2">
-                    {qrDataUrl ? <img src={qrDataUrl} alt="Authenticator QR code" className="h-full w-full" /> : <Loader2 className="animate-spin text-slate-500" />}
-                  </div>
-                  <div className="min-w-0 flex-1 space-y-2 text-sm text-muted-foreground">
-                    <p>Scan the QR code with Microsoft Authenticator, Google Authenticator, 1Password, or another TOTP app.</p>
-                    <div className="rounded-md border bg-muted/30 p-2">
-                      <div className="text-[11px] uppercase text-muted-foreground">Seed key</div>
-                      <div className="mt-1 break-all font-mono text-xs text-foreground">{mfaSetup?.secret ?? "Loading..."}</div>
+                {needsMfaEnrollment ? (
+                  <div className="flex flex-col gap-3 sm:flex-row">
+                    <div className="flex h-[228px] w-[228px] shrink-0 items-center justify-center rounded-md border bg-white p-2">
+                      {qrDataUrl ? <img src={qrDataUrl} alt="Authenticator QR code" className="h-full w-full" /> : <Loader2 className="animate-spin text-slate-500" />}
                     </div>
-                    <Button type="button" variant="outline" size="sm" onClick={copySeed} disabled={!mfaSetup?.secret}>
-                      <Copy size={13} className="mr-1.5" /> Copy seed
-                    </Button>
+                    <div className="min-w-0 flex-1 space-y-2 text-sm text-muted-foreground">
+                      <p>Scan the QR code with Microsoft Authenticator, Google Authenticator, 1Password, or another TOTP app.</p>
+                      <div className="rounded-md border bg-muted/30 p-2">
+                        <div className="text-[11px] uppercase text-muted-foreground">Seed key</div>
+                        <div className="mt-1 break-all font-mono text-xs text-foreground">{mfaSetup?.secret ?? "Loading..."}</div>
+                      </div>
+                      <Button type="button" variant="outline" size="sm" onClick={copySeed} disabled={!mfaSetup?.secret}>
+                        <Copy size={13} className="mr-1.5" /> Copy seed
+                      </Button>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="rounded-md border bg-muted/30 p-4 text-sm text-muted-foreground">
+                    Enter the six-digit code from your enrolled authenticator to unlock this session.
+                  </div>
+                )}
                 <Input
                   inputMode="numeric"
                   pattern="[0-9]*"
@@ -212,15 +240,19 @@ export default function AccountSecuritySetup() {
                   onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
                   placeholder="Enter 6-digit code"
                   className="font-mono"
-                  data-testid="input-mfa-setup-code"
+                  data-testid={needsMfaEnrollment ? "input-mfa-setup-code" : "input-mfa-challenge-code"}
                 />
                 <Button type="submit" disabled={mfaCode.length !== 6 || mfaBusy} data-testid="button-verify-mfa">
-                  {mfaBusy ? <><Loader2 size={14} className="mr-1.5 animate-spin" />Verifying</> : "Verify MFA"}
+                  {mfaBusy ? <><Loader2 size={14} className="mr-1.5 animate-spin" />Verifying</> : needsMfaEnrollment ? "Enable MFA" : "Verify and continue"}
                 </Button>
               </form>
             ) : (
               <div className="rounded-md border border-emerald-400/30 bg-emerald-400/10 p-3 text-sm text-emerald-700 dark:text-emerald-200">
-                MFA is active for this account.
+                <div className="font-medium">MFA is active for this account.</div>
+                <div className="mt-1 text-xs opacity-85">
+                  Authenticator verification is required at every new sign-in
+                  {user?.mfaVerifiedAt ? ` · enrolled ${new Date(user.mfaVerifiedAt).toLocaleString()}` : ""}.
+                </div>
               </div>
             )}
           </Card>

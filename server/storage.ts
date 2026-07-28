@@ -1,31 +1,87 @@
 import {
-  tenants, tenantScopes, users, aiProviders, aiTaskAssignments,
+  tenants,
+  tenantScopes,
+  users,
+  aiProviders,
+  aiTaskAssignments,
   osintSources as osintSourcesTbl,
   auditLog as auditLogTbl,
-  type ThreatActorDTO, type ThreatActorFullDTO,
-  type ThreatActorTtpDTO, type ThreatActorToolDTO,
-  type ThreatActorCampaignDTO, type ThreatActorIocDTO,
-  type ThreatActorReferenceDTO, type ThreatActorRuleLinkDTO,
-  type ThreatActorTenantDTO, type TenantRelevance,
-  type ActorType, type SponsorshipLevel, type TlpLevel, type ThreatLevel,
-  type IntentProximity, type WepConfidence, type SophisticationLevel,
-  type AdmiraltySource, type AdmiraltyInfo, type IocType, type TtpStatus,
-  type DetectionPriority, type TapStatus,
-  type Tenant, type User,
+  type ThreatActorDTO,
+  type ThreatActorFullDTO,
+  type ThreatActorTtpDTO,
+  type ThreatActorToolDTO,
+  type ThreatActorCampaignDTO,
+  type ThreatActorIocDTO,
+  type ThreatActorReferenceDTO,
+  type ThreatActorRuleLinkDTO,
+  type ThreatActorTenantDTO,
+  type TenantRelevance,
+  type ActorType,
+  type SponsorshipLevel,
+  type TlpLevel,
+  type ThreatLevel,
+  type IntentProximity,
+  type WepConfidence,
+  type SophisticationLevel,
+  type AdmiraltySource,
+  type AdmiraltyInfo,
+  type IocType,
+  type TtpStatus,
+  type DetectionPriority,
+  type TapStatus,
+  type Tenant,
+  type User,
   type AiProvider,
   type AiProviderSummary,
-  type AiTask, type AiProviderKind,
+  type AiTask,
+  type AiProviderKind,
   type OsintSource,
   type AuditLogEntry,
-  type OsintFindingDTO, type HuntQueryDTO, type ThreatLandscapeDTO,
-  type DetectionRuleDTO, type RuleDeploymentDTO, type DeploymentMode, type DeploymentStatus,
-  type RuleStatus, type RuleSeverity, type SiemTargetId, SIEM_TARGETS, SIEM_TARGET_IDS,
+  type ClientProfileDTO,
+  type ClientDigestDTO,
+  type ClientTaxonomyKind,
+  type ClientTaxonomyOptionDTO,
+  type ClientAnalysisScopeDTO,
+  type OsintFindingDTO,
+  type HuntQueryDTO,
+  type ThreatLandscapeDTO,
+  type DetectionRuleDTO,
+  type RuleDeploymentDTO,
+  type RuleValidationDTO,
+  type DeploymentMode,
+  type DeploymentStatus,
+  type RuleSyntaxStatus,
+  type RuleTestStatus,
+  type RuleFalsePositiveRisk,
+  type RuleStatus,
+  type RuleSeverity,
+  type SiemTargetId,
+  SIEM_TARGETS,
+  SIEM_TARGET_IDS,
   type SearchResultDTO,
+  CLIENT_TYPES,
+  GEOS,
+  INDUSTRIES,
   MONITORED_TECHNOLOGIES,
-  IOC_TYPES,
-  OSINT_CATEGORY_LABELS, OSINT_CATEGORY_ORDER, OSINT_OVERVIEW_PERSONAS, type OsintOverviewPersona,
-  type OsintSourceRowDTO, type OsintOverviewResultDTO,
+  OSINT_CATEGORY_LABELS,
+  OSINT_CATEGORY_ORDER,
+  OSINT_OVERVIEW_PERSONAS,
+  type OsintOverviewPersona,
+  type OsintSourceRowDTO,
+  type OsintOverviewResultDTO,
 } from "@shared/schema";
+import {
+  CLIENT_DIGEST_TEMPLATE_TOKENS,
+  DEFAULT_CLIENT_DIGEST_BODY_TEMPLATE,
+  DEFAULT_CLIENT_DIGEST_SUBJECT_TEMPLATE,
+  LEGACY_CLIENT_DIGEST_BODY_TEMPLATE,
+} from "@shared/clientDigestTemplate";
+import {
+  clientProfileScopeLimitErrors,
+  clientMatchingScopeForTypes,
+  normalizeClientTypeIds,
+  type ClientMatchingScope,
+} from "@shared/clientMatchingScope";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
 import { createCipheriv, createDecipheriv, createHash, createHmac, scryptSync, timingSafeEqual } from "node:crypto";
@@ -33,26 +89,42 @@ import { and, desc, eq, like } from "drizzle-orm";
 import { randomUUID, randomBytes } from "node:crypto";
 import { isStrictProduction, MockFallbackBlockedError } from "./productionMode";
 import { dispatchAi, testProvider as testAiProviderImpl } from "./aiClient";
+import { liveListModels, type LiveModelListResult } from "./aiLive";
 import { isSecurityPublisherHost } from "./iocPublisherBlocklist";
 import { fetchSourcesBatch } from "./sourceFetch";
+import { ensureSigmaEvidenceReferences, extractFetchedEvidenceUrls } from "./detectionEvidence";
 import { OSINT_SOURCES, REMOVED_OSINT_SOURCE_IDS } from "./osintSeed";
 import { ensureClusterIdPersisted, backfillClusters } from "./osintClustering";
 import { secretStore } from "./secretStore";
-import { chmodSync, closeSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { getXBearerTokenForIngest } from "./socialIntegrations";
+import { getKelaIngestConfig } from "./kelaIntegration";
+import { getCommunityIngestConfigs } from "./communityIntegrations";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 
-const sqlite = new Database("data.db");
+const WORKSPACE_DB_PATH = resolve(process.env.OPTRASIGHT_DB_PATH || join(process.cwd(), "data.db"));
+mkdirSync(dirname(WORKSPACE_DB_PATH), { recursive: true, mode: 0o700 });
+const sqlite = new Database(WORKSPACE_DB_PATH);
 sqlite.pragma("journal_mode = WAL");
 export const db = drizzle(sqlite);
 
 const AI_PROVIDER_SECRET = "ai_provider";
+
+function assertClientProfileScopeLimits(input: {
+  clientTypes: string[];
+  monitoredTechnologies: string[];
+  mappingTerms: string[];
+}) {
+  const errors = clientProfileScopeLimitErrors(input);
+  if (errors.length) throw new Error(errors.join(" "));
+}
 
 // ---------- bootstrap ----------
 function ensureSchema() {
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS tenants (
       id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE,
-      plan TEXT NOT NULL DEFAULT 'starter', created_at TEXT NOT NULL
+      plan TEXT NOT NULL DEFAULT 'starter', operating_mode TEXT, created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS tenant_scopes (
       tenant_id TEXT PRIMARY KEY,
@@ -61,6 +133,52 @@ function ensureSchema() {
       ip_ranges TEXT NOT NULL DEFAULT '[]',
       executive_emails TEXT NOT NULL DEFAULT '[]'
     );
+    CREATE TABLE IF NOT EXISTS client_profiles (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      client_types TEXT NOT NULL DEFAULT '[]',
+      geo_ids TEXT NOT NULL DEFAULT '[]',
+      industry_ids TEXT NOT NULL DEFAULT '[]',
+      technology_ids TEXT NOT NULL DEFAULT '[]',
+      mapping_terms TEXT NOT NULL DEFAULT '[]',
+      notification_emails TEXT NOT NULL DEFAULT '[]',
+      digest_enabled INTEGER NOT NULL DEFAULT 0,
+      digest_cadence TEXT NOT NULL DEFAULT 'weekly',
+      digest_subject_template TEXT,
+      digest_body_template TEXT,
+      email_logo_url TEXT,
+      last_digest_at TEXT,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_client_profiles_tenant
+      ON client_profiles(tenant_id, is_active, updated_at);
+    CREATE TABLE IF NOT EXISTS client_digests (
+      id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, client_id TEXT NOT NULL,
+      cadence TEXT NOT NULL, period_start TEXT NOT NULL, period_end TEXT NOT NULL,
+      recipients TEXT NOT NULL DEFAULT '[]', subject TEXT NOT NULL, body_md TEXT NOT NULL,
+      finding_ids TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'draft',
+      ai_provider_label TEXT, created_at TEXT NOT NULL, created_by TEXT NOT NULL,
+      reviewed_at TEXT, reviewed_by TEXT,
+      UNIQUE(tenant_id, client_id, cadence, period_start, period_end)
+    );
+    CREATE INDEX IF NOT EXISTS idx_client_digests_client
+      ON client_digests(tenant_id, client_id, created_at DESC);
+    CREATE TABLE IF NOT EXISTS client_taxonomy_options (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      label TEXT NOT NULL,
+      aliases TEXT NOT NULL DEFAULT '[]',
+      fingerprint TEXT NOT NULL,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE(tenant_id, kind, fingerprint)
+    );
+    CREATE INDEX IF NOT EXISTS idx_client_taxonomy_tenant
+      ON client_taxonomy_options(tenant_id, kind, created_at);
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, email TEXT NOT NULL UNIQUE,
       password TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'threat_intel_expert',
@@ -81,6 +199,7 @@ function ensureSchema() {
       access_mode TEXT NOT NULL DEFAULT 'credentialed',
       issued_at TEXT NOT NULL,
       last_used_at TEXT NOT NULL,
+      mfa_verified_at TEXT,
       revoked_at TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id, revoked_at);
@@ -129,7 +248,10 @@ function ensureSchema() {
       ai_summary TEXT, ai_relevance_score INTEGER,
       ai_recommendation TEXT, ai_analyzed_at TEXT, ai_provider_label TEXT,
       draft_email TEXT, draft_email_at TEXT,
-      status TEXT NOT NULL DEFAULT 'new', created_at TEXT NOT NULL
+      status TEXT NOT NULL DEFAULT 'new',
+      ai_client_matches TEXT NOT NULL DEFAULT '[]',
+      client_match_decisions TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_osint_findings_tenant ON osint_findings(tenant_id);
     CREATE TABLE IF NOT EXISTS hunt_queries (
@@ -167,6 +289,7 @@ function ensureSchema() {
       mitre_techniques TEXT NOT NULL DEFAULT '[]',
       affected_tech TEXT NOT NULL DEFAULT '[]',
       threat_actors TEXT NOT NULL DEFAULT '[]',
+      client_ids TEXT NOT NULL DEFAULT '[]',
       sigma_yaml TEXT,
       queries TEXT NOT NULL DEFAULT '{}',
       notes TEXT,
@@ -187,6 +310,22 @@ function ensureSchema() {
       UNIQUE(tenant_id, rule_id, siem_id)
     );
     CREATE INDEX IF NOT EXISTS idx_rule_deployments_rule ON rule_deployments(tenant_id, rule_id);
+    CREATE TABLE IF NOT EXISTS rule_validations (
+      id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL,
+      rule_id TEXT NOT NULL, client_id TEXT NOT NULL, siem_id TEXT NOT NULL,
+      rule_version INTEGER NOT NULL,
+      telemetry_sources TEXT NOT NULL DEFAULT '[]',
+      syntax_status TEXT NOT NULL DEFAULT 'not_checked',
+      test_status TEXT NOT NULL DEFAULT 'not_tested',
+      test_method TEXT, expected_result TEXT, observed_result TEXT,
+      false_positive_risk TEXT NOT NULL DEFAULT 'unknown',
+      external_reference TEXT, notes TEXT,
+      tested_at TEXT, tested_by TEXT,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      UNIQUE(tenant_id, rule_id, client_id, siem_id, rule_version)
+    );
+    CREATE INDEX IF NOT EXISTS idx_rule_validations_rule
+      ON rule_validations(tenant_id, rule_id, rule_version);
     -- v2.30.3 — Threat Actor Profiles (TAP). Header + body in threat_actors;
     -- sub-resources (TTPs, tools, campaigns, IoCs, references, rule links)
     -- in dedicated tables for structured querying.
@@ -341,9 +480,18 @@ function ensureSchema() {
     `ALTER TABLE users ADD COLUMN created_at TEXT`,
     `ALTER TABLE users ADD COLUMN last_login_at TEXT`,
     `ALTER TABLE auth_sessions ADD COLUMN access_mode TEXT NOT NULL DEFAULT 'credentialed'`,
+    `ALTER TABLE auth_sessions ADD COLUMN mfa_verified_at TEXT`,
     // v2.8 — IoC parsing + cross-source dedupe.
     `ALTER TABLE osint_findings ADD COLUMN iocs TEXT NOT NULL DEFAULT '{}'`,
     `ALTER TABLE osint_findings ADD COLUMN content_hash TEXT`,
+    `ALTER TABLE osint_findings ADD COLUMN published_at_inferred INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE osint_findings ADD COLUMN publisher_severity TEXT`,
+    `ALTER TABLE osint_findings ADD COLUMN technical_severity TEXT`,
+    `ALTER TABLE osint_findings ADD COLUMN client_impact_severity TEXT`,
+    `ALTER TABLE osint_findings ADD COLUMN analyst_final_severity TEXT`,
+    `ALTER TABLE osint_findings ADD COLUMN analyst_severity_rationale TEXT`,
+    `ALTER TABLE osint_findings ADD COLUMN analyst_severity_at TEXT`,
+    `ALTER TABLE osint_findings ADD COLUMN analyst_severity_by TEXT`,
     // v2.16 — per-finding source-content cache + CIRT deep-dive cache.
     // The background analyzer fills these so deep-dive can return instantly
     // for already-analyzed findings instead of running a 60-120s live AI call.
@@ -360,6 +508,26 @@ function ensureSchema() {
     `ALTER TABLE osint_findings ADD COLUMN analyst_tags TEXT NOT NULL DEFAULT '[]'`,
     `ALTER TABLE osint_findings ADD COLUMN analyst_edited_at TEXT`,
     `ALTER TABLE osint_findings ADD COLUMN analyst_edited_by TEXT`,
+    // Batch Two — explicit analyst assessment and client profile tags.
+    `ALTER TABLE osint_findings ADD COLUMN analyst_assessment TEXT`,
+    `ALTER TABLE osint_findings ADD COLUMN analyst_disposition TEXT`,
+    `ALTER TABLE osint_findings ADD COLUMN analyst_confidence TEXT`,
+    `ALTER TABLE osint_findings ADD COLUMN analyst_impact TEXT`,
+    `ALTER TABLE osint_findings ADD COLUMN analyst_next_action TEXT`,
+    `ALTER TABLE osint_findings ADD COLUMN analyst_assessed_at TEXT`,
+    `ALTER TABLE osint_findings ADD COLUMN analyst_assessed_by TEXT`,
+    `ALTER TABLE osint_findings ADD COLUMN client_tags TEXT NOT NULL DEFAULT '[]'`,
+    `ALTER TABLE osint_findings ADD COLUMN ai_client_matches TEXT NOT NULL DEFAULT '[]'`,
+    `ALTER TABLE osint_findings ADD COLUMN client_match_decisions TEXT NOT NULL DEFAULT '{}'`,
+    `ALTER TABLE client_profiles ADD COLUMN mapping_terms TEXT NOT NULL DEFAULT '[]'`,
+    `ALTER TABLE client_profiles ADD COLUMN digest_enabled INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE client_profiles ADD COLUMN digest_cadence TEXT NOT NULL DEFAULT 'weekly'`,
+    `ALTER TABLE client_profiles ADD COLUMN digest_subject_template TEXT`,
+    `ALTER TABLE client_profiles ADD COLUMN digest_body_template TEXT`,
+    `ALTER TABLE client_profiles ADD COLUMN email_logo_url TEXT`,
+    `ALTER TABLE client_profiles ADD COLUMN last_digest_at TEXT`,
+    `ALTER TABLE detection_rules ADD COLUMN client_ids TEXT NOT NULL DEFAULT '[]'`,
+    `ALTER TABLE tenants ADD COLUMN operating_mode TEXT`,
     // v2.29 — AI categorisation of the intel item.
     //   threat_intel  — actionable threat advisory / incident report
     //   regular_report — quarterly landscape / vendor M-Trends-style review
@@ -384,13 +552,40 @@ function ensureSchema() {
     `ALTER TABLE threat_actors ADD COLUMN portrait_status TEXT NOT NULL DEFAULT 'idle'`,
   ];
   for (const stmt of alters) {
-    try { sqlite.exec(stmt); } catch { /* column already exists */ }
+    try {
+      sqlite.exec(stmt);
+    } catch {
+      /* column already exists */
+    }
   }
-  sqlite.prepare(`
+  sqlite
+    .prepare(
+      `
+    UPDATE tenants
+       SET operating_mode = 'mss'
+     WHERE operating_mode IS NULL
+       AND EXISTS (SELECT 1 FROM client_profiles WHERE client_profiles.tenant_id = tenants.id)
+  `,
+    )
+    .run();
+  sqlite
+    .prepare(
+      `
     UPDATE users
        SET account_type = 'platform'
      WHERE COALESCE(account_type, '') NOT IN ('client', 'platform')
-  `).run();
+  `,
+    )
+    .run();
+  sqlite
+    .prepare(
+      `
+    UPDATE client_profiles
+       SET digest_body_template = ?, updated_at = ?
+     WHERE digest_body_template = ?
+  `,
+    )
+    .run(DEFAULT_CLIENT_DIGEST_BODY_TEMPLATE, now(), LEGACY_CLIENT_DIGEST_BODY_TEMPLATE);
 
   // v2.16 — tenant-level background-job settings + indexes for the analyzer
   // queue. Idempotent.
@@ -474,7 +669,9 @@ function ensureSchema() {
     `ALTER TABLE ai_jobs ADD COLUMN heartbeat_at TEXT`,
   ];
   for (const stmt of aiJobAlters) {
-    try { sqlite.exec(stmt); } catch (e: any) {
+    try {
+      sqlite.exec(stmt);
+    } catch (e: any) {
       if (!/duplicate column/i.test(String(e?.message ?? ""))) throw e;
     }
   }
@@ -482,11 +679,15 @@ function ensureSchema() {
 
 function migrateCredentialSecretsOutOfPublicDb(): void {
   const migratedAi = sqlite.transaction(() => {
-    const rows = sqlite.prepare(`
+    const rows = sqlite
+      .prepare(
+        `
       SELECT id, tenant_id AS tenantId, api_key_enc AS apiKeyEnc
       FROM ai_providers
       WHERE api_key_enc IS NOT NULL AND api_key_enc != ''
-    `).all() as Array<{ id: string; tenantId: string; apiKeyEnc: string }>;
+    `,
+      )
+      .all() as Array<{ id: string; tenantId: string; apiKeyEnc: string }>;
     const clear = sqlite.prepare("UPDATE ai_providers SET api_key_enc = NULL WHERE id = ?");
     for (const row of rows) {
       secretStore.setSecret(row.tenantId, AI_PROVIDER_SECRET, row.id, "api_key", row.apiKeyEnc);
@@ -501,7 +702,11 @@ function migrateCredentialSecretsOutOfPublicDb(): void {
 }
 
 const DATA_DIR = resolve(process.cwd(), "data");
-try { mkdirSync(DATA_DIR, { recursive: true }); } catch { /* fs perms */ }
+try {
+  mkdirSync(DATA_DIR, { recursive: true });
+} catch {
+  /* fs perms */
+}
 
 function loadKek(): Buffer {
   const env = process.env.OPTRASIGHT_KEY_ENCRYPTION_KEY || process.env.OPTRASIGHT_KEK;
@@ -511,23 +716,20 @@ function loadKek(): Buffer {
   }
   const keyPath = join(DATA_DIR, ".optrasight-kek");
   try {
-    try {
+    if (existsSync(keyPath)) {
       const v = readFileSync(keyPath, "utf8").trim();
       if (v) return Buffer.from(v, "base64");
-    } catch (readErr: any) {
-      if (readErr?.code !== "ENOENT") throw readErr;
     }
     const key = randomBytes(32);
-    const fd = openSync(keyPath, "wx", 0o600);
+    writeFileSync(keyPath, key.toString("base64"), { mode: 0o600 });
     try {
-      writeFileSync(fd, key.toString("base64"));
-    } finally {
-      closeSync(fd);
+      chmodSync(keyPath, 0o600);
+    } catch {
+      /* best-effort */
     }
-    try { chmodSync(keyPath, 0o600); } catch { /* best-effort */ }
     return key;
-  } catch (err) {
-    throw new Error(`Unable to initialize OptraSight key-encryption key: ${(err as Error).message}`);
+  } catch {
+    return createHash("sha256").update(`optrasight-local-${process.cwd()}`).digest();
   }
 }
 
@@ -549,7 +751,9 @@ const dec = (s: string | null | undefined) => {
       return Buffer.concat([decipher.update(Buffer.from(bodyB64, "base64")), decipher.final()]).toString("utf8");
     }
     return Buffer.from(s, "base64").toString("utf8");
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 };
 const mask = (s: string) =>
   s.length <= 4 ? "•".repeat(s.length) : "•".repeat(Math.max(4, s.length - 4)) + s.slice(-4);
@@ -614,10 +818,11 @@ function totpCode(secretBase32: string, step: number): string {
   counter.writeBigUInt64BE(BigInt(step));
   const digest = createHmac("sha1", base32Decode(secretBase32)).update(counter).digest();
   const offset = digest[digest.length - 1] & 0x0f;
-  const binary = ((digest[offset] & 0x7f) << 24)
-    | ((digest[offset + 1] & 0xff) << 16)
-    | ((digest[offset + 2] & 0xff) << 8)
-    | (digest[offset + 3] & 0xff);
+  const binary =
+    ((digest[offset] & 0x7f) << 24) |
+    ((digest[offset + 1] & 0xff) << 16) |
+    ((digest[offset + 2] & 0xff) << 8) |
+    (digest[offset + 3] & 0xff);
   return String(binary % 1_000_000).padStart(6, "0");
 }
 
@@ -635,19 +840,29 @@ function tokenHash(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
-function issueSession(userId: string, accessMode: "credentialed" | "guest" = "credentialed"): string {
+function issueSession(
+  userId: string,
+  accessMode: "credentialed" | "guest" = "credentialed",
+  mfaVerified = false,
+): string {
   const token = randomBytes(32).toString("base64url");
   const ts = now();
-  sqlite.prepare(`
-    INSERT INTO auth_sessions (token_hash, user_id, access_mode, issued_at, last_used_at, revoked_at)
-    VALUES (?, ?, ?, ?, ?, NULL)
-  `).run(tokenHash(token), userId, accessMode, ts, ts);
+  sqlite
+    .prepare(
+      `
+    INSERT INTO auth_sessions (token_hash, user_id, access_mode, issued_at, last_used_at, mfa_verified_at, revoked_at)
+    VALUES (?, ?, ?, ?, ?, ?, NULL)
+  `,
+    )
+    .run(tokenHash(token), userId, accessMode, ts, ts, mfaVerified ? ts : null);
   return token;
 }
 
 export const SESSION_ABSOLUTE_MS = Number(process.env.OPTRASIGHT_SESSION_ABSOLUTE_MS || 24 * 60 * 60 * 1000);
 export const SESSION_IDLE_TIMEOUT_MS = Number(process.env.OPTRASIGHT_SESSION_IDLE_MS || 12 * 60 * 60 * 1000);
-export const ADMIN_SESSION_ABSOLUTE_MS = Number(process.env.OPTRASIGHT_ADMIN_SESSION_ABSOLUTE_MS || 12 * 60 * 60 * 1000);
+export const ADMIN_SESSION_ABSOLUTE_MS = Number(
+  process.env.OPTRASIGHT_ADMIN_SESSION_ABSOLUTE_MS || 12 * 60 * 60 * 1000,
+);
 export const ADMIN_SESSION_IDLE_TIMEOUT_MS = Number(process.env.OPTRASIGHT_ADMIN_SESSION_IDLE_MS || 60 * 60 * 1000);
 const SESSION_IDLE_TOUCH_MS = Number(process.env.OPTRASIGHT_SESSION_TOUCH_MS || 5 * 60 * 1000);
 const AUTH_LOCK_THRESHOLD = Number(process.env.OPTRASIGHT_AUTH_LOCK_THRESHOLD || 5);
@@ -684,36 +899,42 @@ function userLockedUntil(user: Pick<User, "accountLockedUntil">): string | null 
 
 function recordAuthFailure(uid: string, kind: "login" | "mfa"): void {
   const col = kind === "login" ? "failed_login_count" : "failed_mfa_count";
-  const row = sqlite.prepare(`SELECT COALESCE(${col}, 0) AS n FROM users WHERE id = ?`).get(uid) as { n: number } | undefined;
+  const row = sqlite.prepare(`SELECT COALESCE(${col}, 0) AS n FROM users WHERE id = ?`).get(uid) as
+    | { n: number }
+    | undefined;
   const next = Number(row?.n || 0) + 1;
-  const lockedUntil = next >= AUTH_LOCK_THRESHOLD
-    ? new Date(Date.now() + AUTH_LOCK_MS).toISOString()
-    : null;
-  sqlite.prepare(`
+  const lockedUntil = next >= AUTH_LOCK_THRESHOLD ? new Date(Date.now() + AUTH_LOCK_MS).toISOString() : null;
+  sqlite
+    .prepare(
+      `
     UPDATE users
     SET ${col} = ?,
         account_locked_until = COALESCE(?, account_locked_until)
     WHERE id = ?
-  `).run(next, lockedUntil, uid);
+  `,
+    )
+    .run(next, lockedUntil, uid);
 }
 
 function clearAuthFailures(uid: string): void {
-  sqlite.prepare(`
+  sqlite
+    .prepare(
+      `
     UPDATE users
     SET failed_login_count = 0,
         failed_mfa_count = 0,
         account_locked_until = NULL
     WHERE id = ?
-  `).run(uid);
+  `,
+    )
+    .run(uid);
 }
 
 function accessModeForRole(role: string): "credentialed" | "guest" {
   return role === "reviewer" ? "guest" : "credentialed";
 }
 
-function aiProviderSecret(
-  row: Pick<AiProvider, "tenantId" | "id" | "apiKeyEnc"> | null | undefined,
-): string | null {
+function aiProviderSecret(row: Pick<AiProvider, "tenantId" | "id" | "apiKeyEnc"> | null | undefined): string | null {
   if (!row) return null;
   return secretStore.getSecret(row.tenantId, AI_PROVIDER_SECRET, row.id, "api_key") ?? row.apiKeyEnc ?? null;
 }
@@ -731,10 +952,195 @@ function aiProviderHasSecret(row: Pick<AiProvider, "tenantId" | "id" | "apiKeyEn
 const j = (v: unknown) => JSON.stringify(v ?? []);
 const p = <T = any>(v: string | null | undefined, d: T): T => {
   if (!v) return d;
-  try { return JSON.parse(v) as T; } catch { return d; }
+  try {
+    return JSON.parse(v) as T;
+  } catch {
+    return d;
+  }
 };
 const now = () => new Date().toISOString();
 const id = () => randomUUID();
+
+type InternalTaxonomyOption = ClientTaxonomyOptionDTO & { legacyId?: string };
+
+function stableTaxonomyId(kind: ClientTaxonomyKind, sourceId: string): string {
+  const hex = createHash("sha256")
+    .update(`optrasight-taxonomy\0${kind}\0${sourceId}`)
+    .digest("hex")
+    .slice(0, 32)
+    .split("");
+  hex[12] = "5";
+  hex[16] = ((parseInt(hex[16], 16) & 0x3) | 0x8).toString(16);
+  return `${hex.slice(0, 8).join("")}-${hex.slice(8, 12).join("")}-${hex.slice(12, 16).join("")}-${hex.slice(16, 20).join("")}-${hex.slice(20).join("")}`;
+}
+
+function taxonomyFingerprint(kind: ClientTaxonomyKind, label: string): string {
+  const normalized = label
+    .normalize("NFKC")
+    .trim()
+    .toLocaleLowerCase("en-US")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+  return createHash("sha256").update(`${kind}\0${normalized}`).digest("hex");
+}
+
+function builtInTaxonomyOptions(): InternalTaxonomyOption[] {
+  return [
+    ...GEOS.map((option) => ({
+      id: stableTaxonomyId("geo", option.id),
+      kind: "geo" as const,
+      label: option.label,
+      aliases: [],
+      source: "built_in" as const,
+      optionKind: option.kind,
+      legacyId: option.id,
+    })),
+    ...INDUSTRIES.map((option) => ({
+      id: stableTaxonomyId("industry", option.id),
+      kind: "industry" as const,
+      label: option.label,
+      aliases:
+        option.id === "CRITICAL_INFRA"
+          ? ["Critical National Infrastructure", "CNI", "Essential Services", "Operational Technology", "OT / ICS"]
+          : [],
+      source: "built_in" as const,
+      legacyId: option.id,
+    })),
+    ...MONITORED_TECHNOLOGIES.map((option) => ({
+      id: stableTaxonomyId("technology", option.id),
+      kind: "technology" as const,
+      label: option.label,
+      aliases: [],
+      source: "built_in" as const,
+      category: option.category,
+      legacyId: option.id,
+    })),
+  ];
+}
+
+function customTaxonomyOptions(tid: string): InternalTaxonomyOption[] {
+  const rows = sqlite
+    .prepare(
+      `
+    SELECT id, kind, label, aliases
+    FROM client_taxonomy_options
+    WHERE tenant_id = ?
+    ORDER BY kind, label
+  `,
+    )
+    .all(tid) as Array<{ id: string; kind: ClientTaxonomyKind; label: string; aliases: string }>;
+  return rows.map((row) => ({
+    id: row.id,
+    kind: row.kind,
+    label: row.label,
+    aliases: p<string[]>(row.aliases, []),
+    source: "custom",
+  }));
+}
+
+function taxonomyOptionsForTenant(tid: string): InternalTaxonomyOption[] {
+  return [...builtInTaxonomyOptions(), ...customTaxonomyOptions(tid)];
+}
+
+function migrateLegacyScopeIds(
+  values: string[],
+  kind: ClientTaxonomyKind,
+  options: InternalTaxonomyOption[],
+): string[] {
+  const allowed = new Set(options.filter((option) => option.kind === kind).map((option) => option.id));
+  const legacy = new Map(
+    options.filter((option) => option.kind === kind && option.legacyId).map((option) => [option.legacyId!, option.id]),
+  );
+  return Array.from(
+    new Set(
+      values
+        .map((value) => (allowed.has(value) ? value : legacy.get(value)))
+        .filter((value): value is string => !!value),
+    ),
+  );
+}
+
+function ensureDefaultClientProfile(tid: string): void {
+  const existing = sqlite.prepare("SELECT id FROM client_profiles WHERE tenant_id = ? LIMIT 1").get(tid);
+  if (existing) return;
+  const tenant = sqlite.prepare("SELECT name FROM tenants WHERE id = ?").get(tid) as { name: string } | undefined;
+  if (!tenant) return;
+  const scope = sqlite.prepare("SELECT * FROM tenant_scopes WHERE tenant_id = ?").get(tid) as any;
+  const options = taxonomyOptionsForTenant(tid);
+  const ts = now();
+  sqlite
+    .prepare(
+      `
+    INSERT INTO client_profiles (
+      id, tenant_id, name, client_types, geo_ids, industry_ids,
+      technology_ids, mapping_terms, notification_emails, is_active, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+  `,
+    )
+    .run(
+      id(),
+      tid,
+      tenant.name,
+      j(p<string[]>(scope?.client_types, [])),
+      j(migrateLegacyScopeIds(p<string[]>(scope?.geos, []), "geo", options)),
+      j(migrateLegacyScopeIds(p<string[]>(scope?.industries, []), "industry", options)),
+      j(migrateLegacyScopeIds(p<string[]>(scope?.monitored_technologies, []), "technology", options)),
+      "[]",
+      j(p<string[]>(scope?.notification_emails, [])),
+      ts,
+      ts,
+    );
+}
+
+function clientProfileRowToDto(row: any): ClientProfileDTO {
+  return {
+    id: row.id,
+    tenantId: row.tenant_id,
+    name: row.name,
+    clientTypes: p<string[]>(row.client_types, []),
+    geos: p<string[]>(row.geo_ids, []),
+    industries: p<string[]>(row.industry_ids, []),
+    monitoredTechnologies: p<string[]>(row.technology_ids, []),
+    mappingTerms: p<string[]>(row.mapping_terms, []),
+    notificationEmails: p<string[]>(row.notification_emails, []),
+    digestEnabled: Number(row.digest_enabled) === 1,
+    digestCadence: (row.digest_cadence || "weekly") as ClientProfileDTO["digestCadence"],
+    digestSubjectTemplate: row.digest_subject_template || DEFAULT_CLIENT_DIGEST_SUBJECT_TEMPLATE,
+    digestBodyTemplate: row.digest_body_template || DEFAULT_CLIENT_DIGEST_BODY_TEMPLATE,
+    emailLogoUrl: row.email_logo_url ?? null,
+    lastDigestAt: row.last_digest_at ?? null,
+    isActive: Number(row.is_active) === 1,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function clientDigestRowToDto(row: any): ClientDigestDTO {
+  return {
+    id: row.id,
+    clientId: row.client_id,
+    cadence: row.cadence,
+    periodStart: row.period_start,
+    periodEnd: row.period_end,
+    recipients: p<string[]>(row.recipients, []),
+    subject: row.subject,
+    bodyMd: row.body_md,
+    findingIds: p<string[]>(row.finding_ids, []),
+    status: row.status,
+    aiProviderLabel: row.ai_provider_label ?? null,
+    createdAt: row.created_at,
+    createdBy: row.created_by,
+    reviewedAt: row.reviewed_at ?? null,
+    reviewedBy: row.reviewed_by ?? null,
+  };
+}
+
+const CLIENT_DIGEST_DAYS: Record<ClientProfileDTO["digestCadence"], number> = {
+  daily: 1,
+  weekly: 7,
+  biweekly: 14,
+  monthly: 30,
+};
 
 const BATCH_ONE_WORKSPACE_PROFILE = {
   clientTypes: ["Threat Intelligence"],
@@ -743,9 +1149,24 @@ const BATCH_ONE_WORKSPACE_PROFILE = {
   monitoredTechnologies: ["osint", "threat-intelligence", "detection-engineering"],
 };
 const BATCH_ONE_AI_CONTEXT = {
-  industries: BATCH_ONE_WORKSPACE_PROFILE.industries,
-  geos: BATCH_ONE_WORKSPACE_PROFILE.geos,
-  monitoredTechnologies: BATCH_ONE_WORKSPACE_PROFILE.monitoredTechnologies,
+  clients: [
+    {
+      id: stableTaxonomyId("industry", "batch-one-workspace-client"),
+      name: "Batch One Workspace",
+      clientTypes: ["TI"],
+      matchingScope: "cti_subscription" as const,
+      mappingTerms: [],
+      geographies: [{ id: stableTaxonomyId("geo", "GLOBAL"), label: "Global", aliases: [] }],
+      industries: [
+        { id: stableTaxonomyId("industry", "SECURITY_OPERATIONS"), label: "Security operations", aliases: [] },
+      ],
+      technologies: [
+        { id: stableTaxonomyId("technology", "osint"), label: "OSINT", aliases: [] },
+        { id: stableTaxonomyId("technology", "threat-intelligence"), label: "Threat intelligence", aliases: [] },
+        { id: stableTaxonomyId("technology", "detection-engineering"), label: "Detection engineering", aliases: [] },
+      ],
+    },
+  ],
 };
 
 /** v2.30 — safe JSON parse helpers for the new analytics columns. Defensive
@@ -756,7 +1177,9 @@ function parseJsonArray<T = unknown>(raw: unknown): T[] | null {
   try {
     const v = JSON.parse(String(raw));
     return Array.isArray(v) ? (v as T[]) : null;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 function parseAttackTechniques(raw: unknown): Array<{ id: string; name?: string; tactic?: string }> | null {
   const arr = parseJsonArray<any>(raw);
@@ -773,7 +1196,8 @@ function parseAttackTechniques(raw: unknown): Array<{ id: string; name?: string;
 // ---------- seeding ----------
 const SEED_TENANTS = [
   {
-    name: "BatchOne Workspace", slug: "batchone-workspace",
+    name: "BatchOne Workspace",
+    slug: "batchone-workspace",
     keywords: ["optrasight", "batchone", "threat-intel"],
     domains: ["example.org"],
     ipRanges: ["203.0.113.0/24"],
@@ -786,31 +1210,27 @@ const SEED_TENANTS = [
   },
 ];
 
-const BLOCKED_INITIAL_PASSWORD_SCRYPTS = [
-  Buffer.from("SJ5Gc6rf+bvcydKkoA3oi33e6ph2OmYLPjnu/saoHVI=", "base64"),
-  Buffer.from("ALp9U58x6iRKyX53vx1kvp+uK6yJeSzuuESSLLH+6VM=", "base64"),
-];
+const BLOCKED_INITIAL_PASSWORD_SHA256 = new Set([
+  "ec62f5d9f10bb6ab56516e28978e1a5e1bfe2ffc40f3b0cc990efc49f9ce621b",
+  "833126ae95cdb91fe9e83ec1944bdbc7a73bfb36c861f71e9464423f8062ac91",
+]);
 
 function isBlockedInitialPassword(value: string): boolean {
-  const digest = scryptSync(value, "optrasight-seed-password-blocklist-v1", 32, { N: 16384, r: 8, p: 1 });
-  return BLOCKED_INITIAL_PASSWORD_SCRYPTS.some((blocked) => timingSafeEqual(blocked, digest));
+  const digest = createHash("sha256").update(value, "utf8").digest("hex");
+  return BLOCKED_INITIAL_PASSWORD_SHA256.has(digest);
 }
 
 const AI_PROVIDER_SEED_DEFAULTS: Array<{ provider: AiProviderKind; label: string; model: string }> = [
-  { provider: "openai", label: "OpenAI", model: "gpt-5.4-mini" },
-  { provider: "anthropic", label: "Anthropic", model: "claude-sonnet-4-6" },
-  { provider: "gemini", label: "Google Gemini", model: "gemini-flash-latest" },
+  { provider: "openai", label: "OpenAI", model: "gpt-5.6" },
+  { provider: "anthropic", label: "Anthropic", model: "claude-sonnet-5" },
+  { provider: "gemini", label: "Google Gemini", model: "gemini-3.6-flash" },
   { provider: "perplexity", label: "Perplexity", model: "sonar-pro" },
   { provider: "deepseek", label: "DeepSeek", model: "deepseek-v4-flash" },
   { provider: "kimi", label: "Kimi (Moonshot)", model: "kimi-k2.6" },
   { provider: "ollama", label: "Ollama (local)", model: "llama3.1:8b" },
 ];
 
-const AI_PROVIDER_DEFAULT_MODEL_BY_KIND = new Map(
-  AI_PROVIDER_SEED_DEFAULTS.map((p) => [p.provider, p.model]),
-);
-
-const ALLOWED_IOC_BUCKETS = new Set<string>(IOC_TYPES);
+const AI_PROVIDER_DEFAULT_MODEL_BY_KIND = new Map(AI_PROVIDER_SEED_DEFAULTS.map((p) => [p.provider, p.model]));
 
 const STALE_SEEDED_AI_MODELS = new Set([
   "gpt-4o-mini",
@@ -819,6 +1239,10 @@ const STALE_SEEDED_AI_MODELS = new Set([
   "gemini-1.5-pro",
   "gemini-2.5-flash",
   "gemini-2.5-pro",
+  "gemini-flash-latest",
+  "gemini-3-flash",
+  "gemini-3-flash-preview",
+  "gemini-3.1-flash-lite",
   "deepseek-chat",
   "deepseek-reasoner",
   "sonar-large",
@@ -852,15 +1276,26 @@ function seedAiProvidersIfEmpty(tenantId: string) {
   }
   for (const p of AI_PROVIDER_SEED_DEFAULTS) {
     const pid = id();
-    db.insert(aiProviders).values({
-      id: pid, tenantId, provider: p.provider, label: p.label, model: p.model,
-      baseUrl: null,
-      apiKeyEnc: null,
-      apiKeyMask: null,
-      enabled: 0, isDefault: 0,
-      lastTestedAt: null, lastTestOk: null, lastTestMessage: null,
-      config: "{}", createdAt: now(), updatedAt: now(),
-    }).run();
+    db.insert(aiProviders)
+      .values({
+        id: pid,
+        tenantId,
+        provider: p.provider,
+        label: p.label,
+        model: p.model,
+        baseUrl: null,
+        apiKeyEnc: null,
+        apiKeyMask: null,
+        enabled: 0,
+        isDefault: 0,
+        lastTestedAt: null,
+        lastTestOk: null,
+        lastTestMessage: null,
+        config: "{}",
+        createdAt: now(),
+        updatedAt: now(),
+      })
+      .run();
   }
 }
 
@@ -873,7 +1308,7 @@ function providerSupportsAiTask(provider: Pick<AiProvider, "provider"> | undefin
 function seedOsintSourcesIfEmpty() {
   const upsert = sqlite.prepare(`
     INSERT INTO osint_sources (id, category, name, url, language, region, reliability, enabled)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       category = excluded.category,
       name = excluded.name,
@@ -883,15 +1318,29 @@ function seedOsintSourcesIfEmpty() {
       reliability = excluded.reliability
   `);
   const tx = sqlite.transaction((rows: typeof OSINT_SOURCES) => {
-    for (const s of rows) upsert.run(s.id, s.category, s.name, s.url, s.language ?? "en", s.region ?? null, s.reliability ?? "B");
+    for (const s of rows)
+      upsert.run(
+        s.id,
+        s.category,
+        s.name,
+        s.url,
+        s.language ?? "en",
+        s.region ?? null,
+        s.reliability ?? "B",
+        s.enabled === false ? 0 : 1,
+      );
     const keep = rows.map((s) => s.id);
     if (keep.length > 0) {
       const placeholders = keep.map(() => "?").join(",");
-      sqlite.prepare(`
+      sqlite
+        .prepare(
+          `
         DELETE FROM osint_sources
         WHERE id NOT IN (${placeholders})
           AND id NOT IN (SELECT DISTINCT source_id FROM osint_findings)
-      `).run(...keep);
+      `,
+        )
+        .run(...keep);
     }
     if (REMOVED_OSINT_SOURCE_IDS.length > 0) {
       const removedPlaceholders = REMOVED_OSINT_SOURCE_IDS.map(() => "?").join(",");
@@ -909,14 +1358,24 @@ function seedIfEmpty() {
   for (const s of SEED_TENANTS) {
     const tid = id();
     if (!firstTenantId) firstTenantId = tid;
-    db.insert(tenants).values({
-      id: tid, name: s.name, slug: s.slug, plan: "pro", createdAt: now(),
-    }).run();
-    db.insert(tenantScopes).values({
-      tenantId: tid, brandKeywords: j(s.keywords),
-      monitoredDomains: j(s.domains), ipRanges: j(s.ipRanges),
-      executiveEmails: j([]),
-    }).run();
+    db.insert(tenants)
+      .values({
+        id: tid,
+        name: s.name,
+        slug: s.slug,
+        plan: "pro",
+        createdAt: now(),
+      })
+      .run();
+    db.insert(tenantScopes)
+      .values({
+        tenantId: tid,
+        brandKeywords: j(s.keywords),
+        monitoredDomains: j(s.domains),
+        ipRanges: j(s.ipRanges),
+        executiveEmails: j([]),
+      })
+      .run();
     // seed AI providers per tenant (so the AI Setup page is pre-populated)
     seedAiProvidersIfEmpty(tid);
 
@@ -931,28 +1390,38 @@ function seedIfEmpty() {
       };
       const existingScope = db.select().from(tenantScopes).where(eq(tenantScopes.tenantId, tid)).get();
       if (existingScope) {
-        db.update(tenantScopes).set(profilePayload as any).where(eq(tenantScopes.tenantId, tid)).run();
+        db.update(tenantScopes)
+          .set(profilePayload as any)
+          .where(eq(tenantScopes.tenantId, tid))
+          .run();
       } else {
-        db.insert(tenantScopes).values({ tenantId: tid, ...(profilePayload as any) }).run();
+        db.insert(tenantScopes)
+          .values({ tenantId: tid, ...(profilePayload as any) })
+          .run();
       }
     }
   }
 
   // Platform admin seed account for local BatchOne administration.
   if (firstTenantId) {
-    db.insert(users).values({
-      id: id(), tenantId: firstTenantId,
-      email: "admin@cep.com", password: hashPassword("ChangeMe!2026Admin"), role: "admin",
-      accountType: "platform",
-      displayName: "Seed Platform Admin",
-      status: "active",
-      passwordMustChange: true,
-      mfaEnabled: false,
-      mfaSecretEnc: null,
-      mfaVerifiedAt: null,
-      createdAt: now(),
-      lastLoginAt: null,
-    }).run();
+    db.insert(users)
+      .values({
+        id: id(),
+        tenantId: firstTenantId,
+        email: "admin@cep.com",
+        password: hashPassword("ChangeMe!2026Admin"),
+        role: "admin",
+        accountType: "platform",
+        displayName: "Seed Platform Admin",
+        status: "active",
+        passwordMustChange: true,
+        mfaEnabled: false,
+        mfaSecretEnc: null,
+        mfaVerifiedAt: null,
+        createdAt: now(),
+        lastLoginAt: null,
+      })
+      .run();
   }
 }
 
@@ -962,9 +1431,13 @@ function ensureAiProvidersForExistingWorkspaces() {
   }
 }
 
-function platformUserForBatchOne<T extends Omit<User, "password"> & {
-  tenantName?: string | null; tenantSlug?: string | null; tenantPlan?: string | null;
-}>(row: T): T {
+function platformUserForBatchOne<
+  T extends Omit<User, "password"> & {
+    tenantName?: string | null;
+    tenantSlug?: string | null;
+    tenantPlan?: string | null;
+  },
+>(row: T): T {
   return row;
 }
 
@@ -977,7 +1450,12 @@ function ensurePlatformSeedUsers() {
   if (!firstTenant) return;
   const seeds = [
     { email: "admin@cep.com", password: "ChangeMe!2026Admin", role: "admin", displayName: "Seed Platform Admin" },
-    { email: "reviewer@cep.com", password: "ChangeMe!2026Review", role: "reviewer", displayName: "Seed Read-only Reviewer" },
+    {
+      email: "reviewer@cep.com",
+      password: "ChangeMe!2026Review",
+      role: "reviewer",
+      displayName: "Seed Read-only Reviewer",
+    },
   ];
   for (const seed of seeds) {
     const existing = db.select().from(users).where(eq(users.email, seed.email)).get();
@@ -987,27 +1465,32 @@ function ensurePlatformSeedUsers() {
         patch.passwordMustChange = true;
       }
       if (Object.keys(patch).length > 0) {
-        db.update(users).set(patch as any).where(eq(users.id, existing.id)).run();
+        db.update(users)
+          .set(patch as any)
+          .where(eq(users.id, existing.id))
+          .run();
       }
       continue;
     }
     const uid = id();
-    db.insert(users).values({
-      id: uid,
-      tenantId: firstTenant.id,
-      email: seed.email,
-      password: hashPassword(seed.password),
-      role: seed.role,
-      accountType: "platform",
-      displayName: seed.displayName,
-      status: "active",
-      passwordMustChange: true,
-      mfaEnabled: false,
-      mfaSecretEnc: null,
-      mfaVerifiedAt: null,
-      createdAt: now(),
-      lastLoginAt: null,
-    }).run();
+    db.insert(users)
+      .values({
+        id: uid,
+        tenantId: firstTenant.id,
+        email: seed.email,
+        password: hashPassword(seed.password),
+        role: seed.role,
+        accountType: "platform",
+        displayName: seed.displayName,
+        status: "active",
+        passwordMustChange: true,
+        mfaEnabled: false,
+        mfaSecretEnc: null,
+        mfaVerifiedAt: null,
+        createdAt: now(),
+        lastLoginAt: null,
+      })
+      .run();
   }
 }
 
@@ -1046,7 +1529,9 @@ setTimeout(() => {
     for (const { id: tid } of tids) {
       try {
         total += storage.backfillThreatActorsFromExistingData(tid, { createdBy: "system" });
-      } catch (e) { console.warn(`[tap] backfill failed for tenant ${tid}`, e); }
+      } catch (e) {
+        console.warn(`[tap] backfill failed for tenant ${tid}`, e);
+      }
     }
     if (total > 0) console.log(`[tap] startup backfill: inserted ${total} shell threat-actor profiles`);
   } catch (e) {
@@ -1079,9 +1564,7 @@ setTimeout(() => {
 function migrateHuntQueriesToDetectionRules(): void {
   let hqRows: any[] = [];
   try {
-    hqRows = sqlite.prepare(
-      "SELECT * FROM hunt_queries ORDER BY created_at ASC"
-    ).all() as any[];
+    hqRows = sqlite.prepare("SELECT * FROM hunt_queries ORDER BY created_at ASC").all() as any[];
   } catch {
     return; // table missing on first boot
   }
@@ -1096,18 +1579,27 @@ function migrateHuntQueriesToDetectionRules(): void {
   for (const hq of hqRows) {
     const ruleId = `migrated:${hq.id}`;
     // Idempotency: skip if a peer detection_rule already exists.
-    const existing = sqlite.prepare(
-      "SELECT id FROM detection_rules WHERE tenant_id = ? AND id = ?"
-    ).get(hq.tenant_id, ruleId);
-    if (existing) { skipped += 1; continue; }
+    const existing = sqlite
+      .prepare("SELECT id FROM detection_rules WHERE tenant_id = ? AND id = ?")
+      .get(hq.tenant_id, ruleId);
+    if (existing) {
+      skipped += 1;
+      continue;
+    }
 
     // Parse JSON columns defensively.
     let findingIds: string[] = [];
-    try { findingIds = JSON.parse(hq.source_finding_ids || "[]"); } catch {}
+    try {
+      findingIds = JSON.parse(hq.source_finding_ids || "[]");
+    } catch {}
     let affectedTech: string[] = [];
-    try { affectedTech = JSON.parse(hq.affected_tech || "[]"); } catch {}
+    try {
+      affectedTech = JSON.parse(hq.affected_tech || "[]");
+    } catch {}
     let rawQueries: Record<string, unknown> = {};
-    try { rawQueries = JSON.parse(hq.queries || "{}") || {}; } catch {}
+    try {
+      rawQueries = JSON.parse(hq.queries || "{}") || {};
+    } catch {}
 
     // Split sigma out, normalise everything else to a single string per SIEM.
     let sigmaYaml: string | null = null;
@@ -1115,7 +1607,9 @@ function migrateHuntQueriesToDetectionRules(): void {
     for (const [k, v] of Object.entries(rawQueries)) {
       const flat = Array.isArray(v)
         ? v.filter((x) => typeof x === "string" && x.trim().length > 0).join("\n\n")
-        : (typeof v === "string" ? v : "");
+        : typeof v === "string"
+          ? v
+          : "";
       if (!flat) continue;
       if (k === "sigma") sigmaYaml = flat;
       else queries[k] = flat;
@@ -1127,13 +1621,19 @@ function migrateHuntQueriesToDetectionRules(): void {
     let severity = SEVERITY_FALLBACK;
     const techSet = new Set<string>(affectedTech);
     const actorSet = new Set<string>();
+    const clientSet = new Set<string>();
     for (const fid of findingIds) {
-      const f = sqlite.prepare(
-        "SELECT severity, affected_tech, threat_actors FROM osint_findings WHERE tenant_id = ? AND id = ?"
-      ).get(hq.tenant_id, fid) as any | undefined;
+      const f = sqlite
+        .prepare(
+          "SELECT severity, affected_tech, threat_actors, client_tags FROM osint_findings WHERE tenant_id = ? AND id = ?",
+        )
+        .get(hq.tenant_id, fid) as any | undefined;
       if (!f) continue;
       const r = sevRank[String(f.severity || "").toLowerCase()] ?? -1;
-      if (r > bestSev) { bestSev = r; severity = String(f.severity).toLowerCase(); }
+      if (r > bestSev) {
+        bestSev = r;
+        severity = String(f.severity).toLowerCase();
+      }
       try {
         const at = JSON.parse(f.affected_tech || "[]");
         if (Array.isArray(at)) at.forEach((x) => typeof x === "string" && techSet.add(x));
@@ -1142,26 +1642,45 @@ function migrateHuntQueriesToDetectionRules(): void {
         const ta = JSON.parse(f.threat_actors || "[]");
         if (Array.isArray(ta)) ta.forEach((x) => typeof x === "string" && actorSet.add(x));
       } catch {}
+      try {
+        const ct = JSON.parse(f.client_tags || "[]");
+        if (Array.isArray(ct)) ct.forEach((x) => typeof x === "string" && clientSet.add(x));
+      } catch {}
     }
     // Severity must be one of the RuleSeverity values; collapse 'info' → 'low'.
     if (severity === "info") severity = "low";
     if (!sevRank[severity] && severity !== "low") severity = SEVERITY_FALLBACK;
 
     try {
-      sqlite.prepare(`INSERT INTO detection_rules (
+      sqlite
+        .prepare(
+          `INSERT INTO detection_rules (
         id, tenant_id, title, description, source_finding_ids, status, severity,
-        mitre_techniques, affected_tech, threat_actors, sigma_yaml, queries, notes,
+        mitre_techniques, affected_tech, threat_actors, client_ids, sigma_yaml, queries, notes,
         version, ai_provider_label, created_at, updated_at, created_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-        ruleId, hq.tenant_id, hq.title || "Migrated hunt query",
-        hq.description ?? null,
-        JSON.stringify(findingIds), "draft", severity,
-        "[]", JSON.stringify(Array.from(techSet)), JSON.stringify(Array.from(actorSet)),
-        sigmaYaml, JSON.stringify(queries),
-        "Migrated from legacy hunt query (v2.30.2.1). Original hunt-query id: " + hq.id,
-        1, hq.ai_provider_label ?? null,
-        hq.created_at || ts, ts, hq.created_by || "system",
-      );
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          ruleId,
+          hq.tenant_id,
+          hq.title || "Migrated hunt query",
+          hq.description ?? null,
+          JSON.stringify(findingIds),
+          "draft",
+          severity,
+          "[]",
+          JSON.stringify(Array.from(techSet)),
+          JSON.stringify(Array.from(actorSet)),
+          JSON.stringify(Array.from(clientSet)),
+          sigmaYaml,
+          JSON.stringify(queries),
+          "Migrated from legacy hunt query (v2.30.2.1). Original hunt-query id: " + hq.id,
+          1,
+          hq.ai_provider_label ?? null,
+          hq.created_at || ts,
+          ts,
+          hq.created_by || "system",
+        );
       migrated += 1;
     } catch (e) {
       console.warn(`[migrate-hq->dr] failed to migrate hunt_query ${hq.id}:`, e);
@@ -1173,8 +1692,51 @@ function migrateHuntQueriesToDetectionRules(): void {
   }
 }
 
-try { migrateHuntQueriesToDetectionRules(); } catch (e) {
+try {
+  migrateHuntQueriesToDetectionRules();
+} catch (e) {
   console.warn("[migrate-hq->dr] migration failed", e);
+}
+
+function backfillDetectionRuleClientIds(): void {
+  const rules = sqlite
+    .prepare("SELECT id, tenant_id, source_finding_ids, client_ids FROM detection_rules")
+    .all() as Array<{ id: string; tenant_id: string; source_finding_ids: string; client_ids: string }>;
+  let updated = 0;
+  for (const rule of rules) {
+    const existing = p<string[]>(rule.client_ids, []);
+    if (existing.length > 0) continue;
+    const findingIds = p<string[]>(rule.source_finding_ids, []);
+    if (findingIds.length === 0) continue;
+    const allowed = new Set(
+      (
+        sqlite
+          .prepare("SELECT id FROM client_profiles WHERE tenant_id = ? AND is_active = 1")
+          .all(rule.tenant_id) as Array<{ id: string }>
+      ).map((profile) => profile.id),
+    );
+    const clientIds = new Set<string>();
+    for (const findingId of findingIds) {
+      const row = sqlite
+        .prepare("SELECT client_tags FROM osint_findings WHERE tenant_id = ? AND id = ?")
+        .get(rule.tenant_id, findingId) as { client_tags?: string } | undefined;
+      for (const clientId of p<string[]>(row?.client_tags, [])) {
+        if (allowed.has(clientId)) clientIds.add(clientId);
+      }
+    }
+    if (clientIds.size === 0) continue;
+    sqlite
+      .prepare("UPDATE detection_rules SET client_ids = ? WHERE tenant_id = ? AND id = ?")
+      .run(j(Array.from(clientIds).slice(0, 32)), rule.tenant_id, rule.id);
+    updated += 1;
+  }
+  if (updated > 0) console.log(`[detection-rules] client scope backfilled=${updated}`);
+}
+
+try {
+  backfillDetectionRuleClientIds();
+} catch (e) {
+  console.warn("[detection-rules] client scope backfill failed", e);
 }
 
 // ---------- OSINT source enrichment helpers ----------
@@ -1188,25 +1750,25 @@ try { migrateHuntQueriesToDetectionRules(); } catch (e) {
  */
 const SOURCE_NAME_TRANSLATIONS: Record<string, string> = {
   // Mainland China
-  "CNVD — China National Vuln DB":                "CNVD — China National Vulnerability Database",
+  "CNVD — China National Vuln DB": "CNVD — China National Vulnerability Database",
   "CNNVD — China National Information Security": "CNNVD — China National Information Security Vulnerability Database",
   // Russia
-  "BDU FSTEC (Russia)":                            "BDU FSTEC — Russian Federal Vulnerability Database",
+  "BDU FSTEC (Russia)": "BDU FSTEC — Russian Federal Vulnerability Database",
   // Japan
-  "VulnDB — JVN iPedia":                          "JVN iPedia — Japan Vulnerability Notes",
-  "JVN — JPCERT/JPCERT advisories":                "JVN — JPCERT/CC Advisories",
+  "VulnDB — JVN iPedia": "JVN iPedia — Japan Vulnerability Notes",
+  "JVN — JPCERT/JPCERT advisories": "JVN — JPCERT/CC Advisories",
   // Taiwan
-  "Taiwan NICST":                                  "Taiwan NICS — National Information & Communication Security Taskforce",
-  "Taiwan iThome SecurityWeekly":                  "Taiwan iThome — Security Weekly",
+  "Taiwan NICST": "Taiwan NICS — National Information & Communication Security Taskforce",
+  "Taiwan iThome SecurityWeekly": "Taiwan iThome — Security Weekly",
   // Hong Kong
-  "Hong Kong HKMA — Cybersecurity Fortification":  "HKMA — Cybersecurity Fortification Initiative (Hong Kong)",
-  "Hong Kong OFCA Cyber":                          "OFCA — Office of the Communications Authority (Hong Kong)",
+  "Hong Kong HKMA — Cybersecurity Fortification": "HKMA — Cybersecurity Fortification Initiative (Hong Kong)",
+  "Hong Kong OFCA Cyber": "OFCA — Office of the Communications Authority (Hong Kong)",
   // Malaysia / Singapore / India
-  "Bank Negara Malaysia (RMiT)":                   "Bank Negara Malaysia — Risk Management in Technology (RMiT)",
-  "Singapore CSA bulletins":                       "CSA Singapore — Cybersecurity Advisories",
-  "MAS Notice — Cybersecurity (Singapore)":        "MAS Singapore — Cybersecurity Notices",
-  "MAS — Notice 655 / TRM Guidelines":             "MAS Singapore — Notice 655 / Technology Risk Management Guidelines",
-  "RBI Cybersecurity (India)":                     "RBI India — Cybersecurity Guidelines",
+  "Bank Negara Malaysia (RMiT)": "Bank Negara Malaysia — Risk Management in Technology (RMiT)",
+  "Singapore CSA bulletins": "CSA Singapore — Cybersecurity Advisories",
+  "MAS Notice — Cybersecurity (Singapore)": "MAS Singapore — Cybersecurity Notices",
+  "MAS — Notice 655 / TRM Guidelines": "MAS Singapore — Notice 655 / Technology Risk Management Guidelines",
+  "RBI Cybersecurity (India)": "RBI India — Cybersecurity Guidelines",
 };
 
 function translateSourceName(name: string, language: string): string {
@@ -1217,7 +1779,10 @@ function translateSourceName(name: string, language: string): string {
   if (mapped) return mapped;
   if (nonLatin) {
     // Best-effort: drop non-Latin runs and append a language tag so the row stays readable.
-    const stripped = name.replace(/[\u3040-\u30ff\u4e00-\u9fff\uac00-\ud7af\u0400-\u04ff]+/g, "").replace(/\s+/g, " ").trim();
+    const stripped = name
+      .replace(/[\u3040-\u30ff\u4e00-\u9fff\uac00-\ud7af\u0400-\u04ff]+/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
     return stripped ? `${stripped} (${language})` : `${name} (${language})`;
   }
   return name;
@@ -1227,7 +1792,8 @@ function classifySourceKind(url: string | null | undefined): string {
   const u = (url || "").toLowerCase();
   if (!u) return "web";
   if (/\.json(\?|$)/.test(u) || u.includes("/api/") || u.includes("api.")) return "json";
-  if (/\.(rss|xml|atom|rdf)(\?|$)/.test(u) || u.includes("/rss") || u.includes("/feed") || u.includes("/atom")) return "rss";
+  if (/\.(rss|xml|atom|rdf)(\?|$)/.test(u) || u.includes("/rss") || u.includes("/feed") || u.includes("/atom"))
+    return "rss";
   return "web";
 }
 
@@ -1248,7 +1814,11 @@ export { OSINT_OVERVIEW_PERSONAS as OSINT_OVERVIEW_PERSONA_LIST };
 // ---------- public API ----------
 export const storage = {
   // auth
-  login(email: string, password: string, mfaCode?: string): (User & { accessToken: string; accessMode: "credentialed" | "guest" }) | { mfaRequired: true } | undefined {
+  login(
+    email: string,
+    password: string,
+    mfaCode?: string,
+  ): (User & { accessToken: string; accessMode: "credentialed" | "guest" }) | { mfaRequired: true } | undefined {
     const u = db.select().from(users).where(eq(users.email, email)).get();
     if (!u) {
       verifyPassword(password, DUMMY_PASSWORD_HASH);
@@ -1270,14 +1840,58 @@ export const storage = {
         recordAuthFailure(u.id, "mfa");
         return { mfaRequired: true };
       }
+      if (!u.mfaVerifiedAt) {
+        db.update(users)
+          .set({ mfaVerifiedAt: now() } as any)
+          .where(eq(users.id, u.id))
+          .run();
+      }
     }
     if (verified.needsRehash) {
-      db.update(users).set({ password: hashPassword(password) }).where(eq(users.id, u.id)).run();
+      db.update(users)
+        .set({ password: hashPassword(password) })
+        .where(eq(users.id, u.id))
+        .run();
     }
     clearAuthFailures(u.id);
-    db.update(users).set({ lastLoginAt: now() } as any).where(eq(users.id, u.id)).run();
+    db.update(users)
+      .set({ lastLoginAt: now() } as any)
+      .where(eq(users.id, u.id))
+      .run();
     const accessMode = accessModeForRole(u.role);
-    return { ...u, accessToken: issueSession(u.id, accessMode), accessMode };
+    return { ...u, accessToken: issueSession(u.id, accessMode, !!u.mfaEnabled), accessMode };
+  },
+  createTestSession(): (User & { accessToken: string; accessMode: "credentialed" | "guest" }) | undefined {
+    const u = sqlite
+      .prepare(
+        `
+      SELECT id, tenant_id AS tenantId, email, password, role,
+             COALESCE(account_type, 'platform') AS accountType,
+             display_name AS displayName,
+             COALESCE(status, 'active') AS status,
+             COALESCE(password_must_change, 0) AS passwordMustChange,
+             COALESCE(mfa_enabled, 0) AS mfaEnabled,
+             mfa_secret_enc AS mfaSecretEnc,
+             mfa_verified_at AS mfaVerifiedAt,
+             COALESCE(failed_login_count, 0) AS failedLoginCount,
+             COALESCE(failed_mfa_count, 0) AS failedMfaCount,
+             account_locked_until AS accountLockedUntil,
+             created_at AS createdAt,
+             last_login_at AS lastLoginAt
+      FROM users
+      WHERE COALESCE(status, 'active') = 'active'
+      ORDER BY CASE role WHEN 'admin' THEN 0 WHEN 'threat_intel_expert' THEN 1 ELSE 2 END, created_at ASC
+      LIMIT 1
+    `,
+      )
+      .get() as User | undefined;
+    if (!u) return undefined;
+    db.update(users)
+      .set({ lastLoginAt: now() } as any)
+      .where(eq(users.id, u.id))
+      .run();
+    const accessMode = accessModeForRole(u.role);
+    return { ...u, accessToken: issueSession(u.id, accessMode, true), accessMode };
   },
   changeOwnPassword(uid: string, currentPassword: string, nextPassword: string): Omit<User, "password"> | undefined {
     const u = db.select().from(users).where(eq(users.id, uid)).get();
@@ -1289,14 +1903,19 @@ export const storage = {
     if (isBlockedInitialPassword(nextPassword)) {
       throw new Error("new password cannot reuse a seeded or temporary setup password");
     }
-    db.update(users).set({
-      password: hashPassword(nextPassword),
-      passwordMustChange: false,
-    } as any).where(eq(users.id, uid)).run();
+    db.update(users)
+      .set({
+        password: hashPassword(nextPassword),
+        passwordMustChange: false,
+      } as any)
+      .where(eq(users.id, uid))
+      .run();
     return storage.getUserPublic(uid);
   },
   getUserPublic(uid: string): Omit<User, "password"> | undefined {
-    return sqlite.prepare(`
+    return sqlite
+      .prepare(
+        `
       SELECT id, tenant_id AS tenantId, email, role,
              display_name AS displayName,
              COALESCE(account_type, 'platform') AS accountType,
@@ -1311,16 +1930,23 @@ export const storage = {
              last_login_at AS lastLoginAt
       FROM users
       WHERE id = ?
-    `).get(uid) as Omit<User, "password"> | undefined;
+    `,
+      )
+      .get(uid) as Omit<User, "password"> | undefined;
   },
-  getMfaSetup(uid: string): { enabled: boolean; verifiedAt: string | null; secret: string; otpauthUrl: string } | undefined {
+  getMfaSetup(
+    uid: string,
+  ): { enabled: boolean; verifiedAt: string | null; secret: string; otpauthUrl: string } | undefined {
     const u = db.select().from(users).where(eq(users.id, uid)).get();
     if (!u) return undefined;
     if (u.mfaEnabled) return undefined;
     let secret = dec(u.mfaSecretEnc);
     if (!secret) {
       secret = newMfaSecret();
-      db.update(users).set({ mfaSecretEnc: enc(secret) } as any).where(eq(users.id, uid)).run();
+      db.update(users)
+        .set({ mfaSecretEnc: enc(secret) } as any)
+        .where(eq(users.id, uid))
+        .run();
     }
     const label = encodeURIComponent(`OptraSight:${u.email}`);
     const issuer = encodeURIComponent("OptraSight");
@@ -1340,28 +1966,79 @@ export const storage = {
       recordAuthFailure(uid, "mfa");
       throw new Error("invalid MFA code");
     }
-    db.update(users).set({
-      mfaEnabled: true,
-      mfaVerifiedAt: now(),
-    } as any).where(eq(users.id, uid)).run();
+    db.update(users)
+      .set({
+        mfaEnabled: true,
+        mfaVerifiedAt: now(),
+      } as any)
+      .where(eq(users.id, uid))
+      .run();
     clearAuthFailures(uid);
     return storage.getUserPublic(uid);
   },
+  verifyMfaChallenge(uid: string, code: string, token: string): Omit<User, "password"> | undefined {
+    const u = db.select().from(users).where(eq(users.id, uid)).get();
+    if (!u || !u.mfaEnabled) return undefined;
+    if (userLockedUntil(u)) throw new Error("account temporarily locked due to failed authentication attempts");
+    const secret = dec(u.mfaSecretEnc);
+    if (!verifyTotp(secret, code)) {
+      recordAuthFailure(uid, "mfa");
+      throw new Error("invalid MFA code");
+    }
+    const result = sqlite
+      .prepare(
+        `
+      UPDATE auth_sessions SET mfa_verified_at = ?, last_used_at = ?
+      WHERE token_hash = ? AND user_id = ? AND revoked_at IS NULL
+    `,
+      )
+      .run(now(), now(), tokenHash(token), uid);
+    if (result.changes === 0) throw new Error("authentication session is no longer active");
+    clearAuthFailures(uid);
+    return storage.getUserPublic(uid);
+  },
+  markSessionMfaVerified(uid: string, token: string): boolean {
+    const result = sqlite
+      .prepare(
+        `
+      UPDATE auth_sessions SET mfa_verified_at = ?, last_used_at = ?
+      WHERE token_hash = ? AND user_id = ? AND revoked_at IS NULL
+    `,
+      )
+      .run(now(), now(), tokenHash(token), uid);
+    return result.changes > 0;
+  },
   getUser(token: string): User | undefined {
     const h = tokenHash(token);
-    const session = sqlite.prepare(`
+    const session = sqlite
+      .prepare(
+        `
       SELECT s.user_id AS userId,
              COALESCE(s.access_mode, 'credentialed') AS accessMode,
              s.issued_at AS issuedAt,
              s.last_used_at AS lastUsedAt,
+             s.mfa_verified_at AS sessionMfaVerifiedAt,
              u.role AS role
       FROM auth_sessions s
       JOIN users u ON u.id = s.user_id
       WHERE s.token_hash = ? AND s.revoked_at IS NULL
-    `).get(h) as { userId: string; accessMode: "credentialed" | "guest"; issuedAt: string | null; lastUsedAt: string | null; role: string | null } | undefined;
+    `,
+      )
+      .get(h) as
+      | {
+          userId: string;
+          accessMode: "credentialed" | "guest";
+          issuedAt: string | null;
+          lastUsedAt: string | null;
+          sessionMfaVerifiedAt: string | null;
+          role: string | null;
+        }
+      | undefined;
     if (session?.userId) {
       if (sessionExpiryReason(session)) {
-        sqlite.prepare("UPDATE auth_sessions SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL").run(now(), h);
+        sqlite
+          .prepare("UPDATE auth_sessions SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL")
+          .run(now(), h);
         return undefined;
       }
       // Keep a browser session stable during normal in-app refresh/polling.
@@ -1372,19 +2049,27 @@ export const storage = {
       }
       const u = db.select().from(users).where(eq(users.id, session.userId)).get();
       if (!u || (u.status ?? "active") !== "active") return undefined;
-      return { ...u, accessMode: session.accessMode } as User;
+      return { ...u, accessMode: session.accessMode, sessionMfaVerifiedAt: session.sessionMfaVerifiedAt } as User;
     }
     return undefined;
   },
   logout(token: string): boolean {
-    const r = sqlite.prepare(`
+    const r = sqlite
+      .prepare(
+        `
       UPDATE auth_sessions SET revoked_at = ?
       WHERE token_hash = ? AND revoked_at IS NULL
-    `).run(now(), tokenHash(token));
+    `,
+      )
+      .run(now(), tokenHash(token));
     return r.changes > 0;
   },
-  listPlatformUsers(): Array<Omit<User, "password"> & { tenantName: string | null; tenantSlug: string | null; tenantPlan: string | null }> {
-    const rows = sqlite.prepare(`
+  listPlatformUsers(): Array<
+    Omit<User, "password"> & { tenantName: string | null; tenantSlug: string | null; tenantPlan: string | null }
+  > {
+    const rows = sqlite
+      .prepare(
+        `
       SELECT u.id, u.tenant_id AS tenantId, u.email, u.role,
              u.display_name AS displayName,
              COALESCE(u.account_type, 'platform') AS accountType,
@@ -1407,11 +2092,20 @@ export const storage = {
         CASE u.role WHEN 'admin' THEN 0 ELSE 1 END,
         CASE COALESCE(u.status, 'active') WHEN 'active' THEN 0 ELSE 1 END,
         u.email COLLATE NOCASE
-    `).all() as Array<Omit<User, "password"> & { tenantName: string | null; tenantSlug: string | null; tenantPlan: string | null }>;
+    `,
+      )
+      .all() as Array<
+      Omit<User, "password"> & { tenantName: string | null; tenantSlug: string | null; tenantPlan: string | null }
+    >;
     return rows.map(platformUserForBatchOne);
   },
   createPlatformUser(opts: {
-    tenantId: string; email: string; password: string; role: string; displayName?: string; status?: string;
+    tenantId: string;
+    email: string;
+    password: string;
+    role: string;
+    displayName?: string;
+    status?: string;
   }): Omit<User, "password"> | undefined {
     if (isBlockedInitialPassword(opts.password)) {
       throw new Error("password cannot reuse a seeded or temporary setup password");
@@ -1419,30 +2113,40 @@ export const storage = {
     const tenant = db.select().from(tenants).where(eq(tenants.id, opts.tenantId)).get();
     if (!tenant) throw new Error("workspace not found");
     const uid = id();
-    db.insert(users).values({
-      id: uid,
-      tenantId: opts.tenantId,
-      email: opts.email.trim().toLowerCase(),
-      password: hashPassword(opts.password),
-      role: opts.role,
-      accountType: "platform",
-      displayName: opts.displayName?.trim() || null,
-      status: opts.status ?? "active",
-      passwordMustChange: true,
-      mfaEnabled: false,
-      mfaSecretEnc: null,
-      mfaVerifiedAt: null,
-      failedLoginCount: 0,
-      failedMfaCount: 0,
-      accountLockedUntil: null,
-      createdAt: now(),
-      lastLoginAt: null,
-    } as any).run();
+    db.insert(users)
+      .values({
+        id: uid,
+        tenantId: opts.tenantId,
+        email: opts.email.trim().toLowerCase(),
+        password: hashPassword(opts.password),
+        role: opts.role,
+        accountType: "platform",
+        displayName: opts.displayName?.trim() || null,
+        status: opts.status ?? "active",
+        passwordMustChange: true,
+        mfaEnabled: false,
+        mfaSecretEnc: null,
+        mfaVerifiedAt: null,
+        failedLoginCount: 0,
+        failedMfaCount: 0,
+        accountLockedUntil: null,
+        createdAt: now(),
+        lastLoginAt: null,
+      } as any)
+      .run();
     return storage.getUserPublic(uid);
   },
-  updatePlatformUser(uid: string, patch: {
-    tenantId?: string; email?: string; password?: string; role?: string; displayName?: string | null; status?: string;
-  }): Omit<User, "password"> | undefined {
+  updatePlatformUser(
+    uid: string,
+    patch: {
+      tenantId?: string;
+      email?: string;
+      password?: string;
+      role?: string;
+      displayName?: string | null;
+      status?: string;
+    },
+  ): Omit<User, "password"> | undefined {
     const existing = storage.getUserPublic(uid);
     if (!existing || (existing as any).accountType !== "platform") return undefined;
     const nextTenantId = patch.tenantId ?? existing.tenantId;
@@ -1469,7 +2173,10 @@ export const storage = {
     if (patch.displayName !== undefined) payload.displayName = patch.displayName?.trim() || null;
     if (patch.status !== undefined) payload.status = patch.status;
     if (Object.keys(payload).length > 0) {
-      db.update(users).set(payload as any).where(eq(users.id, uid)).run();
+      db.update(users)
+        .set(payload as any)
+        .where(eq(users.id, uid))
+        .run();
     }
     return storage.getUserPublic(uid);
   },
@@ -1489,13 +2196,16 @@ export const storage = {
   resetPlatformUserMfa(uid: string): Omit<User, "password"> | undefined {
     const existing = storage.getUserPublic(uid);
     if (!existing || (existing as any).accountType !== "platform") return undefined;
-    db.update(users).set({
-      mfaEnabled: false,
-      mfaSecretEnc: null,
-      mfaVerifiedAt: null,
-      failedMfaCount: 0,
-      accountLockedUntil: null,
-    } as any).where(eq(users.id, uid)).run();
+    db.update(users)
+      .set({
+        mfaEnabled: false,
+        mfaSecretEnc: null,
+        mfaVerifiedAt: null,
+        failedMfaCount: 0,
+        accountLockedUntil: null,
+      } as any)
+      .where(eq(users.id, uid))
+      .run();
     revokeUserSessions(uid);
     return storage.getUserPublic(uid);
   },
@@ -1508,35 +2218,680 @@ export const storage = {
   getTenant(tid: string): Tenant | undefined {
     return db.select().from(tenants).where(eq(tenants.id, tid)).get();
   },
+  setTenantOperatingMode(tid: string, operatingMode: "mss" | "individual", actor: string): Tenant | undefined {
+    sqlite.prepare("UPDATE tenants SET operating_mode = ? WHERE id = ?").run(operatingMode, tid);
+    storage.appendAudit(tid, actor, "workspace.operating_mode.update", tid, { operatingMode });
+    return storage.getTenant(tid);
+  },
+  listClientTaxonomyOptions(tid: string): ClientTaxonomyOptionDTO[] {
+    return taxonomyOptionsForTenant(tid).map(({ legacyId: _legacyId, ...option }) => option);
+  },
+  createClientTaxonomyOption(
+    tid: string,
+    opts: {
+      kind: ClientTaxonomyKind;
+      label: string;
+      aliases: string[];
+      actor: string;
+    },
+  ): ClientTaxonomyOptionDTO {
+    const label = opts.label.normalize("NFKC").trim();
+    const fingerprint = taxonomyFingerprint(opts.kind, label);
+    const duplicate = sqlite
+      .prepare(
+        `
+      SELECT id FROM client_taxonomy_options
+      WHERE tenant_id = ? AND kind = ? AND fingerprint = ?
+    `,
+      )
+      .get(tid, opts.kind, fingerprint) as { id: string } | undefined;
+    if (duplicate) {
+      const existing = taxonomyOptionsForTenant(tid).find((option) => option.id === duplicate.id);
+      if (existing) return existing;
+    }
+    const builtInDuplicate = builtInTaxonomyOptions().find(
+      (option) => taxonomyFingerprint(opts.kind, option.label) === fingerprint,
+    );
+    if (builtInDuplicate) return builtInDuplicate;
+    const optionId = id();
+    const aliases = Array.from(
+      new Set(opts.aliases.map((alias) => alias.normalize("NFKC").trim()).filter(Boolean)),
+    ).slice(0, 20);
+    sqlite
+      .prepare(
+        `
+      INSERT INTO client_taxonomy_options
+        (id, tenant_id, kind, label, aliases, fingerprint, created_by, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+      )
+      .run(optionId, tid, opts.kind, label, j(aliases), fingerprint, opts.actor, now());
+    storage.appendAudit(tid, opts.actor, "client_taxonomy.create", optionId, { kind: opts.kind, label });
+    return { id: optionId, kind: opts.kind, label, aliases, source: "custom" };
+  },
+  listClientProfiles(tid: string, opts?: { includeArchived?: boolean }): ClientProfileDTO[] {
+    ensureDefaultClientProfile(tid);
+    const rows = sqlite
+      .prepare(
+        `
+      SELECT * FROM client_profiles
+      WHERE tenant_id = ? ${opts?.includeArchived ? "" : "AND is_active = 1"}
+      ORDER BY is_active DESC, name COLLATE NOCASE, created_at
+    `,
+      )
+      .all(tid) as any[];
+    return rows.map(clientProfileRowToDto);
+  },
+  getClientProfile(tid: string, clientId?: string): ClientProfileDTO | undefined {
+    ensureDefaultClientProfile(tid);
+    const row = clientId
+      ? sqlite.prepare("SELECT * FROM client_profiles WHERE tenant_id = ? AND id = ?").get(tid, clientId)
+      : sqlite
+          .prepare("SELECT * FROM client_profiles WHERE tenant_id = ? AND is_active = 1 ORDER BY created_at LIMIT 1")
+          .get(tid);
+    return row ? clientProfileRowToDto(row) : undefined;
+  },
+  createClientProfile(
+    tid: string,
+    input: {
+      name: string;
+      clientTypes: string[];
+      geos: string[];
+      industries: string[];
+      monitoredTechnologies: string[];
+      mappingTerms: string[];
+      notificationEmails: string[];
+      digestEnabled: boolean;
+      digestCadence: ClientProfileDTO["digestCadence"];
+      digestSubjectTemplate: string;
+      digestBodyTemplate: string;
+      actor: string;
+    },
+  ): ClientProfileDTO {
+    assertClientProfileScopeLimits(input);
+    const catalog = taxonomyOptionsForTenant(tid);
+    const allowedByKind = (kind: ClientTaxonomyKind) =>
+      new Set(catalog.filter((option) => option.kind === kind).map((option) => option.id));
+    const validateIds = (values: string[], kind: ClientTaxonomyKind) => {
+      const allowed = allowedByKind(kind);
+      const unique = Array.from(new Set(values));
+      if (unique.some((value) => !allowed.has(value))) throw new Error(`unknown ${kind} taxonomy option`);
+      return unique;
+    };
+    const clientId = id();
+    const ts = now();
+    sqlite
+      .prepare(
+        `
+      INSERT INTO client_profiles (
+        id, tenant_id, name, client_types, geo_ids, industry_ids,
+        technology_ids, mapping_terms, notification_emails, digest_enabled,
+        digest_cadence, digest_subject_template, digest_body_template,
+        is_active, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+    `,
+      )
+      .run(
+        clientId,
+        tid,
+        input.name.trim(),
+        j(Array.from(new Set(input.clientTypes))),
+        j(validateIds(input.geos, "geo")),
+        j(validateIds(input.industries, "industry")),
+        j(validateIds(input.monitoredTechnologies, "technology")),
+        j(
+          Array.from(new Set(input.mappingTerms.map((term) => term.normalize("NFKC").trim()).filter(Boolean))).slice(
+            0,
+            120,
+          ),
+        ),
+        j(Array.from(new Set(input.notificationEmails.map((email) => email.toLowerCase())))),
+        input.digestEnabled ? 1 : 0,
+        input.digestCadence,
+        input.digestSubjectTemplate,
+        input.digestBodyTemplate,
+        ts,
+        ts,
+      );
+    storage.appendAudit(tid, input.actor, "client_profile.create", clientId, { name: input.name.trim() });
+    return storage.getClientProfile(tid, clientId)!;
+  },
+  createClientProfilesBulk(
+    tid: string,
+    inputs: Array<{
+      name: string;
+      clientTypes: string[];
+      geographies: string[];
+      industries: string[];
+      monitoredTechnologies: string[];
+      mappingTerms: string[];
+      notificationEmails: string[];
+      digestEnabled: boolean;
+      digestCadence: ClientProfileDTO["digestCadence"];
+    }>,
+    opts: { createMissingTaxonomyOptions: boolean; actor: string },
+  ): {
+    created: ClientProfileDTO[];
+    results: Array<{ row: number; name: string; status: "created" | "failed"; clientId?: string; error?: string }>;
+  } {
+    const created: ClientProfileDTO[] = [];
+    const results: Array<{
+      row: number;
+      name: string;
+      status: "created" | "failed";
+      clientId?: string;
+      error?: string;
+    }> = [];
+    const existingNames = new Set(
+      (storage.listClientProfiles(tid, { includeArchived: true }) as ClientProfileDTO[]).map(
+        (profile: ClientProfileDTO) => profile.name.normalize("NFKC").trim().toLowerCase(),
+      ),
+    );
+    const resolveTypes = (values: string[]) => {
+      const resolved = values.flatMap((value) => {
+        const ids = normalizeClientTypeIds([value]);
+        if (!ids.length)
+          throw new Error(`unknown client type "${value}"; use ${CLIENT_TYPES.map((item) => item.id).join(", ")}`);
+        return ids;
+      });
+      return Array.from(new Set(resolved));
+    };
+    const resolveOptions = (kind: ClientTaxonomyKind, values: string[]) =>
+      values.map((value) => {
+        const fingerprint = taxonomyFingerprint(kind, value);
+        const catalog = taxonomyOptionsForTenant(tid);
+        const match = catalog.find(
+          (option) =>
+            taxonomyFingerprint(kind, option.label) === fingerprint ||
+            option.aliases.some((alias) => taxonomyFingerprint(kind, alias) === fingerprint),
+        );
+        if (match) return match.id;
+        if (!opts.createMissingTaxonomyOptions) {
+          throw new Error(`unknown ${kind} "${value}"; enable custom taxonomy creation or correct the CSV value`);
+        }
+        return storage.createClientTaxonomyOption(tid, {
+          kind,
+          label: value,
+          aliases: [],
+          actor: opts.actor,
+        }).id;
+      });
+    inputs.forEach((input, index) => {
+      const name = input.name.normalize("NFKC").trim();
+      try {
+        const nameKey = name.toLowerCase();
+        if (existingNames.has(nameKey))
+          throw new Error("a Client Profile with this name already exists or is archived");
+        const profile = storage.createClientProfile(tid, {
+          name,
+          clientTypes: resolveTypes(input.clientTypes),
+          geos: resolveOptions("geo", input.geographies),
+          industries: resolveOptions("industry", input.industries),
+          monitoredTechnologies: resolveOptions("technology", input.monitoredTechnologies),
+          mappingTerms: input.mappingTerms,
+          notificationEmails: input.notificationEmails,
+          digestEnabled: input.digestEnabled,
+          digestCadence: input.digestCadence,
+          digestSubjectTemplate: DEFAULT_CLIENT_DIGEST_SUBJECT_TEMPLATE,
+          digestBodyTemplate: DEFAULT_CLIENT_DIGEST_BODY_TEMPLATE,
+          actor: opts.actor,
+        });
+        existingNames.add(nameKey);
+        created.push(profile);
+        results.push({ row: index + 1, name, status: "created", clientId: profile.id });
+      } catch (error) {
+        results.push({
+          row: index + 1,
+          name,
+          status: "failed",
+          error: error instanceof Error ? error.message : "Client Profile creation failed",
+        });
+      }
+    });
+    storage.appendAudit(tid, opts.actor, "client_profile.bulk_create", tid, {
+      requested: inputs.length,
+      created: created.length,
+      failed: results.filter((result) => result.status === "failed").length,
+      createMissingTaxonomyOptions: opts.createMissingTaxonomyOptions,
+    });
+    return { created, results };
+  },
+  updateClientProfile(
+    tid: string,
+    clientId: string,
+    patch: {
+      name?: string;
+      clientTypes?: string[];
+      geos?: string[];
+      industries?: string[];
+      monitoredTechnologies?: string[];
+      mappingTerms?: string[];
+      notificationEmails?: string[];
+      digestEnabled?: boolean;
+      digestCadence?: ClientProfileDTO["digestCadence"];
+      digestSubjectTemplate?: string;
+      digestBodyTemplate?: string;
+      isActive?: boolean;
+      actor: string;
+    },
+  ): ClientProfileDTO | undefined {
+    const existing = storage.getClientProfile(tid, clientId);
+    if (!existing) return undefined;
+    const catalog = taxonomyOptionsForTenant(tid);
+    const validateIds = (values: string[], kind: ClientTaxonomyKind) => {
+      const allowed = new Set(catalog.filter((option) => option.kind === kind).map((option) => option.id));
+      const unique = Array.from(new Set(values));
+      if (unique.some((value) => !allowed.has(value))) throw new Error(`unknown ${kind} taxonomy option`);
+      return unique;
+    };
+    const next = {
+      name: patch.name?.trim() || existing.name,
+      clientTypes: patch.clientTypes ?? existing.clientTypes,
+      geos: patch.geos ? validateIds(patch.geos, "geo") : existing.geos,
+      industries: patch.industries ? validateIds(patch.industries, "industry") : existing.industries,
+      monitoredTechnologies: patch.monitoredTechnologies
+        ? validateIds(patch.monitoredTechnologies, "technology")
+        : existing.monitoredTechnologies,
+      mappingTerms: patch.mappingTerms
+        ? Array.from(new Set(patch.mappingTerms.map((term) => term.normalize("NFKC").trim()).filter(Boolean))).slice(
+            0,
+            120,
+          )
+        : existing.mappingTerms,
+      notificationEmails: patch.notificationEmails ?? existing.notificationEmails,
+      digestEnabled: patch.digestEnabled ?? existing.digestEnabled,
+      digestCadence: patch.digestCadence ?? existing.digestCadence,
+      digestSubjectTemplate: patch.digestSubjectTemplate ?? existing.digestSubjectTemplate,
+      digestBodyTemplate: patch.digestBodyTemplate ?? existing.digestBodyTemplate,
+      isActive: patch.isActive ?? existing.isActive,
+    };
+    assertClientProfileScopeLimits(next);
+    sqlite
+      .prepare(
+        `
+      UPDATE client_profiles SET
+        name = ?, client_types = ?, geo_ids = ?, industry_ids = ?, technology_ids = ?,
+        mapping_terms = ?, notification_emails = ?, digest_enabled = ?, digest_cadence = ?,
+        digest_subject_template = ?, digest_body_template = ?, is_active = ?, updated_at = ?
+      WHERE tenant_id = ? AND id = ?
+    `,
+      )
+      .run(
+        next.name,
+        j(Array.from(new Set(next.clientTypes))),
+        j(next.geos),
+        j(next.industries),
+        j(next.monitoredTechnologies),
+        j(next.mappingTerms),
+        j(Array.from(new Set(next.notificationEmails.map((email) => email.toLowerCase())))),
+        next.digestEnabled ? 1 : 0,
+        next.digestCadence,
+        next.digestSubjectTemplate,
+        next.digestBodyTemplate,
+        next.isActive ? 1 : 0,
+        now(),
+        tid,
+        clientId,
+      );
+    storage.appendAudit(tid, patch.actor, "client_profile.update", clientId, {
+      fields: Object.keys(patch).filter((key) => key !== "actor"),
+    });
+    return storage.getClientProfile(tid, clientId);
+  },
+  setClientEmailLogo(
+    tid: string,
+    clientId: string,
+    logoUrl: string | null,
+    actor: string,
+  ): ClientProfileDTO | undefined {
+    const existing = storage.getClientProfile(tid, clientId);
+    if (!existing) return undefined;
+    const updatedAt = now();
+    sqlite
+      .prepare(
+        `
+      UPDATE client_profiles SET email_logo_url = ?, updated_at = ?
+      WHERE tenant_id = ? AND id = ?
+    `,
+      )
+      .run(logoUrl, updatedAt, tid, clientId);
+    storage.appendAudit(tid, actor, logoUrl ? "client_email_logo.upload" : "client_email_logo.remove", clientId, {});
+    return storage.getClientProfile(tid, clientId);
+  },
+  getClientAnalysisScope(tid: string): ClientAnalysisScopeDTO {
+    const options = new Map<string, ClientTaxonomyOptionDTO>(
+      (storage.listClientTaxonomyOptions(tid) as ClientTaxonomyOptionDTO[]).map((option: ClientTaxonomyOptionDTO) => [
+        option.id,
+        option,
+      ]),
+    );
+    return {
+      clients: (storage.listClientProfiles(tid) as ClientProfileDTO[]).map((profile: ClientProfileDTO) => ({
+        id: profile.id,
+        name: profile.name,
+        clientTypes: profile.clientTypes,
+        matchingScope: clientMatchingScopeForTypes(profile.clientTypes),
+        mappingTerms: profile.mappingTerms,
+        geographies: profile.geos
+          .map((optionId: string) => options.get(optionId))
+          .filter(Boolean) as ClientTaxonomyOptionDTO[],
+        industries: profile.industries
+          .map((optionId: string) => options.get(optionId))
+          .filter(Boolean) as ClientTaxonomyOptionDTO[],
+        technologies: profile.monitoredTechnologies
+          .map((optionId: string) => options.get(optionId))
+          .filter(Boolean) as ClientTaxonomyOptionDTO[],
+      })),
+    };
+  },
+
+  listClientDigests(tid: string, clientId: string): ClientDigestDTO[] {
+    return (
+      sqlite
+        .prepare(
+          `
+      SELECT * FROM client_digests
+      WHERE tenant_id = ? AND client_id = ?
+      ORDER BY created_at DESC LIMIT 100
+    `,
+        )
+        .all(tid, clientId) as any[]
+    ).map(clientDigestRowToDto);
+  },
+
+  listDueClientDigestProfiles(tid: string): ClientProfileDTO[] {
+    const nowMs = Date.now();
+    return (storage.listClientProfiles(tid) as ClientProfileDTO[]).filter((client: ClientProfileDTO) => {
+      if (!client.digestEnabled || client.notificationEmails.length === 0) return false;
+      if (!client.lastDigestAt) return true;
+      const lastMs = Date.parse(client.lastDigestAt);
+      return Number.isNaN(lastMs) || lastMs + CLIENT_DIGEST_DAYS[client.digestCadence] * 86400_000 <= nowMs;
+    });
+  },
+
+  async generateClientDigest(
+    tid: string,
+    clientId: string,
+    opts: {
+      cadence?: ClientProfileDTO["digestCadence"];
+      findingIds?: string[];
+      assessmentSelection?: {
+        focusedFindingIds: string[];
+        generalFindingIds: string[];
+        sourceJobId?: string;
+      };
+      actor: string;
+    },
+  ): Promise<ClientDigestDTO> {
+    const client = storage.getClientProfile(tid, clientId) as ClientProfileDTO | undefined;
+    if (!client || !client.isActive) throw new Error("active client profile not found");
+    if (!opts.assessmentSelection && client.notificationEmails.length === 0) {
+      throw new Error("add at least one notification email before generating a client digest");
+    }
+    const cadence: ClientProfileDTO["digestCadence"] = opts.cadence ?? client.digestCadence;
+    const periodEnd = now();
+    const periodStart = new Date(Date.parse(periodEnd) - CLIENT_DIGEST_DAYS[cadence] * 86400_000).toISOString();
+    const existing = sqlite
+      .prepare(
+        `
+      SELECT * FROM client_digests
+      WHERE tenant_id = ? AND client_id = ? AND cadence = ? AND period_start = ? AND period_end = ?
+    `,
+      )
+      .get(tid, clientId, cadence, periodStart, periodEnd) as any;
+    if (existing) return clientDigestRowToDto(existing);
+
+    const assessmentIds = opts.assessmentSelection
+      ? Array.from(
+          new Set([...opts.assessmentSelection.focusedFindingIds, ...opts.assessmentSelection.generalFindingIds]),
+        ).slice(0, 60)
+      : [];
+    let rows =
+      assessmentIds.length > 0
+        ? (sqlite
+            .prepare(
+              `
+        SELECT f.*, s.name AS source_name
+        FROM osint_findings f
+        LEFT JOIN osint_sources s ON s.id = f.source_id
+        WHERE f.tenant_id = ? AND f.id IN (${assessmentIds.map(() => "?").join(",")})
+      `,
+            )
+            .all(tid, ...assessmentIds) as any[])
+        : (sqlite
+            .prepare(
+              `
+      SELECT f.*, s.name AS source_name
+      FROM osint_findings f
+      LEFT JOIN osint_sources s ON s.id = f.source_id
+      WHERE f.tenant_id = ?
+        AND f.published_at >= ? AND f.published_at <= ?
+        AND f.status IN ('triaged', 'assessed', 'escalated')
+        AND EXISTS (SELECT 1 FROM json_each(f.client_tags) WHERE value = ?)
+      ORDER BY
+        CASE f.status WHEN 'escalated' THEN 0 WHEN 'assessed' THEN 1 ELSE 2 END,
+        CASE f.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+        f.published_at DESC
+      LIMIT 60
+    `,
+            )
+            .all(tid, periodStart, periodEnd, clientId) as any[]);
+    if (!opts.assessmentSelection && opts.findingIds?.length) {
+      const requested = new Set(opts.findingIds);
+      rows = rows.filter((row) => requested.has(row.id));
+    }
+    if (assessmentIds.length > 0) {
+      const order = new Map(assessmentIds.map((findingId, index) => [findingId, index]));
+      rows.sort((a, b) => (order.get(a.id) ?? 999) - (order.get(b.id) ?? 999));
+    }
+    if (rows.length === 0) throw new Error(`no selected intelligence is available for the ${cadence} draft`);
+
+    const scope = (
+      storage.getClientAnalysisScope(tid).clients as Array<{
+        id: string;
+        clientTypes: string[];
+        matchingScope: ClientMatchingScope;
+        industries: ClientTaxonomyOptionDTO[];
+        geographies: ClientTaxonomyOptionDTO[];
+        technologies: ClientTaxonomyOptionDTO[];
+      }>
+    ).find((item) => item.id === clientId);
+    const provider = storage.resolveAiProvider(tid, "client_digest");
+    if (!provider) throw new Error("no live AI provider is configured for client digest generation");
+    const countIocs = (raw: string) => {
+      try {
+        const bag = JSON.parse(raw || "{}");
+        return Object.values(bag).reduce(
+          (total: number, values: any) => total + (Array.isArray(values) ? values.length : 0),
+          0,
+        );
+      } catch {
+        return 0;
+      }
+    };
+    const result = dispatchAi({
+      task: "client_digest",
+      input: {
+        client: {
+          name: client.name,
+          cadence,
+          clientTypes: client.clientTypes,
+          matchingScope: scope?.matchingScope ?? clientMatchingScopeForTypes(client.clientTypes),
+          mappingTerms: client.mappingTerms,
+          industries: scope?.industries.map((item) => item.label) ?? [],
+          geographies: scope?.geographies.map((item) => item.label) ?? [],
+          technologies: scope?.technologies.map((item) => item.label) ?? [],
+        },
+        periodStart,
+        periodEnd,
+        template: {
+          subjectTemplate: client.digestSubjectTemplate,
+          bodyTemplate: client.digestBodyTemplate,
+          supportedPlaceholders: CLIENT_DIGEST_TEMPLATE_TOKENS,
+        },
+        findings: rows.map((row) => ({
+          id: row.id,
+          selectionClass: opts.assessmentSelection?.generalFindingIds.includes(row.id)
+            ? ("general_watch" as const)
+            : ("client_focused" as const),
+          title: row.title,
+          source: row.source_name || "Unknown source",
+          url: row.url ?? null,
+          publishedAt: row.published_at,
+          severity: row.severity,
+          status: row.status,
+          aiSummary: row.ai_summary ?? null,
+          analystAssessment: row.analyst_assessment ?? null,
+          analystDisposition: row.analyst_disposition ?? null,
+          analystImpact: row.analyst_impact ?? null,
+          analystNextAction: row.analyst_next_action ?? null,
+          cveIds: p<string[]>(row.cve_ids, []),
+          threatActors: p<string[]>(row.threat_actors, []),
+          affectedTech: p<string[]>(row.affected_tech, []),
+          iocCount: countIocs(row.iocs),
+        })),
+      },
+      provider,
+    });
+    if (result.task !== "client_digest") throw new Error("unexpected AI result");
+    const digestId = id();
+    const createdAt = now();
+    sqlite
+      .prepare(
+        `INSERT INTO client_digests (
+      id, tenant_id, client_id, cadence, period_start, period_end, recipients,
+      subject, body_md, finding_ids, status, ai_provider_label, created_at, created_by
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?)`,
+      )
+      .run(
+        digestId,
+        tid,
+        clientId,
+        cadence,
+        periodStart,
+        periodEnd,
+        j(client.notificationEmails),
+        result.output.subject,
+        result.output.bodyMd,
+        j(result.output.includedFindingIds),
+        provider.label,
+        createdAt,
+        opts.actor,
+      );
+    if (!opts.assessmentSelection) {
+      sqlite
+        .prepare("UPDATE client_profiles SET last_digest_at = ?, updated_at = ? WHERE tenant_id = ? AND id = ?")
+        .run(createdAt, createdAt, tid, clientId);
+    }
+    storage.appendAudit(tid, opts.actor, "client_digest.generate", digestId, {
+      clientId,
+      cadence,
+      candidates: rows.length,
+      selected: result.output.includedFindingIds.length,
+      source: opts.assessmentSelection ? "client_impact_assessment" : "manual_or_scheduled",
+      sourceJobId: opts.assessmentSelection?.sourceJobId ?? null,
+      generalWatchCandidates: opts.assessmentSelection?.generalFindingIds.length ?? 0,
+    });
+    return storage.listClientDigests(tid, clientId)[0];
+  },
+
+  updateClientDigest(
+    tid: string,
+    clientId: string,
+    digestId: string,
+    patch: {
+      subject?: string;
+      bodyMd?: string;
+      status?: ClientDigestDTO["status"];
+      actor: string;
+    },
+  ): ClientDigestDTO | undefined {
+    const existing = sqlite
+      .prepare("SELECT * FROM client_digests WHERE tenant_id = ? AND client_id = ? AND id = ?")
+      .get(tid, clientId, digestId) as any;
+    if (!existing) return undefined;
+    const contentChanged =
+      (patch.subject !== undefined && patch.subject !== existing.subject) ||
+      (patch.bodyMd !== undefined && patch.bodyMd !== existing.body_md);
+    // Any content change invalidates an earlier approval. Delivery can only
+    // promote an unchanged, approved draft to sent through the SMTP route.
+    const status = contentChanged ? "draft" : (patch.status ?? existing.status);
+    sqlite
+      .prepare(
+        `UPDATE client_digests SET
+      subject = ?, body_md = ?, status = ?,
+      reviewed_at = CASE WHEN ? IN ('reviewed','approved','sent') THEN ? ELSE reviewed_at END,
+      reviewed_by = CASE WHEN ? IN ('reviewed','approved','sent') THEN ? ELSE reviewed_by END
+      WHERE tenant_id = ? AND client_id = ? AND id = ?`,
+      )
+      .run(
+        patch.subject ?? existing.subject,
+        patch.bodyMd ?? existing.body_md,
+        status,
+        status,
+        now(),
+        status,
+        patch.actor,
+        tid,
+        clientId,
+        digestId,
+      );
+    storage.appendAudit(tid, patch.actor, "client_digest.update", digestId, {
+      clientId,
+      fields: Object.keys(patch).filter((key) => key !== "actor"),
+    });
+    const row = sqlite.prepare("SELECT * FROM client_digests WHERE id = ?").get(digestId) as any;
+    return row ? clientDigestRowToDto(row) : undefined;
+  },
 
   // ---------- AI providers ----------
   listAiProviders(tid: string): AiProviderSummary[] {
-    const rows = db.select().from(aiProviders)
+    const rows = db
+      .select()
+      .from(aiProviders)
       .where(eq(aiProviders.tenantId, tid))
-      .orderBy(desc(aiProviders.isDefault), aiProviders.label).all();
+      .orderBy(desc(aiProviders.isDefault), aiProviders.label)
+      .all();
     return rows.map(aiProviderToSummary);
   },
   hasUsableAiProvider(tid: string): boolean {
-    const row = db.select().from(aiProviders)
+    const row = db
+      .select()
+      .from(aiProviders)
       .where(and(eq(aiProviders.tenantId, tid), eq(aiProviders.enabled, 1)))
       .all()
       .find((p) => aiProviderHasSecret(p) && p.lastTestOk === 1);
     return !!row;
   },
-  upsertAiProvider(tid: string, opts: {
-    id?: string;
-    provider: AiProviderKind; label: string; model: string;
-    baseUrl?: string; apiKey?: string;
-    enabled: boolean; isDefault: boolean;
-    config?: Record<string, any>;
-  }): AiProviderSummary {
+  upsertAiProvider(
+    tid: string,
+    opts: {
+      id?: string;
+      provider: AiProviderKind;
+      label: string;
+      model: string;
+      baseUrl?: string;
+      apiKey?: string;
+      enabled: boolean;
+      isDefault: boolean;
+      config?: Record<string, any>;
+    },
+  ): AiProviderSummary {
     const t = now();
     const existing = opts.id
-      ? db.select().from(aiProviders).where(and(eq(aiProviders.id, opts.id), eq(aiProviders.tenantId, tid))).get()
+      ? db
+          .select()
+          .from(aiProviders)
+          .where(and(eq(aiProviders.id, opts.id), eq(aiProviders.tenantId, tid)))
+          .get()
       : undefined;
-    const row: any = existing ? { ...existing } : {
-      id: id(), tenantId: tid, createdAt: t,
-    };
+    const row: any = existing
+      ? { ...existing }
+      : {
+          id: id(),
+          tenantId: tid,
+          createdAt: t,
+        };
     row.provider = opts.provider;
     row.label = opts.label;
     row.model = opts.model;
@@ -1544,7 +2899,8 @@ export const storage = {
     if (opts.apiKey !== undefined) {
       if (opts.apiKey === "") {
         secretStore.deleteSecret(tid, AI_PROVIDER_SECRET, row.id, "api_key");
-        row.apiKeyEnc = null; row.apiKeyMask = null;
+        row.apiKeyEnc = null;
+        row.apiKeyMask = null;
       } else if (opts.apiKey.length > 0) {
         secretStore.setSecret(tid, AI_PROVIDER_SECRET, row.id, "api_key", enc(opts.apiKey));
         row.apiKeyEnc = null;
@@ -1568,10 +2924,7 @@ export const storage = {
         .set({ isDefault: 0, updatedAt: t })
         .where(and(eq(aiProviders.tenantId, tid)))
         .run();
-      db.update(aiProviders)
-        .set({ isDefault: 1, updatedAt: t })
-        .where(eq(aiProviders.id, row.id))
-        .run();
+      db.update(aiProviders).set({ isDefault: 1, updatedAt: t }).where(eq(aiProviders.id, row.id)).run();
     }
     const fresh = db.select().from(aiProviders).where(eq(aiProviders.id, row.id)).get()!;
     return aiProviderToSummary(fresh);
@@ -1581,49 +2934,80 @@ export const storage = {
     db.delete(aiTaskAssignments)
       .where(and(eq(aiTaskAssignments.tenantId, tid), eq(aiTaskAssignments.providerId, pid)))
       .run();
-    const r = db.delete(aiProviders)
-      .where(and(eq(aiProviders.id, pid), eq(aiProviders.tenantId, tid))).run();
+    const r = db
+      .delete(aiProviders)
+      .where(and(eq(aiProviders.id, pid), eq(aiProviders.tenantId, tid)))
+      .run();
     if (r.changes > 0) secretStore.deleteOwnerSecrets(tid, AI_PROVIDER_SECRET, pid);
     return r.changes > 0;
   },
   testAiProvider(tid: string, pid: string): { ok: boolean; latencyMs: number; message: string; probedAt: string } {
-    const row = db.select().from(aiProviders).where(and(eq(aiProviders.id, pid), eq(aiProviders.tenantId, tid))).get();
+    const row = db
+      .select()
+      .from(aiProviders)
+      .where(and(eq(aiProviders.id, pid), eq(aiProviders.tenantId, tid)))
+      .get();
     if (!row) return { ok: false, latencyMs: 0, message: "unknown provider", probedAt: now() };
     const r = testAiProviderImpl(hydrateAiProviderSecret(row)!);
     const probedAt = now();
-    db.update(aiProviders).set({
-      lastTestedAt: probedAt,
-      lastTestOk: r.ok ? 1 : 0,
-      lastTestMessage: r.message,
-      updatedAt: probedAt,
-    }).where(eq(aiProviders.id, pid)).run();
+    db.update(aiProviders)
+      .set({
+        lastTestedAt: probedAt,
+        lastTestOk: r.ok ? 1 : 0,
+        lastTestMessage: r.message,
+        updatedAt: probedAt,
+      })
+      .where(eq(aiProviders.id, pid))
+      .run();
     return { ...r, probedAt };
   },
+  listAiProviderModels(tid: string, pid: string): LiveModelListResult {
+    const row = db
+      .select()
+      .from(aiProviders)
+      .where(and(eq(aiProviders.id, pid), eq(aiProviders.tenantId, tid)))
+      .get();
+    if (!row) return { ok: false, latencyMs: 0, message: "unknown provider", models: [] };
+    return liveListModels(hydrateAiProviderSecret(row)!);
+  },
   getAiAssignments(tid: string): Record<AiTask, string> {
-    const rows = db.select().from(aiTaskAssignments)
-      .where(eq(aiTaskAssignments.tenantId, tid)).all();
+    const rows = db.select().from(aiTaskAssignments).where(eq(aiTaskAssignments.tenantId, tid)).all();
     const m: Record<string, string> = {};
     for (const r of rows) m[r.task] = r.providerId;
     if (!m.osint_chat && m.osint_overview) m.osint_chat = m.osint_overview;
+    if (!m.client_digest) m.client_digest = m.osint_overview || m.osint_analysis;
     return m as Record<AiTask, string>;
   },
   setAiAssignments(tid: string, assignments: Record<string, string>) {
     const t = now();
     for (const [task, pid] of Object.entries(assignments)) {
-      const exists = db.select().from(aiTaskAssignments)
-        .where(and(eq(aiTaskAssignments.tenantId, tid), eq(aiTaskAssignments.task, task))).get();
+      const exists = db
+        .select()
+        .from(aiTaskAssignments)
+        .where(and(eq(aiTaskAssignments.tenantId, tid), eq(aiTaskAssignments.task, task)))
+        .get();
       if (exists) {
-        db.update(aiTaskAssignments).set({ providerId: pid, updatedAt: t })
-          .where(eq(aiTaskAssignments.id, exists.id)).run();
+        db.update(aiTaskAssignments)
+          .set({ providerId: pid, updatedAt: t })
+          .where(eq(aiTaskAssignments.id, exists.id))
+          .run();
       } else {
-        db.insert(aiTaskAssignments).values({
-          id: id(), tenantId: tid, task, providerId: pid, updatedAt: t,
-        }).run();
+        db.insert(aiTaskAssignments)
+          .values({
+            id: id(),
+            tenantId: tid,
+            task,
+            providerId: pid,
+            updatedAt: t,
+          })
+          .run();
       }
     }
   },
   assignProviderToUnassignedAiTasks(tid: string, providerId: string, tasks: readonly string[]): string[] {
-    const provider = db.select().from(aiProviders)
+    const provider = db
+      .select()
+      .from(aiProviders)
       .where(and(eq(aiProviders.id, providerId), eq(aiProviders.tenantId, tid)))
       .get();
     if (!provider) return [];
@@ -1631,13 +3015,21 @@ export const storage = {
     const assigned: string[] = [];
     for (const task of tasks) {
       if (!providerSupportsAiTask(provider, task)) continue;
-      const exists = db.select().from(aiTaskAssignments)
+      const exists = db
+        .select()
+        .from(aiTaskAssignments)
         .where(and(eq(aiTaskAssignments.tenantId, tid), eq(aiTaskAssignments.task, task)))
         .get();
       if (exists) continue;
-      db.insert(aiTaskAssignments).values({
-        id: id(), tenantId: tid, task, providerId, updatedAt: t,
-      }).run();
+      db.insert(aiTaskAssignments)
+        .values({
+          id: id(),
+          tenantId: tid,
+          task,
+          providerId,
+          updatedAt: t,
+        })
+        .run();
       assigned.push(task);
     }
     return assigned;
@@ -1651,15 +3043,23 @@ export const storage = {
     const assignments = storage.getAiAssignments(tid);
     const pid = assignments[task];
     if (pid) {
-      const row = db.select().from(aiProviders).where(and(eq(aiProviders.id, pid), eq(aiProviders.tenantId, tid))).get();
+      const row = db
+        .select()
+        .from(aiProviders)
+        .where(and(eq(aiProviders.id, pid), eq(aiProviders.tenantId, tid)))
+        .get();
       if (usable(row)) return hydrateAiProviderSecret(row)!;
       return undefined;
     }
-    const def = db.select().from(aiProviders)
+    const def = db
+      .select()
+      .from(aiProviders)
       .where(and(eq(aiProviders.tenantId, tid), eq(aiProviders.isDefault, 1)))
       .get();
     if (usable(def)) return hydrateAiProviderSecret(def)!;
-    const fallback = db.select().from(aiProviders)
+    const fallback = db
+      .select()
+      .from(aiProviders)
       .where(and(eq(aiProviders.tenantId, tid), eq(aiProviders.enabled, 1)))
       .all()
       .find((row) => usable(row));
@@ -1677,15 +3077,23 @@ export const storage = {
     const assignments = storage.getAiAssignments(tid);
     const pid = assignments.tap_portrait;
     if (pid) {
-      const row = db.select().from(aiProviders).where(and(eq(aiProviders.id, pid), eq(aiProviders.tenantId, tid))).get();
+      const row = db
+        .select()
+        .from(aiProviders)
+        .where(and(eq(aiProviders.id, pid), eq(aiProviders.tenantId, tid)))
+        .get();
       if (usable(row) && supportsPortrait(row)) return hydrateAiProviderSecret(row)!;
       return undefined;
     }
-    const def = db.select().from(aiProviders)
+    const def = db
+      .select()
+      .from(aiProviders)
       .where(and(eq(aiProviders.tenantId, tid), eq(aiProviders.isDefault, 1)))
       .get();
     if (usable(def) && supportsPortrait(def)) return hydrateAiProviderSecret(def)!;
-    const fallback = db.select().from(aiProviders)
+    const fallback = db
+      .select()
+      .from(aiProviders)
       .where(and(eq(aiProviders.tenantId, tid), eq(aiProviders.enabled, 1)))
       .all()
       .find((row) => usable(row) && supportsPortrait(row));
@@ -1698,7 +3106,10 @@ export const storage = {
     if (opts?.category) filters.push(eq(osintSourcesTbl.category, opts.category));
     if (opts?.q) filters.push(like(osintSourcesTbl.name, `%${opts.q}%`));
     const q = filters.length
-      ? db.select().from(osintSourcesTbl).where(and(...filters))
+      ? db
+          .select()
+          .from(osintSourcesTbl)
+          .where(and(...filters))
       : db.select().from(osintSourcesTbl);
     return q.orderBy(osintSourcesTbl.category, osintSourcesTbl.name).limit(1000).all();
   },
@@ -1787,19 +3198,23 @@ export const storage = {
     // ---- daily trend (last 30 days) ----
     // SQLite has no DATE_TRUNC; substr the ISO-8601 created_at down to yyyy-mm-dd.
     const trendRows = sqlite
-      .prepare(`
+      .prepare(
+        `
         SELECT substr(COALESCE(published_at, created_at), 1, 10) as day, COUNT(*) as n
         FROM osint_findings
         WHERE COALESCE(published_at, created_at) >= ?${tenantClause}
         GROUP BY day
         ORDER BY day ASC
-      `)
+      `,
+      )
       .all(since30, ...tenantParam) as Array<{ day: string; n: number }>;
     // Fill missing days with 0 so the chart line stays continuous.
     const trend: Array<{ day: string; count: number }> = [];
     const have = new Map(trendRows.map((r) => [r.day, r.n]));
     for (let i = 29; i >= 0; i--) {
-      const d = new Date(); d.setUTCDate(d.getUTCDate() - i); d.setUTCHours(0, 0, 0, 0);
+      const d = new Date();
+      d.setUTCDate(d.getUTCDate() - i);
+      d.setUTCHours(0, 0, 0, 0);
       const key = d.toISOString().slice(0, 10);
       trend.push({ day: key, count: have.get(key) ?? 0 });
     }
@@ -1817,36 +3232,42 @@ export const storage = {
       });
 
     const topContribRows = sqlite
-      .prepare(`
+      .prepare(
+        `
         SELECT source_id as sid, COUNT(*) as n
         FROM osint_findings
         WHERE COALESCE(published_at, created_at) >= ?${tenantClause}
         GROUP BY source_id
         ORDER BY n DESC
         LIMIT 10
-      `)
+      `,
+      )
       .all(since30, ...tenantParam) as Array<{ sid: string; n: number }>;
 
     const topThreatRows = sqlite
-      .prepare(`
+      .prepare(
+        `
         SELECT source_id as sid, COUNT(*) as n
         FROM osint_findings
         WHERE intel_category = 'threat_intel'${tenantClause}
         GROUP BY source_id
         ORDER BY n DESC
         LIMIT 10
-      `)
+      `,
+      )
       .all(...tenantParam) as Array<{ sid: string; n: number }>;
 
     const topEmailRows = sqlite
-      .prepare(`
+      .prepare(
+        `
         SELECT source_id as sid, COUNT(*) as n
         FROM osint_findings
         WHERE draft_email IS NOT NULL${tenantClause}
         GROUP BY source_id
         ORDER BY n DESC
         LIMIT 10
-      `)
+      `,
+      )
       .all(...tenantParam) as Array<{ sid: string; n: number }>;
 
     return {
@@ -1875,7 +3296,9 @@ export const storage = {
     const sourceMeta = new Map(storage.listOsintSources().map((s) => [s.id, s]));
 
     // Pull aggregate counters per source in a single sweep.
-    const rows = sqlite.prepare(`
+    const rows = sqlite
+      .prepare(
+        `
       SELECT
         source_id as sid,
         COUNT(*) as total,
@@ -1888,20 +3311,32 @@ export const storage = {
       FROM osint_findings
       WHERE COALESCE(published_at, created_at) >= ?${tenantClause}
       GROUP BY source_id
-    `).all(since30, ...tenantParam) as Array<{
-      sid: string; total: number; sev_high: number; cat_total: number;
-      cat_intel: number; analyst_conv: number; iocs_len_sum: number; iocs_rows: number;
+    `,
+      )
+      .all(since30, ...tenantParam) as Array<{
+      sid: string;
+      total: number;
+      sev_high: number;
+      cat_total: number;
+      cat_intel: number;
+      analyst_conv: number;
+      iocs_len_sum: number;
+      iocs_rows: number;
     }>;
 
     // Median lag per source = median (created_at - published_at) in hours.
     // SQLite has no MEDIAN; compute in JS over a per-source row list.
-    const lagRows = sqlite.prepare(`
+    const lagRows = sqlite
+      .prepare(
+        `
       SELECT source_id as sid,
              (julianday(created_at) - julianday(published_at)) * 24.0 as lag_h
       FROM osint_findings
       WHERE COALESCE(published_at, created_at) >= ?${tenantClause}
         AND published_at IS NOT NULL AND created_at IS NOT NULL
-    `).all(since30, ...tenantParam) as Array<{ sid: string; lag_h: number }>;
+    `,
+      )
+      .all(since30, ...tenantParam) as Array<{ sid: string; lag_h: number }>;
     const lagBySrc = new Map<string, number[]>();
     for (const r of lagRows) {
       if (typeof r.lag_h !== "number" || isNaN(r.lag_h) || r.lag_h < 0) continue;
@@ -1919,11 +3354,15 @@ export const storage = {
     // IoC density: precise mean IoC count per finding per source via a second
     // small pass (parsing JSON in SQL is messy). We grab id+iocs in batch and
     // count in JS.
-    const iocRows = sqlite.prepare(`
+    const iocRows = sqlite
+      .prepare(
+        `
       SELECT source_id as sid, iocs
       FROM osint_findings
       WHERE COALESCE(published_at, created_at) >= ?${tenantClause}
-    `).all(since30, ...tenantParam) as Array<{ sid: string; iocs: string | null }>;
+    `,
+      )
+      .all(since30, ...tenantParam) as Array<{ sid: string; iocs: string | null }>;
     const iocSums = new Map<string, { sum: number; n: number }>();
     for (const r of iocRows) {
       const slot = iocSums.get(r.sid) ?? { sum: 0, n: 0 };
@@ -1937,7 +3376,9 @@ export const storage = {
               if (Array.isArray(v)) slot.sum += v.length;
             }
           }
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
       }
       iocSums.set(r.sid, slot);
     }
@@ -1955,12 +3396,7 @@ export const storage = {
       const lagH = median(lagArr);
       const freshScore = clamp01(1 - Math.min(72, lagH) / 72);
       // Composite weights: conv 0.30, ioc 0.20, intel 0.20, sev 0.15, fresh 0.15.
-      const score01 =
-        0.30 * conv +
-        0.20 * iocDensity +
-        0.20 * intelRatio +
-        0.15 * sevSkew +
-        0.15 * freshScore;
+      const score01 = 0.3 * conv + 0.2 * iocDensity + 0.2 * intelRatio + 0.15 * sevSkew + 0.15 * freshScore;
       const src = sourceMeta.get(r.sid);
       return {
         sourceId: r.sid,
@@ -2003,12 +3439,16 @@ export const storage = {
     const sourceMeta = new Map(storage.listOsintSources().map((s) => [s.id, s]));
 
     // Pull every clustered finding in the window so we can group by cluster.
-    const rows = sqlite.prepare(`
+    const rows = sqlite
+      .prepare(
+        `
       SELECT id, source_id as sid, cluster_id, published_at
       FROM osint_findings
       WHERE COALESCE(published_at, created_at) >= ?${tenantClause}
         AND cluster_id IS NOT NULL
-    `).all(since30, ...tenantParam) as Array<{ id: string; sid: string; cluster_id: string; published_at: string }>;
+    `,
+      )
+      .all(since30, ...tenantParam) as Array<{ id: string; sid: string; cluster_id: string; published_at: string }>;
 
     // Per-source counters.
     const totalBySrc = new Map<string, number>();
@@ -2044,7 +3484,10 @@ export const storage = {
         let firstSrc = members[0].sid;
         let firstPub = members[0].pub;
         for (const m of members) {
-          if (m.pub && (m.pub < firstPub || !firstPub)) { firstPub = m.pub; firstSrc = m.sid; }
+          if (m.pub && (m.pub < firstPub || !firstPub)) {
+            firstPub = m.pub;
+            firstSrc = m.sid;
+          }
         }
         firstBySrc.set(firstSrc, (firstBySrc.get(firstSrc) ?? 0) + 1);
         for (const s of uniqSrcs) shareTotalBySrc.set(s, (shareTotalBySrc.get(s) ?? 0) + 1);
@@ -2068,23 +3511,29 @@ export const storage = {
       return src ? translateSourceName(src.name, src.language) : sid;
     };
 
-    const uniqueRate = Array.from(totalBySrc.entries()).map(([sid, total]) => {
-      const uniqueCount = uniqueBySrc.get(sid) ?? 0;
-      return {
+    const uniqueRate = Array.from(totalBySrc.entries())
+      .map(([sid, total]) => {
+        const uniqueCount = uniqueBySrc.get(sid) ?? 0;
+        return {
+          sourceId: sid,
+          name: nameOf(sid),
+          uniqueRate: total > 0 ? Math.round((uniqueCount / total) * 1000) / 1000 : 0,
+          total,
+          uniqueCount,
+        };
+      })
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 20);
+
+    const firstToPublish = Array.from(firstBySrc.entries())
+      .map(([sid, firstCount]) => ({
         sourceId: sid,
         name: nameOf(sid),
-        uniqueRate: total > 0 ? Math.round((uniqueCount / total) * 1000) / 1000 : 0,
-        total,
-        uniqueCount,
-      };
-    }).sort((a, b) => b.total - a.total).slice(0, 20);
-
-    const firstToPublish = Array.from(firstBySrc.entries()).map(([sid, firstCount]) => ({
-      sourceId: sid,
-      name: nameOf(sid),
-      firstCount,
-      shareTotal: shareTotalBySrc.get(sid) ?? 0,
-    })).sort((a, b) => b.firstCount - a.firstCount).slice(0, 15);
+        firstCount,
+        shareTotal: shareTotalBySrc.get(sid) ?? 0,
+      }))
+      .sort((a, b) => b.firstCount - a.firstCount)
+      .slice(0, 15);
 
     return {
       uniqueRate,
@@ -2104,47 +3553,210 @@ export const storage = {
     const sourceMeta = new Map(storage.listOsintSources().map((s) => [s.id, s]));
 
     // Pull all relevant fields for the window once.
-    const rows = sqlite.prepare(`
+    const rows = sqlite
+      .prepare(
+        `
       SELECT source_id as sid, attack_techniques, sectors, regions
       FROM osint_findings
       WHERE COALESCE(published_at, created_at) >= ?${tenantClause}
-    `).all(since30, ...tenantParam) as Array<{ sid: string; attack_techniques: string | null; sectors: string | null; regions: string | null }>;
+    `,
+      )
+      .all(since30, ...tenantParam) as Array<{
+      sid: string;
+      attack_techniques: string | null;
+      sectors: string | null;
+      regions: string | null;
+    }>;
 
     // ATT&CK tactic mapping. We bucket techniques into 14 canonical Enterprise
     // tactics for human readability; the source data is technique-level.
     // (Detail technique counts are still available via individual finding pages.)
     const TACTIC_MAP: Record<string, { id: string; label: string }> = {
       // Reconnaissance
-      "T1595": { id: "TA0043", label: "Reconnaissance" }, "T1592": { id: "TA0043", label: "Reconnaissance" },
-      "T1589": { id: "TA0043", label: "Reconnaissance" }, "T1590": { id: "TA0043", label: "Reconnaissance" },
-      "T1591": { id: "TA0043", label: "Reconnaissance" }, "T1593": { id: "TA0043", label: "Reconnaissance" },
-      "T1594": { id: "TA0043", label: "Reconnaissance" }, "T1596": { id: "TA0043", label: "Reconnaissance" }, "T1597": { id: "TA0043", label: "Reconnaissance" }, "T1598": { id: "TA0043", label: "Reconnaissance" },
+      T1595: { id: "TA0043", label: "Reconnaissance" },
+      T1592: { id: "TA0043", label: "Reconnaissance" },
+      T1589: { id: "TA0043", label: "Reconnaissance" },
+      T1590: { id: "TA0043", label: "Reconnaissance" },
+      T1591: { id: "TA0043", label: "Reconnaissance" },
+      T1593: { id: "TA0043", label: "Reconnaissance" },
+      T1594: { id: "TA0043", label: "Reconnaissance" },
+      T1596: { id: "TA0043", label: "Reconnaissance" },
+      T1597: { id: "TA0043", label: "Reconnaissance" },
+      T1598: { id: "TA0043", label: "Reconnaissance" },
       // Resource Development
-      "T1583": { id: "TA0042", label: "Resource Development" }, "T1584": { id: "TA0042", label: "Resource Development" }, "T1585": { id: "TA0042", label: "Resource Development" }, "T1586": { id: "TA0042", label: "Resource Development" }, "T1587": { id: "TA0042", label: "Resource Development" }, "T1588": { id: "TA0042", label: "Resource Development" }, "T1608": { id: "TA0042", label: "Resource Development" },
+      T1583: { id: "TA0042", label: "Resource Development" },
+      T1584: { id: "TA0042", label: "Resource Development" },
+      T1585: { id: "TA0042", label: "Resource Development" },
+      T1586: { id: "TA0042", label: "Resource Development" },
+      T1587: { id: "TA0042", label: "Resource Development" },
+      T1588: { id: "TA0042", label: "Resource Development" },
+      T1608: { id: "TA0042", label: "Resource Development" },
       // Initial Access
-      "T1078": { id: "TA0001", label: "Initial Access" }, "T1133": { id: "TA0001", label: "Initial Access" }, "T1190": { id: "TA0001", label: "Initial Access" }, "T1189": { id: "TA0001", label: "Initial Access" }, "T1199": { id: "TA0001", label: "Initial Access" }, "T1200": { id: "TA0001", label: "Initial Access" }, "T1566": { id: "TA0001", label: "Initial Access" }, "T1091": { id: "TA0001", label: "Initial Access" }, "T1195": { id: "TA0001", label: "Initial Access" },
+      T1078: { id: "TA0001", label: "Initial Access" },
+      T1133: { id: "TA0001", label: "Initial Access" },
+      T1190: { id: "TA0001", label: "Initial Access" },
+      T1189: { id: "TA0001", label: "Initial Access" },
+      T1199: { id: "TA0001", label: "Initial Access" },
+      T1200: { id: "TA0001", label: "Initial Access" },
+      T1566: { id: "TA0001", label: "Initial Access" },
+      T1091: { id: "TA0001", label: "Initial Access" },
+      T1195: { id: "TA0001", label: "Initial Access" },
       // Execution
-      "T1059": { id: "TA0002", label: "Execution" }, "T1106": { id: "TA0002", label: "Execution" }, "T1129": { id: "TA0002", label: "Execution" }, "T1203": { id: "TA0002", label: "Execution" }, "T1204": { id: "TA0002", label: "Execution" }, "T1559": { id: "TA0002", label: "Execution" }, "T1569": { id: "TA0002", label: "Execution" }, "T1610": { id: "TA0002", label: "Execution" }, "T1053": { id: "TA0002", label: "Execution" },
+      T1059: { id: "TA0002", label: "Execution" },
+      T1106: { id: "TA0002", label: "Execution" },
+      T1129: { id: "TA0002", label: "Execution" },
+      T1203: { id: "TA0002", label: "Execution" },
+      T1204: { id: "TA0002", label: "Execution" },
+      T1559: { id: "TA0002", label: "Execution" },
+      T1569: { id: "TA0002", label: "Execution" },
+      T1610: { id: "TA0002", label: "Execution" },
+      T1053: { id: "TA0002", label: "Execution" },
       // Persistence
-      "T1098": { id: "TA0003", label: "Persistence" }, "T1136": { id: "TA0003", label: "Persistence" }, "T1137": { id: "TA0003", label: "Persistence" }, "T1176": { id: "TA0003", label: "Persistence" }, "T1505": { id: "TA0003", label: "Persistence" }, "T1543": { id: "TA0003", label: "Persistence" }, "T1546": { id: "TA0003", label: "Persistence" }, "T1547": { id: "TA0003", label: "Persistence" }, "T1554": { id: "TA0003", label: "Persistence" }, "T1556": { id: "TA0003", label: "Persistence" }, "T1574": { id: "TA0003", label: "Persistence" }, "T1525": { id: "TA0003", label: "Persistence" },
+      T1098: { id: "TA0003", label: "Persistence" },
+      T1136: { id: "TA0003", label: "Persistence" },
+      T1137: { id: "TA0003", label: "Persistence" },
+      T1176: { id: "TA0003", label: "Persistence" },
+      T1505: { id: "TA0003", label: "Persistence" },
+      T1543: { id: "TA0003", label: "Persistence" },
+      T1546: { id: "TA0003", label: "Persistence" },
+      T1547: { id: "TA0003", label: "Persistence" },
+      T1554: { id: "TA0003", label: "Persistence" },
+      T1556: { id: "TA0003", label: "Persistence" },
+      T1574: { id: "TA0003", label: "Persistence" },
+      T1525: { id: "TA0003", label: "Persistence" },
       // Privilege Escalation
-      "T1548": { id: "TA0004", label: "Privilege Escalation" }, "T1484": { id: "TA0004", label: "Privilege Escalation" }, "T1611": { id: "TA0004", label: "Privilege Escalation" }, "T1068": { id: "TA0004", label: "Privilege Escalation" }, "T1055": { id: "TA0004", label: "Privilege Escalation" }, "T1134": { id: "TA0004", label: "Privilege Escalation" },
+      T1548: { id: "TA0004", label: "Privilege Escalation" },
+      T1484: { id: "TA0004", label: "Privilege Escalation" },
+      T1611: { id: "TA0004", label: "Privilege Escalation" },
+      T1068: { id: "TA0004", label: "Privilege Escalation" },
+      T1055: { id: "TA0004", label: "Privilege Escalation" },
+      T1134: { id: "TA0004", label: "Privilege Escalation" },
       // Defense Evasion
-      "T1027": { id: "TA0005", label: "Defense Evasion" }, "T1036": { id: "TA0005", label: "Defense Evasion" }, "T1070": { id: "TA0005", label: "Defense Evasion" }, "T1112": { id: "TA0005", label: "Defense Evasion" }, "T1140": { id: "TA0005", label: "Defense Evasion" }, "T1197": { id: "TA0005", label: "Defense Evasion" }, "T1202": { id: "TA0005", label: "Defense Evasion" }, "T1207": { id: "TA0005", label: "Defense Evasion" }, "T1211": { id: "TA0005", label: "Defense Evasion" }, "T1218": { id: "TA0005", label: "Defense Evasion" }, "T1222": { id: "TA0005", label: "Defense Evasion" }, "T1480": { id: "TA0005", label: "Defense Evasion" }, "T1497": { id: "TA0005", label: "Defense Evasion" }, "T1535": { id: "TA0005", label: "Defense Evasion" }, "T1542": { id: "TA0005", label: "Defense Evasion" }, "T1553": { id: "TA0005", label: "Defense Evasion" }, "T1562": { id: "TA0005", label: "Defense Evasion" }, "T1564": { id: "TA0005", label: "Defense Evasion" }, "T1578": { id: "TA0005", label: "Defense Evasion" }, "T1600": { id: "TA0005", label: "Defense Evasion" }, "T1620": { id: "TA0005", label: "Defense Evasion" },
+      T1027: { id: "TA0005", label: "Defense Evasion" },
+      T1036: { id: "TA0005", label: "Defense Evasion" },
+      T1070: { id: "TA0005", label: "Defense Evasion" },
+      T1112: { id: "TA0005", label: "Defense Evasion" },
+      T1140: { id: "TA0005", label: "Defense Evasion" },
+      T1197: { id: "TA0005", label: "Defense Evasion" },
+      T1202: { id: "TA0005", label: "Defense Evasion" },
+      T1207: { id: "TA0005", label: "Defense Evasion" },
+      T1211: { id: "TA0005", label: "Defense Evasion" },
+      T1218: { id: "TA0005", label: "Defense Evasion" },
+      T1222: { id: "TA0005", label: "Defense Evasion" },
+      T1480: { id: "TA0005", label: "Defense Evasion" },
+      T1497: { id: "TA0005", label: "Defense Evasion" },
+      T1535: { id: "TA0005", label: "Defense Evasion" },
+      T1542: { id: "TA0005", label: "Defense Evasion" },
+      T1553: { id: "TA0005", label: "Defense Evasion" },
+      T1562: { id: "TA0005", label: "Defense Evasion" },
+      T1564: { id: "TA0005", label: "Defense Evasion" },
+      T1578: { id: "TA0005", label: "Defense Evasion" },
+      T1600: { id: "TA0005", label: "Defense Evasion" },
+      T1620: { id: "TA0005", label: "Defense Evasion" },
       // Credential Access
-      "T1110": { id: "TA0006", label: "Credential Access" }, "T1187": { id: "TA0006", label: "Credential Access" }, "T1212": { id: "TA0006", label: "Credential Access" }, "T1539": { id: "TA0006", label: "Credential Access" }, "T1552": { id: "TA0006", label: "Credential Access" }, "T1555": { id: "TA0006", label: "Credential Access" }, "T1557": { id: "TA0006", label: "Credential Access" }, "T1558": { id: "TA0006", label: "Credential Access" }, "T1606": { id: "TA0006", label: "Credential Access" }, "T1003": { id: "TA0006", label: "Credential Access" }, "T1040": { id: "TA0006", label: "Credential Access" }, "T1056": { id: "TA0006", label: "Credential Access" }, "T1111": { id: "TA0006", label: "Credential Access" },
+      T1110: { id: "TA0006", label: "Credential Access" },
+      T1187: { id: "TA0006", label: "Credential Access" },
+      T1212: { id: "TA0006", label: "Credential Access" },
+      T1539: { id: "TA0006", label: "Credential Access" },
+      T1552: { id: "TA0006", label: "Credential Access" },
+      T1555: { id: "TA0006", label: "Credential Access" },
+      T1557: { id: "TA0006", label: "Credential Access" },
+      T1558: { id: "TA0006", label: "Credential Access" },
+      T1606: { id: "TA0006", label: "Credential Access" },
+      T1003: { id: "TA0006", label: "Credential Access" },
+      T1040: { id: "TA0006", label: "Credential Access" },
+      T1056: { id: "TA0006", label: "Credential Access" },
+      T1111: { id: "TA0006", label: "Credential Access" },
       // Discovery
-      "T1007": { id: "TA0007", label: "Discovery" }, "T1010": { id: "TA0007", label: "Discovery" }, "T1012": { id: "TA0007", label: "Discovery" }, "T1016": { id: "TA0007", label: "Discovery" }, "T1018": { id: "TA0007", label: "Discovery" }, "T1033": { id: "TA0007", label: "Discovery" }, "T1046": { id: "TA0007", label: "Discovery" }, "T1049": { id: "TA0007", label: "Discovery" }, "T1057": { id: "TA0007", label: "Discovery" }, "T1069": { id: "TA0007", label: "Discovery" }, "T1082": { id: "TA0007", label: "Discovery" }, "T1083": { id: "TA0007", label: "Discovery" }, "T1087": { id: "TA0007", label: "Discovery" }, "T1120": { id: "TA0007", label: "Discovery" }, "T1124": { id: "TA0007", label: "Discovery" }, "T1135": { id: "TA0007", label: "Discovery" }, "T1201": { id: "TA0007", label: "Discovery" }, "T1217": { id: "TA0007", label: "Discovery" }, "T1482": { id: "TA0007", label: "Discovery" }, "T1518": { id: "TA0007", label: "Discovery" }, "T1580": { id: "TA0007", label: "Discovery" }, "T1614": { id: "TA0007", label: "Discovery" }, "T1615": { id: "TA0007", label: "Discovery" }, "T1619": { id: "TA0007", label: "Discovery" },
+      T1007: { id: "TA0007", label: "Discovery" },
+      T1010: { id: "TA0007", label: "Discovery" },
+      T1012: { id: "TA0007", label: "Discovery" },
+      T1016: { id: "TA0007", label: "Discovery" },
+      T1018: { id: "TA0007", label: "Discovery" },
+      T1033: { id: "TA0007", label: "Discovery" },
+      T1046: { id: "TA0007", label: "Discovery" },
+      T1049: { id: "TA0007", label: "Discovery" },
+      T1057: { id: "TA0007", label: "Discovery" },
+      T1069: { id: "TA0007", label: "Discovery" },
+      T1082: { id: "TA0007", label: "Discovery" },
+      T1083: { id: "TA0007", label: "Discovery" },
+      T1087: { id: "TA0007", label: "Discovery" },
+      T1120: { id: "TA0007", label: "Discovery" },
+      T1124: { id: "TA0007", label: "Discovery" },
+      T1135: { id: "TA0007", label: "Discovery" },
+      T1201: { id: "TA0007", label: "Discovery" },
+      T1217: { id: "TA0007", label: "Discovery" },
+      T1482: { id: "TA0007", label: "Discovery" },
+      T1518: { id: "TA0007", label: "Discovery" },
+      T1580: { id: "TA0007", label: "Discovery" },
+      T1614: { id: "TA0007", label: "Discovery" },
+      T1615: { id: "TA0007", label: "Discovery" },
+      T1619: { id: "TA0007", label: "Discovery" },
       // Lateral Movement
-      "T1021": { id: "TA0008", label: "Lateral Movement" }, "T1080": { id: "TA0008", label: "Lateral Movement" }, "T1210": { id: "TA0008", label: "Lateral Movement" }, "T1534": { id: "TA0008", label: "Lateral Movement" }, "T1550": { id: "TA0008", label: "Lateral Movement" }, "T1563": { id: "TA0008", label: "Lateral Movement" }, "T1570": { id: "TA0008", label: "Lateral Movement" }, "T1072": { id: "TA0008", label: "Lateral Movement" }, "T1601": { id: "TA0008", label: "Lateral Movement" },
+      T1021: { id: "TA0008", label: "Lateral Movement" },
+      T1080: { id: "TA0008", label: "Lateral Movement" },
+      T1210: { id: "TA0008", label: "Lateral Movement" },
+      T1534: { id: "TA0008", label: "Lateral Movement" },
+      T1550: { id: "TA0008", label: "Lateral Movement" },
+      T1563: { id: "TA0008", label: "Lateral Movement" },
+      T1570: { id: "TA0008", label: "Lateral Movement" },
+      T1072: { id: "TA0008", label: "Lateral Movement" },
+      T1601: { id: "TA0008", label: "Lateral Movement" },
       // Collection
-      "T1005": { id: "TA0009", label: "Collection" }, "T1025": { id: "TA0009", label: "Collection" }, "T1039": { id: "TA0009", label: "Collection" }, "T1074": { id: "TA0009", label: "Collection" }, "T1113": { id: "TA0009", label: "Collection" }, "T1114": { id: "TA0009", label: "Collection" }, "T1115": { id: "TA0009", label: "Collection" }, "T1119": { id: "TA0009", label: "Collection" }, "T1123": { id: "TA0009", label: "Collection" }, "T1125": { id: "TA0009", label: "Collection" }, "T1185": { id: "TA0009", label: "Collection" }, "T1213": { id: "TA0009", label: "Collection" }, "T1530": { id: "TA0009", label: "Collection" }, "T1602": { id: "TA0009", label: "Collection" },
+      T1005: { id: "TA0009", label: "Collection" },
+      T1025: { id: "TA0009", label: "Collection" },
+      T1039: { id: "TA0009", label: "Collection" },
+      T1074: { id: "TA0009", label: "Collection" },
+      T1113: { id: "TA0009", label: "Collection" },
+      T1114: { id: "TA0009", label: "Collection" },
+      T1115: { id: "TA0009", label: "Collection" },
+      T1119: { id: "TA0009", label: "Collection" },
+      T1123: { id: "TA0009", label: "Collection" },
+      T1125: { id: "TA0009", label: "Collection" },
+      T1185: { id: "TA0009", label: "Collection" },
+      T1213: { id: "TA0009", label: "Collection" },
+      T1530: { id: "TA0009", label: "Collection" },
+      T1602: { id: "TA0009", label: "Collection" },
       // Command and Control
-      "T1071": { id: "TA0011", label: "Command & Control" }, "T1090": { id: "TA0011", label: "Command & Control" }, "T1092": { id: "TA0011", label: "Command & Control" }, "T1095": { id: "TA0011", label: "Command & Control" }, "T1102": { id: "TA0011", label: "Command & Control" }, "T1104": { id: "TA0011", label: "Command & Control" }, "T1105": { id: "TA0011", label: "Command & Control" }, "T1132": { id: "TA0011", label: "Command & Control" }, "T1205": { id: "TA0011", label: "Command & Control" }, "T1219": { id: "TA0011", label: "Command & Control" }, "T1568": { id: "TA0011", label: "Command & Control" }, "T1571": { id: "TA0011", label: "Command & Control" }, "T1572": { id: "TA0011", label: "Command & Control" }, "T1573": { id: "TA0011", label: "Command & Control" }, "T1001": { id: "TA0011", label: "Command & Control" }, "T1008": { id: "TA0011", label: "Command & Control" }, "T1029": { id: "TA0011", label: "Command & Control" }, "T1030": { id: "TA0011", label: "Command & Control" },
+      T1071: { id: "TA0011", label: "Command & Control" },
+      T1090: { id: "TA0011", label: "Command & Control" },
+      T1092: { id: "TA0011", label: "Command & Control" },
+      T1095: { id: "TA0011", label: "Command & Control" },
+      T1102: { id: "TA0011", label: "Command & Control" },
+      T1104: { id: "TA0011", label: "Command & Control" },
+      T1105: { id: "TA0011", label: "Command & Control" },
+      T1132: { id: "TA0011", label: "Command & Control" },
+      T1205: { id: "TA0011", label: "Command & Control" },
+      T1219: { id: "TA0011", label: "Command & Control" },
+      T1568: { id: "TA0011", label: "Command & Control" },
+      T1571: { id: "TA0011", label: "Command & Control" },
+      T1572: { id: "TA0011", label: "Command & Control" },
+      T1573: { id: "TA0011", label: "Command & Control" },
+      T1001: { id: "TA0011", label: "Command & Control" },
+      T1008: { id: "TA0011", label: "Command & Control" },
+      T1029: { id: "TA0011", label: "Command & Control" },
+      T1030: { id: "TA0011", label: "Command & Control" },
       // Exfiltration
-      "T1011": { id: "TA0010", label: "Exfiltration" }, "T1020": { id: "TA0010", label: "Exfiltration" }, "T1041": { id: "TA0010", label: "Exfiltration" }, "T1048": { id: "TA0010", label: "Exfiltration" }, "T1052": { id: "TA0010", label: "Exfiltration" }, "T1567": { id: "TA0010", label: "Exfiltration" },
+      T1011: { id: "TA0010", label: "Exfiltration" },
+      T1020: { id: "TA0010", label: "Exfiltration" },
+      T1041: { id: "TA0010", label: "Exfiltration" },
+      T1048: { id: "TA0010", label: "Exfiltration" },
+      T1052: { id: "TA0010", label: "Exfiltration" },
+      T1567: { id: "TA0010", label: "Exfiltration" },
       // Impact
-      "T1485": { id: "TA0040", label: "Impact" }, "T1486": { id: "TA0040", label: "Impact" }, "T1489": { id: "TA0040", label: "Impact" }, "T1490": { id: "TA0040", label: "Impact" }, "T1491": { id: "TA0040", label: "Impact" }, "T1496": { id: "TA0040", label: "Impact" }, "T1498": { id: "TA0040", label: "Impact" }, "T1499": { id: "TA0040", label: "Impact" }, "T1529": { id: "TA0040", label: "Impact" }, "T1531": { id: "TA0040", label: "Impact" }, "T1561": { id: "TA0040", label: "Impact" }, "T1565": { id: "TA0040", label: "Impact" }, "T1657": { id: "TA0040", label: "Impact" },
+      T1485: { id: "TA0040", label: "Impact" },
+      T1486: { id: "TA0040", label: "Impact" },
+      T1489: { id: "TA0040", label: "Impact" },
+      T1490: { id: "TA0040", label: "Impact" },
+      T1491: { id: "TA0040", label: "Impact" },
+      T1496: { id: "TA0040", label: "Impact" },
+      T1498: { id: "TA0040", label: "Impact" },
+      T1499: { id: "TA0040", label: "Impact" },
+      T1529: { id: "TA0040", label: "Impact" },
+      T1531: { id: "TA0040", label: "Impact" },
+      T1561: { id: "TA0040", label: "Impact" },
+      T1565: { id: "TA0040", label: "Impact" },
+      T1657: { id: "TA0040", label: "Impact" },
     };
 
     // Aggregate counts per (source, tactic) and per (source, sector/region).
@@ -2168,7 +3780,9 @@ export const storage = {
         if (Array.isArray(arr)) {
           const seen = new Set<string>();
           for (const t of arr) {
-            const techId = String((t && typeof t === "object" && t.id) ? t.id : t || "").toUpperCase().split(".")[0];
+            const techId = String(t && typeof t === "object" && t.id ? t.id : t || "")
+              .toUpperCase()
+              .split(".")[0];
             if (!/^T[0-9]{4}$/.test(techId)) continue;
             const tac = TACTIC_MAP[techId];
             if (!tac) continue;
@@ -2178,7 +3792,9 @@ export const storage = {
             tacticTotals.set(tac.id, (tacticTotals.get(tac.id) ?? 0) + 1);
           }
         }
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
       // Sectors + regions — unified dimension list. Prefix with kind so they
       // don't collide when a region and sector share a short token.
       const pushDim = (val: unknown, prefix: string) => {
@@ -2187,7 +3803,9 @@ export const storage = {
           if (!Array.isArray(arr)) return;
           const seen = new Set<string>();
           for (const x of arr) {
-            const k = String(x || "").trim().toLowerCase();
+            const k = String(x || "")
+              .trim()
+              .toLowerCase();
             if (!k) continue;
             const dim = `${prefix}:${k}`;
             if (seen.has(dim)) continue;
@@ -2195,7 +3813,9 @@ export const storage = {
             inc(dimensionBySrc, r.sid, dim);
             dimTotals.set(dim, (dimTotals.get(dim) ?? 0) + 1);
           }
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
       };
       pushDim(r.sectors, "sector");
       pushDim(r.regions, "region");
@@ -2205,7 +3825,9 @@ export const storage = {
     const TOP_SOURCES = 12;
     const TOP_DIMS = 12;
     const topSrcs = Array.from(srcTotals.entries())
-      .sort((a, b) => b[1] - a[1]).slice(0, TOP_SOURCES).map(([s]) => s);
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, TOP_SOURCES)
+      .map(([s]) => s);
     const nameOf = (sid: string) => {
       const src = sourceMeta.get(sid);
       return src ? translateSourceName(src.name, src.language) : sid;
@@ -2213,28 +3835,47 @@ export const storage = {
 
     // ATT&CK matrix: 12 tactics, ordered TA0043, TA0042, TA0001..TA0040.
     const tacticOrder = [
-      "TA0043","TA0042","TA0001","TA0002","TA0003","TA0004","TA0005",
-      "TA0006","TA0007","TA0008","TA0009","TA0011","TA0010","TA0040",
+      "TA0043",
+      "TA0042",
+      "TA0001",
+      "TA0002",
+      "TA0003",
+      "TA0004",
+      "TA0005",
+      "TA0006",
+      "TA0007",
+      "TA0008",
+      "TA0009",
+      "TA0011",
+      "TA0010",
+      "TA0040",
     ];
     const tacticLabel: Record<string, string> = {
-      TA0043: "Reconnaissance", TA0042: "Resource Dev", TA0001: "Initial Access",
-      TA0002: "Execution", TA0003: "Persistence", TA0004: "Priv Escalation",
-      TA0005: "Defense Evasion", TA0006: "Credential Access", TA0007: "Discovery",
-      TA0008: "Lateral Movement", TA0009: "Collection", TA0011: "C2",
-      TA0010: "Exfiltration", TA0040: "Impact",
+      TA0043: "Reconnaissance",
+      TA0042: "Resource Dev",
+      TA0001: "Initial Access",
+      TA0002: "Execution",
+      TA0003: "Persistence",
+      TA0004: "Priv Escalation",
+      TA0005: "Defense Evasion",
+      TA0006: "Credential Access",
+      TA0007: "Discovery",
+      TA0008: "Lateral Movement",
+      TA0009: "Collection",
+      TA0011: "C2",
+      TA0010: "Exfiltration",
+      TA0040: "Impact",
     };
     // Only emit tactics that have at least one hit (otherwise the heatmap is mostly empty).
     const tacticsUsed = tacticOrder.filter((t) => (tacticTotals.get(t) ?? 0) > 0);
-    const attackMatrix: number[][] = topSrcs.map((sid) =>
-      tacticsUsed.map((t) => (tacticBySrc.get(sid)?.get(t) ?? 0)),
-    );
+    const attackMatrix: number[][] = topSrcs.map((sid) => tacticsUsed.map((t) => tacticBySrc.get(sid)?.get(t) ?? 0));
 
     // Sectors+regions matrix: top dimensions by total.
     const topDims = Array.from(dimTotals.entries())
-      .sort((a, b) => b[1] - a[1]).slice(0, TOP_DIMS).map(([d]) => d);
-    const sectorsMatrix: number[][] = topSrcs.map((sid) =>
-      topDims.map((d) => (dimensionBySrc.get(sid)?.get(d) ?? 0)),
-    );
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, TOP_DIMS)
+      .map(([d]) => d);
+    const sectorsMatrix: number[][] = topSrcs.map((sid) => topDims.map((d) => dimensionBySrc.get(sid)?.get(d) ?? 0));
 
     return {
       attack: {
@@ -2273,40 +3914,66 @@ export const storage = {
     let total = 0;
     if (explicitIds) {
       const placeholders = explicitIds.map(() => "?").join(",");
-      const row = sqlite.prepare(
-        `SELECT COUNT(*) as n FROM osint_findings WHERE tenant_id = ? AND id IN (${placeholders})`,
-      ).get(tid, ...explicitIds) as { n: number };
+      const row = sqlite
+        .prepare(`SELECT COUNT(*) as n FROM osint_findings WHERE tenant_id = ? AND id IN (${placeholders})`)
+        .get(tid, ...explicitIds) as { n: number };
       total = row?.n ?? 0;
     } else if (onlyUnanalyzed) {
-      const row = sqlite.prepare(`
+      const row = sqlite
+        .prepare(
+          `
         SELECT COUNT(*) as n FROM osint_findings
         WHERE tenant_id = ? AND COALESCE(published_at, created_at) >= ? AND ai_analyzed_at IS NULL
-      `).get(tid, sinceIso) as { n: number };
+      `,
+        )
+        .get(tid, sinceIso) as { n: number };
       total = row?.n ?? 0;
     } else {
-      const row = sqlite.prepare(`
+      const row = sqlite
+        .prepare(
+          `
         SELECT COUNT(*) as n FROM osint_findings
         WHERE tenant_id = ? AND COALESCE(published_at, created_at) >= ?
-      `).get(tid, sinceIso) as { n: number };
+      `,
+        )
+        .get(tid, sinceIso) as { n: number };
       total = row?.n ?? 0;
     }
     const startedAt = now();
-    sqlite.prepare(`
+    sqlite
+      .prepare(
+        `
       INSERT INTO osint_reanalyze_jobs (id, tenant_id, status, total_count, done_count, fail_count, started_at)
       VALUES (?, ?, 'queued', ?, 0, 0, ?)
-    `).run(jobId, tid, total, startedAt);
+    `,
+      )
+      .run(jobId, tid, total, startedAt);
     // Kick off the worker (fire-and-forget). It updates row state as it goes.
     setTimeout(() => {
-      storage._runReanalyzeJob(jobId, tid, sinceIso, { onlyUnanalyzed, ids: explicitIds })
+      storage
+        ._runReanalyzeJob(jobId, tid, sinceIso, { onlyUnanalyzed, ids: explicitIds })
         .catch((e) => console.warn("[reanalyze] job failed", e));
     }, 50);
-    return { id: jobId, status: "queued", totalCount: total, doneCount: 0, failCount: 0, startedAt, finishedAt: null, error: null };
+    return {
+      id: jobId,
+      status: "queued",
+      totalCount: total,
+      doneCount: 0,
+      failCount: 0,
+      startedAt,
+      finishedAt: null,
+      error: null,
+    };
   },
 
   getOsintReanalyzeJob(tid: string, jobId: string): import("@shared/schema").OsintReanalyzeJobDTO | undefined {
-    const row = sqlite.prepare(`
+    const row = sqlite
+      .prepare(
+        `
       SELECT * FROM osint_reanalyze_jobs WHERE id = ? AND tenant_id = ?
-    `).get(jobId, tid) as any;
+    `,
+      )
+      .get(jobId, tid) as any;
     if (!row) return undefined;
     return {
       id: row.id,
@@ -2320,21 +3987,27 @@ export const storage = {
     };
   },
 
-  cancelOsintReanalyzeJob(tid: string, jobId: string, actor?: string | null): { ok: boolean; status: string; message?: string } {
-    const row = sqlite.prepare(
-      "SELECT id, status FROM osint_reanalyze_jobs WHERE id = ? AND tenant_id = ?",
-    ).get(jobId, tid) as { id: string; status: string } | undefined;
+  cancelOsintReanalyzeJob(
+    tid: string,
+    jobId: string,
+    actor?: string | null,
+  ): { ok: boolean; status: string; message?: string } {
+    const row = sqlite
+      .prepare("SELECT id, status FROM osint_reanalyze_jobs WHERE id = ? AND tenant_id = ?")
+      .get(jobId, tid) as { id: string; status: string } | undefined;
     if (!row) return { ok: false, status: "not_found", message: "OSINT reanalysis job not found for this tenant." };
     if (row.status !== "queued" && row.status !== "running") {
       return { ok: false, status: row.status, message: `OSINT reanalysis job already ${row.status}.` };
     }
-    sqlite.prepare(
-      `UPDATE osint_reanalyze_jobs
+    sqlite
+      .prepare(
+        `UPDATE osint_reanalyze_jobs
          SET status = 'cancelled',
              finished_at = ?,
              error = ?
        WHERE id = ? AND tenant_id = ? AND status IN ('queued','running')`,
-    ).run(now(), `Cancelled by ${actor || "operator"}.`, jobId, tid);
+      )
+      .run(now(), `Cancelled by ${actor || "operator"}.`, jobId, tid);
     return { ok: true, status: "cancelled" };
   },
 
@@ -2346,34 +4019,55 @@ export const storage = {
   ): Promise<void> {
     // Mark running.
     sqlite.prepare(`UPDATE osint_reanalyze_jobs SET status = 'running' WHERE id = ? AND status = 'queued'`).run(jobId);
-    const initial = sqlite.prepare("SELECT status FROM osint_reanalyze_jobs WHERE id = ? AND tenant_id = ?").get(jobId, tid) as { status: string } | undefined;
+    const initial = sqlite
+      .prepare("SELECT status FROM osint_reanalyze_jobs WHERE id = ? AND tenant_id = ?")
+      .get(jobId, tid) as { status: string } | undefined;
     if (initial?.status === "cancelled") return;
     const onlyUnanalyzed = !!extra?.onlyUnanalyzed;
     const explicitIds = extra?.ids && extra.ids.length > 0 ? extra.ids : null;
     let ids: string[];
     if (explicitIds) {
       const placeholders = explicitIds.map(() => "?").join(",");
-      ids = (sqlite.prepare(
-        `SELECT id FROM osint_findings WHERE tenant_id = ? AND id IN (${placeholders}) ORDER BY published_at ASC`,
-      ).all(tid, ...explicitIds) as Array<{ id: string }>).map((r) => r.id);
+      ids = (
+        sqlite
+          .prepare(
+            `SELECT id FROM osint_findings WHERE tenant_id = ? AND id IN (${placeholders}) ORDER BY published_at ASC`,
+          )
+          .all(tid, ...explicitIds) as Array<{ id: string }>
+      ).map((r) => r.id);
     } else if (onlyUnanalyzed) {
-      ids = (sqlite.prepare(`
+      ids = (
+        sqlite
+          .prepare(
+            `
         SELECT id FROM osint_findings
         WHERE tenant_id = ? AND COALESCE(published_at, created_at) >= ? AND ai_analyzed_at IS NULL
         ORDER BY published_at ASC
-      `).all(tid, sinceIso) as Array<{ id: string }>).map((r) => r.id);
+      `,
+          )
+          .all(tid, sinceIso) as Array<{ id: string }>
+      ).map((r) => r.id);
     } else {
-      ids = (sqlite.prepare(`
+      ids = (
+        sqlite
+          .prepare(
+            `
         SELECT id FROM osint_findings
         WHERE tenant_id = ? AND COALESCE(published_at, created_at) >= ?
         ORDER BY published_at ASC
-      `).all(tid, sinceIso) as Array<{ id: string }>).map((r) => r.id);
+      `,
+          )
+          .all(tid, sinceIso) as Array<{ id: string }>
+      ).map((r) => r.id);
     }
 
     const BATCH = 5;
-    let done = 0, fail = 0;
+    let done = 0,
+      fail = 0;
     for (let i = 0; i < ids.length; i += BATCH) {
-      const current = sqlite.prepare("SELECT status FROM osint_reanalyze_jobs WHERE id = ? AND tenant_id = ?").get(jobId, tid) as { status: string } | undefined;
+      const current = sqlite
+        .prepare("SELECT status FROM osint_reanalyze_jobs WHERE id = ? AND tenant_id = ?")
+        .get(jobId, tid) as { status: string } | undefined;
       if (current?.status === "cancelled") return;
       const slice = ids.slice(i, i + BATCH);
       try {
@@ -2383,29 +4077,39 @@ export const storage = {
       } catch {
         fail += slice.length;
       }
-      sqlite.prepare(`UPDATE osint_reanalyze_jobs SET done_count = ?, fail_count = ? WHERE id = ? AND status != 'cancelled'`).run(done, fail, jobId);
+      sqlite
+        .prepare(
+          `UPDATE osint_reanalyze_jobs SET done_count = ?, fail_count = ? WHERE id = ? AND status != 'cancelled'`,
+        )
+        .run(done, fail, jobId);
     }
     // Also re-run cluster backfill for the tenant’s findings in the window.
     try {
       const cls = backfillClusters(sqlite, { sinceIso, limit: 50000 });
       console.log(`[reanalyze] cluster backfill scanned=${cls.scanned} assigned=${cls.assigned}`);
-    } catch (e) { console.warn("[reanalyze] cluster backfill failed", e); }
-    sqlite.prepare(`UPDATE osint_reanalyze_jobs SET status = 'done', finished_at = ? WHERE id = ? AND status != 'cancelled'`).run(now(), jobId);
+    } catch (e) {
+      console.warn("[reanalyze] cluster backfill failed", e);
+    }
+    sqlite
+      .prepare(
+        `UPDATE osint_reanalyze_jobs SET status = 'done', finished_at = ? WHERE id = ? AND status != 'cancelled'`,
+      )
+      .run(now(), jobId);
   },
 
   countOsintSourcesByCategory(): Array<{ category: string; label: string; count: number }> {
-    const rows = sqlite.prepare("SELECT category, COUNT(*) as count FROM osint_sources GROUP BY category").all() as any[];
+    const rows = sqlite
+      .prepare("SELECT category, COUNT(*) as count FROM osint_sources GROUP BY category")
+      .all() as any[];
     // v2.10: emit in OSINT_CATEGORY_ORDER so the Sources tab dropdown matches
     // the Findings-tab order (CVE_VULN → CERT_GOV → VENDOR_RESEARCH →
     // SECURITY_NEWS → RANSOMWARE_LEAK).
     const byCat = new Map<string, number>(rows.map((r) => [r.category as string, r.count as number]));
-    return OSINT_CATEGORY_ORDER
-      .filter((c) => byCat.has(c))
-      .map((c) => ({
-        category: c,
-        label: OSINT_CATEGORY_LABELS[c] ?? c,
-        count: byCat.get(c) ?? 0,
-      }));
+    return OSINT_CATEGORY_ORDER.filter((c) => byCat.has(c)).map((c) => ({
+      category: c,
+      label: OSINT_CATEGORY_LABELS[c] ?? c,
+      count: byCat.get(c) ?? 0,
+    }));
   },
 
   /**
@@ -2413,10 +4117,21 @@ export const storage = {
    * monitored technologies, the OSINT source catalog, and a few stock CVE templates.
    * The seed mixes tenant + tech to ensure same-tenant determinism but inter-tenant variance.
    */
-  async runOsintScan(tid: string, opts: { technologies?: string[]; categories?: string[]; maxFindings?: number; mode?: "real" | "mock" | "auto" }): Promise<{ count: number; findings: OsintFindingDTO[]; mode: string; feedsTried?: number; feedsOk?: number; errors?: string[] }> {
-    const techs = (opts.technologies && opts.technologies.length)
-      ? opts.technologies
-      : BATCH_ONE_WORKSPACE_PROFILE.monitoredTechnologies;
+  async runOsintScan(
+    tid: string,
+    opts: { technologies?: string[]; categories?: string[]; maxFindings?: number; mode?: "real" | "mock" | "auto" },
+  ): Promise<{
+    count: number;
+    findings: OsintFindingDTO[];
+    mode: string;
+    feedsTried?: number;
+    feedsOk?: number;
+    errors?: string[];
+  }> {
+    const techs =
+      opts.technologies && opts.technologies.length
+        ? opts.technologies
+        : BATCH_ONE_WORKSPACE_PROFILE.monitoredTechnologies;
     if (techs.length === 0) {
       return { count: 0, findings: [], mode: "none" };
     }
@@ -2428,7 +4143,13 @@ export const storage = {
     if (mode !== "mock") {
       try {
         const { fetchRealOsintItems } = await import("./osintFetcher");
-        realResult = await fetchRealOsintItems({ techs, maxItems: max });
+        realResult = await fetchRealOsintItems({
+          techs,
+          maxItems: max,
+          xBearerToken: getXBearerTokenForIngest(tid),
+          kelaConfig: getKelaIngestConfig(tid),
+          communityConfigs: getCommunityIngestConfigs(tid),
+        });
       } catch (e: any) {
         realResult = { items: [], feedsTried: 0, feedsOk: 0, errors: [String(e?.message || e)] };
       }
@@ -2452,45 +4173,94 @@ export const storage = {
             // Insert a new synthetic source row keyed on the real feed name so
             // future findings (and the Sources tab) reuse it.
             const sid = id();
-            sqlite.prepare(
-              `INSERT INTO osint_sources (id, category, name, url, language, region, reliability, enabled)
-               VALUES (?, ?, ?, ?, 'en', NULL, 'A', 1)`
-            ).run(sid, it.sourceCategory, it.sourceName, it.sourceUrl);
-            src = { id: sid, category: it.sourceCategory, name: it.sourceName, url: it.sourceUrl, reliability: "A", region: null, language: "en" } as any;
+            sqlite
+              .prepare(
+                `INSERT INTO osint_sources (id, category, name, url, language, region, reliability, enabled)
+               VALUES (?, ?, ?, ?, 'en', NULL, 'A', 1)`,
+              )
+              .run(sid, it.sourceCategory, it.sourceName, it.sourceUrl);
+            src = {
+              id: sid,
+              category: it.sourceCategory,
+              name: it.sourceName,
+              url: it.sourceUrl,
+              reliability: "A",
+              region: null,
+              language: "en",
+            } as any;
           }
+          if (!src) continue;
           fetchedSourceIds.add(src.id);
           const fid = id();
           const cveIds = it.cveIds.slice(0, 8);
-          sqlite.prepare(`INSERT INTO osint_findings (
+          sqlite
+            .prepare(
+              `INSERT INTO osint_findings (
             id, tenant_id, source_id, title, url, published_at, severity,
             cve_ids, affected_tech, threat_actors, summary, raw_snippet,
             source_fetched_at,
             ai_summary, ai_relevance_score, ai_recommendation, ai_analyzed_at, ai_provider_label,
             draft_email, draft_email_at, status, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'new', ?)`).run(
-            fid, tid, src.id, it.title.slice(0, 280), it.url, it.publishedAt, it.severity,
-            j(cveIds), j(it.affectedTech), j(it.threatActors), it.summary, it.rawSnippet, now(), now()
-          );
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'new', ?)`,
+            )
+            .run(
+              fid,
+              tid,
+              src.id,
+              it.title.slice(0, 280),
+              it.url,
+              it.publishedAt,
+              it.severity,
+              j(cveIds),
+              j(it.affectedTech),
+              j(it.threatActors),
+              it.summary,
+              it.rawSnippet,
+              now(),
+              now(),
+            );
           items.push({
-            id: fid, tenantId: tid, sourceId: src.id,
-            sourceName: it.sourceName, sourceCategory: it.sourceCategory,
+            id: fid,
+            tenantId: tid,
+            sourceId: src.id,
+            sourceName: it.sourceName,
+            sourceCategory: it.sourceCategory,
             sourceFetchedAt: now(),
-            title: it.title, url: it.url, publishedAt: it.publishedAt, severity: it.severity,
-            cveIds, affectedTech: it.affectedTech, threatActors: it.threatActors,
-            summary: it.summary, aiSummary: null, aiRelevanceScore: null, aiRecommendation: null,
-            aiAnalyzedAt: null, aiProviderLabel: null,
-            draftEmail: null, draftEmailAt: null, status: "new", createdAt: now(),
+            title: it.title,
+            url: it.url,
+            publishedAt: it.publishedAt,
+            severity: it.severity,
+            cveIds,
+            affectedTech: it.affectedTech,
+            threatActors: it.threatActors,
+            summary: it.summary,
+            aiSummary: null,
+            aiRelevanceScore: null,
+            aiRecommendation: null,
+            aiAnalyzedAt: null,
+            aiProviderLabel: null,
+            draftEmail: null,
+            draftEmailAt: null,
+            status: "new",
+            createdAt: now(),
           });
         }
         markOsintSourcesFetched(fetchedSourceIds);
       });
       tx();
       storage.appendAudit(tid, "system", "osint.scan", null, {
-        count: items.length, mode: "real", feedsTried: realResult.feedsTried, feedsOk: realResult.feedsOk, technologies: techs,
+        count: items.length,
+        mode: "real",
+        feedsTried: realResult.feedsTried,
+        feedsOk: realResult.feedsOk,
+        technologies: techs,
       });
       return {
-        count: items.length, findings: items, mode: "real",
-        feedsTried: realResult.feedsTried, feedsOk: realResult.feedsOk,
+        count: items.length,
+        findings: items,
+        mode: "real",
+        feedsTried: realResult.feedsTried,
+        feedsOk: realResult.feedsOk,
         errors: realResult.errors.slice(0, 5),
       };
     }
@@ -2501,10 +4271,17 @@ export const storage = {
     // empty result so the dashboard reflects ground truth.
     if (isStrictProduction() && mode !== "mock") {
       storage.appendAudit(tid, "system", "osint.scan", null, {
-        count: 0, mode: "real", feedsTried: realResult?.feedsTried ?? 0, feedsOk: realResult?.feedsOk ?? 0, technologies: techs, strict: true,
+        count: 0,
+        mode: "real",
+        feedsTried: realResult?.feedsTried ?? 0,
+        feedsOk: realResult?.feedsOk ?? 0,
+        technologies: techs,
+        strict: true,
       });
       return {
-        count: 0, findings: [], mode: "real",
+        count: 0,
+        findings: [],
+        mode: "real",
         feedsTried: realResult?.feedsTried ?? 0,
         feedsOk: realResult?.feedsOk ?? 0,
         errors: realResult?.errors.slice(0, 5) ?? [
@@ -2513,25 +4290,27 @@ export const storage = {
       };
     }
     if (mode === "mock" && isStrictProduction()) {
-      throw new MockFallbackBlockedError(
-        "osint.scan",
-        "Explicit mock mode requested while strict production is on.",
-      );
+      throw new MockFallbackBlockedError("osint.scan", "Explicit mock mode requested while strict production is on.");
     }
     if (mode === "real") {
       // User explicitly asked for real feeds; do not synthesise.
       storage.appendAudit(tid, "system", "osint.scan", null, {
-        count: 0, mode: "real", feedsTried: realResult?.feedsTried ?? 0, feedsOk: realResult?.feedsOk ?? 0, technologies: techs,
+        count: 0,
+        mode: "real",
+        feedsTried: realResult?.feedsTried ?? 0,
+        feedsOk: realResult?.feedsOk ?? 0,
+        technologies: techs,
       });
       return {
-        count: 0, findings: [], mode: "real",
+        count: 0,
+        findings: [],
+        mode: "real",
         feedsTried: realResult?.feedsTried ?? 0,
         feedsOk: realResult?.feedsOk ?? 0,
         errors: realResult?.errors.slice(0, 5) ?? ["No upstream feeds returned matching items"],
       };
     }
-    const allSources = storage.listOsintSources(opts.categories?.length
-      ? undefined : undefined);
+    const allSources = storage.listOsintSources(opts.categories?.length ? undefined : undefined);
     const sources = opts.categories?.length
       ? allSources.filter((s) => opts.categories!.includes(s.category))
       : allSources;
@@ -2541,47 +4320,287 @@ export const storage = {
     for (const t of MONITORED_TECHNOLOGIES) techLabels.set(t.id, t.label);
 
     // Stock vulnerability templates per tech category
-    const TEMPLATES: Array<{ tech: string; sev: string; titleFn: (label: string) => string; cve: string; actors: string[] }> = [
-      { tech: "fortinet-fortios",     sev: "critical", titleFn: (l) => `${l} — pre-auth RCE in SSL-VPN (CVE-2024-21762)`, cve: "CVE-2024-21762", actors: ["UNC5221", "Volt Typhoon"] },
-      { tech: "fortinet-fortimanager",sev: "critical", titleFn: (l) => `${l} — out-of-bound auth bypass`, cve: "CVE-2024-47575", actors: ["UNC5820"] },
-      { tech: "citrix-netscaler",     sev: "critical", titleFn: (l) => `${l} — Citrix Bleed 2 session hijack`, cve: "CVE-2025-5777", actors: ["Lockbit", "AlphV"] },
-      { tech: "ivanti-connectsecure", sev: "critical", titleFn: (l) => `${l} — chained auth bypass + RCE`, cve: "CVE-2025-22457", actors: ["UNC5221"] },
-      { tech: "paloalto-globalprotect", sev: "high",    titleFn: (l) => `${l} — config disclosure`, cve: "CVE-2025-0108", actors: ["opportunistic"] },
-      { tech: "sonicwall-sma",        sev: "high",     titleFn: (l) => `${l} — SQLi to admin takeover`, cve: "CVE-2024-53704", actors: ["FOG", "AKira"] },
-      { tech: "checkpoint-quantum",   sev: "high",     titleFn: (l) => `${l} — info-disclosure on remote access blade`, cve: "CVE-2024-24919", actors: ["opportunistic"] },
-      { tech: "cisco-asa",            sev: "high",     titleFn: (l) => `${l} — ArcaneDoor implant chain`, cve: "CVE-2024-20353", actors: ["UAT4356"] },
-      { tech: "cisco-iosxe",          sev: "critical", titleFn: (l) => `${l} — webui priv-esc + persistence implant`, cve: "CVE-2023-20198", actors: ["opportunistic"] },
-      { tech: "f5-bigip",             sev: "high",     titleFn: (l) => `${l} — TMUI auth bypass`, cve: "CVE-2023-46747", actors: ["opportunistic"] },
-      { tech: "barracuda-esg",        sev: "critical", titleFn: (l) => `${l} — SeaSpy / Saltwater backdoor`, cve: "CVE-2023-2868", actors: ["UNC4841"] },
-      { tech: "ms-exchange",          sev: "critical", titleFn: (l) => `${l} — pre-auth RCE chain (ProxyNotShell variant)`, cve: "CVE-2024-26198", actors: ["Storm-0558"] },
-      { tech: "ms-sharepoint",        sev: "critical", titleFn: (l) => `${l} — ToolShell RCE`, cve: "CVE-2025-53770", actors: ["opportunistic"] },
-      { tech: "zimbra",               sev: "high",     titleFn: (l) => `${l} — XSS to credential theft`, cve: "CVE-2024-45519", actors: ["Russian APT"] },
-      { tech: "okta",                 sev: "high",     titleFn: (l) => `${l} — push fatigue + delegated admin abuse`, cve: "CVE-2024-XXXX", actors: ["Scattered Spider"] },
-      { tech: "ms-entra",             sev: "high",     titleFn: (l) => `${l} — token replay via MFA bypass`, cve: "CVE-2025-XXXX", actors: ["Storm-0558"] },
-      { tech: "adfs",                 sev: "high",     titleFn: (l) => `${l} — golden SAML", actor abuse`, cve: "", actors: ["APT29"] },
-      { tech: "vmware-vcenter",       sev: "critical", titleFn: (l) => `${l} — DCERPC heap overflow`, cve: "CVE-2024-37079", actors: ["AKira", "BlackBasta"] },
-      { tech: "vmware-esxi",          sev: "critical", titleFn: (l) => `${l} — ESXiArgs encryptor reuse`, cve: "CVE-2021-21974", actors: ["AKira", "Lockbit"] },
-      { tech: "vmware-horizon",       sev: "high",     titleFn: (l) => `${l} — Log4Shell exposure persists`, cve: "CVE-2021-44228", actors: ["opportunistic"] },
-      { tech: "atlassian-confluence", sev: "critical", titleFn: (l) => `${l} — improper authz (CVE-2023-22518)`, cve: "CVE-2023-22518", actors: ["C3RB3R"] },
-      { tech: "atlassian-jira",       sev: "high",     titleFn: (l) => `${l} — Jira app auth bypass`, cve: "CVE-2024-1597", actors: ["opportunistic"] },
-      { tech: "gitlab",               sev: "critical", titleFn: (l) => `${l} — account takeover via password reset`, cve: "CVE-2023-7028", actors: ["opportunistic"] },
-      { tech: "github-enterprise",    sev: "high",     titleFn: (l) => `${l} — SAML auth bypass`, cve: "CVE-2024-4985", actors: ["opportunistic"] },
-      { tech: "jenkins",              sev: "critical", titleFn: (l) => `${l} — arg injection RCE`, cve: "CVE-2024-23897", actors: ["opportunistic"] },
-      { tech: "teamcity",             sev: "critical", titleFn: (l) => `${l} — auth bypass on web UI`, cve: "CVE-2024-27198", actors: ["BianLian", "AKira"] },
-      { tech: "log4j",                sev: "critical", titleFn: (l) => `${l} — Log4Shell persists in legacy stacks`, cve: "CVE-2021-44228", actors: ["opportunistic"] },
-      { tech: "spring-framework",     sev: "high",     titleFn: (l) => `${l} — Spring4Shell variants`, cve: "CVE-2022-22965", actors: ["opportunistic"] },
-      { tech: "spring-cloud",         sev: "critical", titleFn: (l) => `${l} — Spring Cloud Gateway code injection`, cve: "CVE-2022-22947", actors: ["opportunistic"] },
-      { tech: "struts2",              sev: "critical", titleFn: (l) => `${l} — file upload RCE", actor reuse`, cve: "CVE-2024-53677", actors: ["opportunistic"] },
-      { tech: "apache-httpd",         sev: "high",     titleFn: (l) => `${l} — mod_rewrite SSRF`, cve: "CVE-2024-38475", actors: ["opportunistic"] },
-      { tech: "tomcat",               sev: "high",     titleFn: (l) => `${l} — Tomcat RCE via partial PUT`, cve: "CVE-2025-24813", actors: ["opportunistic"] },
-      { tech: "moveit",               sev: "critical", titleFn: (l) => `${l} — MOVEit SQLi RCE rerun`, cve: "CVE-2023-34362", actors: ["Cl0p"] },
-      { tech: "goanywhere-mft",       sev: "critical", titleFn: (l) => `${l} — auth bypass (CVE-2024-0204)`, cve: "CVE-2024-0204", actors: ["Cl0p"] },
-      { tech: "cleo-harmony",         sev: "critical", titleFn: (l) => `${l} — autorun directory RCE`, cve: "CVE-2024-50623", actors: ["Termite", "Cl0p"] },
-      { tech: "veeam",                sev: "critical", titleFn: (l) => `${l} — backup auth bypass`, cve: "CVE-2024-40711", actors: ["Akira", "Lockbit"] },
-      { tech: "connectwise-screenconnect", sev: "critical", titleFn: (l) => `${l} — auth bypass + path-traversal`, cve: "CVE-2024-1709", actors: ["opportunistic"] },
-      { tech: "oracle-weblogic",      sev: "critical", titleFn: (l) => `${l} — IIOP/T3 deserialisation`, cve: "CVE-2024-21006", actors: ["opportunistic"] },
-      { tech: "crowdstrike-falcon",   sev: "medium",   titleFn: (l) => `${l} — channel-file faulty content advisory`, cve: "", actors: ["n/a"] },
-      { tech: "aws-iam",              sev: "high",     titleFn: (l) => `${l} — privilege escalation via misconfigured trust policy`, cve: "", actors: ["opportunistic"] },
+    const TEMPLATES: Array<{
+      tech: string;
+      sev: string;
+      titleFn: (label: string) => string;
+      cve: string;
+      actors: string[];
+    }> = [
+      {
+        tech: "fortinet-fortios",
+        sev: "critical",
+        titleFn: (l) => `${l} — pre-auth RCE in SSL-VPN (CVE-2024-21762)`,
+        cve: "CVE-2024-21762",
+        actors: ["UNC5221", "Volt Typhoon"],
+      },
+      {
+        tech: "fortinet-fortimanager",
+        sev: "critical",
+        titleFn: (l) => `${l} — out-of-bound auth bypass`,
+        cve: "CVE-2024-47575",
+        actors: ["UNC5820"],
+      },
+      {
+        tech: "citrix-netscaler",
+        sev: "critical",
+        titleFn: (l) => `${l} — Citrix Bleed 2 session hijack`,
+        cve: "CVE-2025-5777",
+        actors: ["Lockbit", "AlphV"],
+      },
+      {
+        tech: "ivanti-connectsecure",
+        sev: "critical",
+        titleFn: (l) => `${l} — chained auth bypass + RCE`,
+        cve: "CVE-2025-22457",
+        actors: ["UNC5221"],
+      },
+      {
+        tech: "paloalto-globalprotect",
+        sev: "high",
+        titleFn: (l) => `${l} — config disclosure`,
+        cve: "CVE-2025-0108",
+        actors: ["opportunistic"],
+      },
+      {
+        tech: "sonicwall-sma",
+        sev: "high",
+        titleFn: (l) => `${l} — SQLi to admin takeover`,
+        cve: "CVE-2024-53704",
+        actors: ["FOG", "AKira"],
+      },
+      {
+        tech: "checkpoint-quantum",
+        sev: "high",
+        titleFn: (l) => `${l} — info-disclosure on remote access blade`,
+        cve: "CVE-2024-24919",
+        actors: ["opportunistic"],
+      },
+      {
+        tech: "cisco-asa",
+        sev: "high",
+        titleFn: (l) => `${l} — ArcaneDoor implant chain`,
+        cve: "CVE-2024-20353",
+        actors: ["UAT4356"],
+      },
+      {
+        tech: "cisco-iosxe",
+        sev: "critical",
+        titleFn: (l) => `${l} — webui priv-esc + persistence implant`,
+        cve: "CVE-2023-20198",
+        actors: ["opportunistic"],
+      },
+      {
+        tech: "f5-bigip",
+        sev: "high",
+        titleFn: (l) => `${l} — TMUI auth bypass`,
+        cve: "CVE-2023-46747",
+        actors: ["opportunistic"],
+      },
+      {
+        tech: "barracuda-esg",
+        sev: "critical",
+        titleFn: (l) => `${l} — SeaSpy / Saltwater backdoor`,
+        cve: "CVE-2023-2868",
+        actors: ["UNC4841"],
+      },
+      {
+        tech: "ms-exchange",
+        sev: "critical",
+        titleFn: (l) => `${l} — pre-auth RCE chain (ProxyNotShell variant)`,
+        cve: "CVE-2024-26198",
+        actors: ["Storm-0558"],
+      },
+      {
+        tech: "ms-sharepoint",
+        sev: "critical",
+        titleFn: (l) => `${l} — ToolShell RCE`,
+        cve: "CVE-2025-53770",
+        actors: ["opportunistic"],
+      },
+      {
+        tech: "zimbra",
+        sev: "high",
+        titleFn: (l) => `${l} — XSS to credential theft`,
+        cve: "CVE-2024-45519",
+        actors: ["Russian APT"],
+      },
+      {
+        tech: "okta",
+        sev: "high",
+        titleFn: (l) => `${l} — push fatigue + delegated admin abuse`,
+        cve: "CVE-2024-XXXX",
+        actors: ["Scattered Spider"],
+      },
+      {
+        tech: "ms-entra",
+        sev: "high",
+        titleFn: (l) => `${l} — token replay via MFA bypass`,
+        cve: "CVE-2025-XXXX",
+        actors: ["Storm-0558"],
+      },
+      { tech: "adfs", sev: "high", titleFn: (l) => `${l} — golden SAML", actor abuse`, cve: "", actors: ["APT29"] },
+      {
+        tech: "vmware-vcenter",
+        sev: "critical",
+        titleFn: (l) => `${l} — DCERPC heap overflow`,
+        cve: "CVE-2024-37079",
+        actors: ["AKira", "BlackBasta"],
+      },
+      {
+        tech: "vmware-esxi",
+        sev: "critical",
+        titleFn: (l) => `${l} — ESXiArgs encryptor reuse`,
+        cve: "CVE-2021-21974",
+        actors: ["AKira", "Lockbit"],
+      },
+      {
+        tech: "vmware-horizon",
+        sev: "high",
+        titleFn: (l) => `${l} — Log4Shell exposure persists`,
+        cve: "CVE-2021-44228",
+        actors: ["opportunistic"],
+      },
+      {
+        tech: "atlassian-confluence",
+        sev: "critical",
+        titleFn: (l) => `${l} — improper authz (CVE-2023-22518)`,
+        cve: "CVE-2023-22518",
+        actors: ["C3RB3R"],
+      },
+      {
+        tech: "atlassian-jira",
+        sev: "high",
+        titleFn: (l) => `${l} — Jira app auth bypass`,
+        cve: "CVE-2024-1597",
+        actors: ["opportunistic"],
+      },
+      {
+        tech: "gitlab",
+        sev: "critical",
+        titleFn: (l) => `${l} — account takeover via password reset`,
+        cve: "CVE-2023-7028",
+        actors: ["opportunistic"],
+      },
+      {
+        tech: "github-enterprise",
+        sev: "high",
+        titleFn: (l) => `${l} — SAML auth bypass`,
+        cve: "CVE-2024-4985",
+        actors: ["opportunistic"],
+      },
+      {
+        tech: "jenkins",
+        sev: "critical",
+        titleFn: (l) => `${l} — arg injection RCE`,
+        cve: "CVE-2024-23897",
+        actors: ["opportunistic"],
+      },
+      {
+        tech: "teamcity",
+        sev: "critical",
+        titleFn: (l) => `${l} — auth bypass on web UI`,
+        cve: "CVE-2024-27198",
+        actors: ["BianLian", "AKira"],
+      },
+      {
+        tech: "log4j",
+        sev: "critical",
+        titleFn: (l) => `${l} — Log4Shell persists in legacy stacks`,
+        cve: "CVE-2021-44228",
+        actors: ["opportunistic"],
+      },
+      {
+        tech: "spring-framework",
+        sev: "high",
+        titleFn: (l) => `${l} — Spring4Shell variants`,
+        cve: "CVE-2022-22965",
+        actors: ["opportunistic"],
+      },
+      {
+        tech: "spring-cloud",
+        sev: "critical",
+        titleFn: (l) => `${l} — Spring Cloud Gateway code injection`,
+        cve: "CVE-2022-22947",
+        actors: ["opportunistic"],
+      },
+      {
+        tech: "struts2",
+        sev: "critical",
+        titleFn: (l) => `${l} — file upload RCE", actor reuse`,
+        cve: "CVE-2024-53677",
+        actors: ["opportunistic"],
+      },
+      {
+        tech: "apache-httpd",
+        sev: "high",
+        titleFn: (l) => `${l} — mod_rewrite SSRF`,
+        cve: "CVE-2024-38475",
+        actors: ["opportunistic"],
+      },
+      {
+        tech: "tomcat",
+        sev: "high",
+        titleFn: (l) => `${l} — Tomcat RCE via partial PUT`,
+        cve: "CVE-2025-24813",
+        actors: ["opportunistic"],
+      },
+      {
+        tech: "moveit",
+        sev: "critical",
+        titleFn: (l) => `${l} — MOVEit SQLi RCE rerun`,
+        cve: "CVE-2023-34362",
+        actors: ["Cl0p"],
+      },
+      {
+        tech: "goanywhere-mft",
+        sev: "critical",
+        titleFn: (l) => `${l} — auth bypass (CVE-2024-0204)`,
+        cve: "CVE-2024-0204",
+        actors: ["Cl0p"],
+      },
+      {
+        tech: "cleo-harmony",
+        sev: "critical",
+        titleFn: (l) => `${l} — autorun directory RCE`,
+        cve: "CVE-2024-50623",
+        actors: ["Termite", "Cl0p"],
+      },
+      {
+        tech: "veeam",
+        sev: "critical",
+        titleFn: (l) => `${l} — backup auth bypass`,
+        cve: "CVE-2024-40711",
+        actors: ["Akira", "Lockbit"],
+      },
+      {
+        tech: "connectwise-screenconnect",
+        sev: "critical",
+        titleFn: (l) => `${l} — auth bypass + path-traversal`,
+        cve: "CVE-2024-1709",
+        actors: ["opportunistic"],
+      },
+      {
+        tech: "oracle-weblogic",
+        sev: "critical",
+        titleFn: (l) => `${l} — IIOP/T3 deserialisation`,
+        cve: "CVE-2024-21006",
+        actors: ["opportunistic"],
+      },
+      {
+        tech: "crowdstrike-falcon",
+        sev: "medium",
+        titleFn: (l) => `${l} — channel-file faulty content advisory`,
+        cve: "",
+        actors: ["n/a"],
+      },
+      {
+        tech: "aws-iam",
+        sev: "high",
+        titleFn: (l) => `${l} — privilege escalation via misconfigured trust policy`,
+        cve: "",
+        actors: ["opportunistic"],
+      },
     ];
 
     // Build candidate set, restricted to tenant's selected techs
@@ -2596,30 +4615,61 @@ export const storage = {
         const src = sources[((baseSeed + i * 17) >>> 0) % sources.length];
         const fid = id();
         const label = techLabels.get(tmpl.tech) ?? tmpl.tech;
-        const publishedAt = new Date(Date.now() - ((i * 6) + (baseSeed % 24)) * 3600_000).toISOString();
+        const publishedAt = new Date(Date.now() - (i * 6 + (baseSeed % 24)) * 3600_000).toISOString();
         const url = src.url;
         const cveIds = tmpl.cve ? [tmpl.cve] : [];
-        const summary = `Mock OSINT signal: ${tmpl.titleFn(label)}. Source: ${src.name} (${src.category}). Published: ${publishedAt.slice(0,10)}.`;
+        const summary = `Mock OSINT signal: ${tmpl.titleFn(label)}. Source: ${src.name} (${src.category}). Published: ${publishedAt.slice(0, 10)}.`;
         const rawSnippet = `From ${src.name}\n\n${tmpl.titleFn(label)}\n\nThreat actors observed: ${tmpl.actors.join(", ")}.\n\nReferences: ${cveIds.join(", ") || "n/a"}`;
-        sqlite.prepare(`INSERT INTO osint_findings (
+        sqlite
+          .prepare(
+            `INSERT INTO osint_findings (
           id, tenant_id, source_id, title, url, published_at, severity,
           cve_ids, affected_tech, threat_actors, summary, raw_snippet,
           source_fetched_at,
           ai_summary, ai_relevance_score, ai_recommendation, ai_analyzed_at, ai_provider_label,
           draft_email, draft_email_at, status, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'new', ?)`).run(
-          fid, tid, src.id, tmpl.titleFn(label), url, publishedAt, tmpl.sev,
-          j(cveIds), j([tmpl.tech]), j(tmpl.actors), summary, rawSnippet, now(), now()
-        );
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'new', ?)`,
+          )
+          .run(
+            fid,
+            tid,
+            src.id,
+            tmpl.titleFn(label),
+            url,
+            publishedAt,
+            tmpl.sev,
+            j(cveIds),
+            j([tmpl.tech]),
+            j(tmpl.actors),
+            summary,
+            rawSnippet,
+            now(),
+            now(),
+          );
         items.push({
-          id: fid, tenantId: tid, sourceId: src.id,
-          sourceName: src.name, sourceCategory: src.category,
+          id: fid,
+          tenantId: tid,
+          sourceId: src.id,
+          sourceName: src.name,
+          sourceCategory: src.category,
           sourceFetchedAt: now(),
-          title: tmpl.titleFn(label), url, publishedAt, severity: tmpl.sev,
-          cveIds, affectedTech: [tmpl.tech], threatActors: tmpl.actors,
-          summary, aiSummary: null, aiRelevanceScore: null, aiRecommendation: null,
-          aiAnalyzedAt: null, aiProviderLabel: null,
-          draftEmail: null, draftEmailAt: null, status: "new", createdAt: now(),
+          title: tmpl.titleFn(label),
+          url,
+          publishedAt,
+          severity: tmpl.sev,
+          cveIds,
+          affectedTech: [tmpl.tech],
+          threatActors: tmpl.actors,
+          summary,
+          aiSummary: null,
+          aiRelevanceScore: null,
+          aiRecommendation: null,
+          aiAnalyzedAt: null,
+          aiProviderLabel: null,
+          draftEmail: null,
+          draftEmailAt: null,
+          status: "new",
+          createdAt: now(),
         });
         inserted += 1;
       }
@@ -2627,7 +4677,9 @@ export const storage = {
     tx();
     storage.appendAudit(tid, "system", "osint.scan", null, { count: inserted, mode: "mock", technologies: techs });
     return {
-      count: inserted, findings: items, mode: "mock",
+      count: inserted,
+      findings: items,
+      mode: "mock",
       feedsTried: realResult?.feedsTried ?? 0,
       feedsOk: realResult?.feedsOk ?? 0,
       errors: realResult?.errors.slice(0, 5) ?? [],
@@ -2642,12 +4694,20 @@ export const storage = {
    */
   async runGlobalOsintIngest(opts?: {
     workspaceId?: string;
-    days?: number;             // backfill window in days; default 365
-    maxPerSource?: number;     // hard cap per single source; default 60
-    maxTotal?: number;         // hard cap on total parsed items; default 10000
+    days?: number; // backfill window in days; default 365
+    maxPerSource?: number; // hard cap per single source; default 60
+    maxTotal?: number; // hard cap on total parsed items; default 10000
     actor?: string;
     onProgress?: (progress: { attempted: number; total: number; parsed: number; feedsOk: number }) => void;
-  }): Promise<{ count: number; workspaces: number; tenants: number; feedsTried: number; feedsOk: number; errors: string[]; durationMs: number }> {
+  }): Promise<{
+    count: number;
+    workspaces: number;
+    tenants: number;
+    feedsTried: number;
+    feedsOk: number;
+    errors: string[];
+    durationMs: number;
+  }> {
     const t0 = Date.now();
     const days = opts?.days ?? 365;
     const maxPerSource = opts?.maxPerSource ?? 60;
@@ -2655,14 +4715,43 @@ export const storage = {
     const sinceIso = new Date(Date.now() - days * 86400_000).toISOString();
 
     const { runBroadIngest } = await import("./osintFetcher");
-    const result = await runBroadIngest({ sinceIso, maxPerSource, maxTotal, onProgress: opts?.onProgress });
+    const integrationWorkspaceId =
+      opts?.workspaceId ||
+      (
+        sqlite.prepare("SELECT id FROM tenants WHERE slug = 'batchone-workspace' LIMIT 1").get() as
+          | { id?: string }
+          | undefined
+      )?.id;
+    const result = await runBroadIngest({
+      sinceIso,
+      maxPerSource,
+      maxTotal,
+      enabledSourceIds: storage
+        .listOsintSources()
+        .filter((source: any) => !!source.enabled)
+        .map((source: any) => source.id),
+      onProgress: opts?.onProgress,
+      xBearerToken: integrationWorkspaceId ? getXBearerTokenForIngest(integrationWorkspaceId) : null,
+      kelaConfig: integrationWorkspaceId ? getKelaIngestConfig(integrationWorkspaceId) : null,
+      communityConfigs: integrationWorkspaceId ? getCommunityIngestConfigs(integrationWorkspaceId) : [],
+    });
 
     const workspaceRows = opts?.workspaceId
-      ? sqlite.prepare("SELECT id FROM tenants WHERE id = ? LIMIT 1").all(opts.workspaceId) as Array<{ id: string }>
-      : sqlite.prepare("SELECT id FROM tenants WHERE slug = 'batchone-workspace' LIMIT 1").all() as Array<{ id: string }>;
+      ? (sqlite.prepare("SELECT id FROM tenants WHERE id = ? LIMIT 1").all(opts.workspaceId) as Array<{ id: string }>)
+      : (sqlite.prepare("SELECT id FROM tenants WHERE slug = 'batchone-workspace' LIMIT 1").all() as Array<{
+          id: string;
+        }>);
     const workspaceIds = workspaceRows.map((r) => r.id);
     if (workspaceIds.length === 0) {
-      return { count: 0, workspaces: 0, tenants: 0, feedsTried: result.feedsTried, feedsOk: result.feedsOk, errors: result.errors, durationMs: Date.now() - t0 };
+      return {
+        count: 0,
+        workspaces: 0,
+        tenants: 0,
+        feedsTried: result.feedsTried,
+        feedsOk: result.feedsOk,
+        errors: result.errors,
+        durationMs: Date.now() - t0,
+      };
     }
 
     const allSources = storage.listOsintSources();
@@ -2671,15 +4760,21 @@ export const storage = {
     // v2.9 — host-based lookup for defensive source re-resolution. If a parser
     // emits a sourceId whose feed host doesn't match the item URL's host, we
     // prefer the host match (e.g. DFIR Report mis-tagged as Hacker News).
-    const byHost = new Map<string, typeof allSources[number]>();
+    const byHost = new Map<string, (typeof allSources)[number]>();
     for (const s of allSources) {
       try {
         const h = new URL(s.url).hostname.toLowerCase().replace(/^www\./, "");
         if (h && !byHost.has(h)) byHost.set(h, s);
-      } catch { /* skip non-URL */ }
+      } catch {
+        /* skip non-URL */
+      }
     }
     const hostOf = (raw: string): string => {
-      try { return new URL(raw).hostname.toLowerCase().replace(/^www\./, ""); } catch { return ""; }
+      try {
+        return new URL(raw).hostname.toLowerCase().replace(/^www\./, "");
+      } catch {
+        return "";
+      }
     };
 
     // Dedupe within the local workspace by (scope, content_hash) and legacy
@@ -2688,23 +4783,26 @@ export const storage = {
     // same advisory from different RSS aggregators.
     let inserted = 0;
     const insertStmt = sqlite.prepare(`INSERT OR IGNORE INTO osint_findings (
-      id, tenant_id, source_id, title, url, published_at, severity,
+      id, tenant_id, source_id, title, url, published_at, published_at_inferred, severity,
+      publisher_severity, technical_severity,
       cve_ids, affected_tech, threat_actors, iocs, content_hash, summary, raw_snippet,
       source_fetched_at,
       ai_summary, ai_relevance_score, ai_recommendation, ai_analyzed_at, ai_provider_label,
       draft_email, draft_email_at, status, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'new', ?)`);
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'new', ?)`);
 
     // For each parsed item: resolve canonical source row, then insert one row per tenant.
-    const existingKeyRows = sqlite.prepare("SELECT id, tenant_id || '::' || source_id || '::' || substr(url, 1, 200) AS k FROM osint_findings").all() as Array<{ id: string; k: string }>;
-    const existingKeyMap = new Map<string, string>(
-      existingKeyRows.map((r) => [r.k.toLowerCase(), r.id])
-    );
+    const existingKeyRows = sqlite
+      .prepare("SELECT id, tenant_id || '::' || source_id || '::' || substr(url, 1, 200) AS k FROM osint_findings")
+      .all() as Array<{ id: string; k: string }>;
+    const existingKeyMap = new Map<string, string>(existingKeyRows.map((r) => [r.k.toLowerCase(), r.id]));
     // Per-workspace content-hash set for cross-source dedupe at write time.
-    const existingHashRows = sqlite.prepare("SELECT id, tenant_id || '::' || COALESCE(content_hash, '') AS k FROM osint_findings WHERE content_hash IS NOT NULL AND content_hash != ''").all() as Array<{ id: string; k: string }>;
-    const existingHashMap = new Map<string, string>(
-      existingHashRows.map((r) => [r.k.toLowerCase(), r.id])
-    );
+    const existingHashRows = sqlite
+      .prepare(
+        "SELECT id, tenant_id || '::' || COALESCE(content_hash, '') AS k FROM osint_findings WHERE content_hash IS NOT NULL AND content_hash != ''",
+      )
+      .all() as Array<{ id: string; k: string }>;
+    const existingHashMap = new Map<string, string>(existingHashRows.map((r) => [r.k.toLowerCase(), r.id]));
     const markFindingObserved = sqlite.prepare("UPDATE osint_findings SET source_fetched_at = ? WHERE id = ?");
 
     const tx = sqlite.transaction(() => {
@@ -2728,11 +4826,21 @@ export const storage = {
         }
         if (!src) {
           const sid = id();
-          sqlite.prepare(
-            `INSERT INTO osint_sources (id, category, name, url, language, region, reliability, enabled)
-             VALUES (?, ?, ?, ?, 'en', NULL, 'B', 1)`
-          ).run(sid, it.sourceCategory, it.sourceName, it.sourceUrl);
-          src = { id: sid, category: it.sourceCategory, name: it.sourceName, url: it.sourceUrl, reliability: "B", region: null, language: "en" } as any;
+          sqlite
+            .prepare(
+              `INSERT INTO osint_sources (id, category, name, url, language, region, reliability, enabled)
+             VALUES (?, ?, ?, ?, 'en', NULL, 'B', 1)`,
+            )
+            .run(sid, it.sourceCategory, it.sourceName, it.sourceUrl);
+          src = {
+            id: sid,
+            category: it.sourceCategory,
+            name: it.sourceName,
+            url: it.sourceUrl,
+            reliability: "B",
+            region: null,
+            language: "en",
+          } as any;
           byId.set(sid, src!);
           byName.set(it.sourceName.toLowerCase(), src!);
         }
@@ -2754,9 +4862,25 @@ export const storage = {
           existingKeyMap.set(urlKey, fid);
           if (hashKey) existingHashMap.set(hashKey, fid);
           insertStmt.run(
-            fid, tid, src!.id, it.title.slice(0, 280), it.url, it.publishedAt, it.severity,
-            j(cveIds), j(it.affectedTech), j(it.threatActors), iocsJson, contentHash || null,
-            it.summary, it.rawSnippet, fetchedAt, fetchedAt,
+            fid,
+            tid,
+            src!.id,
+            it.title.slice(0, 280),
+            it.url,
+            it.publishedAt,
+            it.publishedAtInferred ? 1 : 0,
+            it.severity,
+            it.publisherSeverity ?? it.severity,
+            it.technicalSeverity ?? it.severity,
+            j(cveIds),
+            j(it.affectedTech),
+            j(it.threatActors),
+            iocsJson,
+            contentHash || null,
+            it.summary,
+            it.rawSnippet,
+            fetchedAt,
+            fetchedAt,
           );
           inserted += 1;
         }
@@ -2766,8 +4890,12 @@ export const storage = {
     tx();
 
     storage.appendAudit(workspaceIds[0], opts?.actor ?? "system", "osint.global_ingest", null, {
-      inserted, workspaces: workspaceIds.length, parsed: result.items.length,
-      feedsTried: result.feedsTried, feedsOk: result.feedsOk, days,
+      inserted,
+      workspaces: workspaceIds.length,
+      parsed: result.items.length,
+      feedsTried: result.feedsTried,
+      feedsOk: result.feedsOk,
+      days,
     });
 
     return {
@@ -2781,12 +4909,35 @@ export const storage = {
     };
   },
 
-  listOsintFindings(tid: string, opts?: { severity?: string; status?: string; tech?: string; sourceId?: string; category?: string }): OsintFindingDTO[] {
+  listOsintFindings(
+    tid: string,
+    opts?: {
+      severity?: string;
+      status?: string;
+      tech?: string;
+      sourceId?: string;
+      category?: string;
+      publishedAfter?: string;
+    },
+  ): OsintFindingDTO[] {
     const where: any[] = ["tenant_id = ?"];
     const params: any[] = [tid];
-    if (opts?.severity) { where.push("severity = ?"); params.push(opts.severity); }
-    if (opts?.status)   { where.push("status = ?"); params.push(opts.status); }
-    if (opts?.sourceId) { where.push("source_id = ?"); params.push(opts.sourceId); }
+    if (opts?.severity) {
+      where.push("severity = ?");
+      params.push(opts.severity);
+    }
+    if (opts?.status) {
+      where.push("status = ?");
+      params.push(opts.status);
+    }
+    if (opts?.sourceId) {
+      where.push("source_id = ?");
+      params.push(opts.sourceId);
+    }
+    if (opts?.publishedAfter) {
+      where.push("published_at_inferred = 0 AND datetime(published_at) >= datetime(?)");
+      params.push(opts.publishedAfter);
+    }
     const sql = `SELECT * FROM osint_findings WHERE ${where.join(" AND ")} ORDER BY created_at DESC, published_at DESC LIMIT 1000`;
     const rows = sqlite.prepare(sql).all(...params) as any[];
     const sourceMap = new Map(storage.listOsintSources().map((s) => [s.id, s]));
@@ -2803,22 +4954,69 @@ export const storage = {
       const src = sourceMap.get(r.source_id);
       if (opts?.category && (src?.category ?? "") !== opts.category) continue;
       let iocs: any = {};
-      try { iocs = JSON.parse(r.iocs || "{}"); } catch { iocs = {}; }
+      try {
+        iocs = JSON.parse(r.iocs || "{}");
+      } catch {
+        iocs = {};
+      }
       out.push({
-        id: r.id, tenantId: r.tenant_id, sourceId: r.source_id,
-        sourceName: src?.name ?? "unknown", sourceCategory: src?.category ?? "unknown",
+        id: r.id,
+        tenantId: r.tenant_id,
+        sourceId: r.source_id,
+        sourceName: src?.name ?? "unknown",
+        sourceCategory: src?.category ?? "unknown",
         sourceFetchedAt: r.source_fetched_at ?? null,
-        title: r.title, url: r.url, publishedAt: r.published_at, severity: r.severity,
+        title: r.title,
+        url: r.url,
+        publishedAt: r.published_at,
+        publishedAtInferred: !!r.published_at_inferred,
+        severity: r.severity,
+        publisherSeverity: r.publisher_severity ?? null,
+        technicalSeverity: r.technical_severity ?? r.severity,
+        clientImpactSeverity: r.client_impact_severity ?? null,
+        analystFinalSeverity: r.analyst_final_severity ?? null,
+        analystSeverityRationale: r.analyst_severity_rationale ?? null,
+        analystSeverityAt: r.analyst_severity_at ?? null,
+        analystSeverityBy: r.analyst_severity_by ?? null,
         cveIds: JSON.parse(r.cve_ids || "[]"),
         affectedTech: techArr,
         threatActors: JSON.parse(r.threat_actors || "[]"),
         iocs,
-        summary: r.summary, aiSummary: r.ai_summary,
-        aiRelevanceScore: r.ai_relevance_score, aiRecommendation: r.ai_recommendation,
-        aiAnalyzedAt: r.ai_analyzed_at, aiProviderLabel: r.ai_provider_label,
-        draftEmail: r.draft_email, draftEmailAt: r.draft_email_at,
-        status: r.status, createdAt: r.created_at,
-        analystTags: (() => { try { const v = JSON.parse(r.analyst_tags || "[]"); return Array.isArray(v) ? v : []; } catch { return []; } })(),
+        summary: r.summary,
+        aiSummary: r.ai_summary,
+        aiRelevanceScore: r.ai_relevance_score,
+        aiRecommendation: r.ai_recommendation,
+        aiAnalyzedAt: r.ai_analyzed_at,
+        aiProviderLabel: r.ai_provider_label,
+        draftEmail: r.draft_email,
+        draftEmailAt: r.draft_email_at,
+        status: r.status,
+        createdAt: r.created_at,
+        analystAssessment: r.analyst_assessment ?? null,
+        analystDisposition: r.analyst_disposition ?? null,
+        analystConfidence: r.analyst_confidence ?? null,
+        analystImpact: r.analyst_impact ?? null,
+        analystNextAction: r.analyst_next_action ?? null,
+        analystAssessedAt: r.analyst_assessed_at ?? null,
+        analystAssessedBy: r.analyst_assessed_by ?? null,
+        clientTags: parseJsonArray<string>(r.client_tags),
+        aiClientMatches: parseJsonArray<any>(r.ai_client_matches) ?? [],
+        clientMatchDecisions: (() => {
+          try {
+            const value = JSON.parse(r.client_match_decisions || "{}");
+            return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+          } catch {
+            return {};
+          }
+        })(),
+        analystTags: (() => {
+          try {
+            const v = JSON.parse(r.analyst_tags || "[]");
+            return Array.isArray(v) ? v : [];
+          } catch {
+            return [];
+          }
+        })(),
         analystEditedAt: r.analyst_edited_at,
         analystEditedBy: r.analyst_edited_by,
         intelCategory: (r.intel_category as any) ?? null,
@@ -2836,23 +5034,70 @@ export const storage = {
     if (!r) return undefined;
     const src = storage.listOsintSources().find((s) => s.id === r.source_id);
     let iocs: any = {};
-    try { iocs = JSON.parse(r.iocs || "{}"); } catch { iocs = {}; }
+    try {
+      iocs = JSON.parse(r.iocs || "{}");
+    } catch {
+      iocs = {};
+    }
     return {
-      id: r.id, tenantId: r.tenant_id, sourceId: r.source_id,
-      sourceName: src?.name ?? "unknown", sourceCategory: src?.category ?? "unknown",
+      id: r.id,
+      tenantId: r.tenant_id,
+      sourceId: r.source_id,
+      sourceName: src?.name ?? "unknown",
+      sourceCategory: src?.category ?? "unknown",
       sourceFetchedAt: r.source_fetched_at ?? null,
-      title: r.title, url: r.url, publishedAt: r.published_at, severity: r.severity,
+      title: r.title,
+      url: r.url,
+      publishedAt: r.published_at,
+      publishedAtInferred: !!r.published_at_inferred,
+      severity: r.severity,
+      publisherSeverity: r.publisher_severity ?? null,
+      technicalSeverity: r.technical_severity ?? r.severity,
+      clientImpactSeverity: r.client_impact_severity ?? null,
+      analystFinalSeverity: r.analyst_final_severity ?? null,
+      analystSeverityRationale: r.analyst_severity_rationale ?? null,
+      analystSeverityAt: r.analyst_severity_at ?? null,
+      analystSeverityBy: r.analyst_severity_by ?? null,
       cveIds: JSON.parse(r.cve_ids || "[]"),
       affectedTech: JSON.parse(r.affected_tech || "[]"),
       threatActors: JSON.parse(r.threat_actors || "[]"),
       iocs,
-      summary: r.summary, aiSummary: r.ai_summary,
-      aiRelevanceScore: r.ai_relevance_score, aiRecommendation: r.ai_recommendation,
-      aiAnalyzedAt: r.ai_analyzed_at, aiProviderLabel: r.ai_provider_label,
-      draftEmail: r.draft_email, draftEmailAt: r.draft_email_at,
-      status: r.status, createdAt: r.created_at,
+      summary: r.summary,
+      aiSummary: r.ai_summary,
+      aiRelevanceScore: r.ai_relevance_score,
+      aiRecommendation: r.ai_recommendation,
+      aiAnalyzedAt: r.ai_analyzed_at,
+      aiProviderLabel: r.ai_provider_label,
+      draftEmail: r.draft_email,
+      draftEmailAt: r.draft_email_at,
+      status: r.status,
+      createdAt: r.created_at,
       rawSnippet: r.raw_snippet,
-      analystTags: (() => { try { const v = JSON.parse(r.analyst_tags || "[]"); return Array.isArray(v) ? v : []; } catch { return []; } })(),
+      analystAssessment: r.analyst_assessment ?? null,
+      analystDisposition: r.analyst_disposition ?? null,
+      analystConfidence: r.analyst_confidence ?? null,
+      analystImpact: r.analyst_impact ?? null,
+      analystNextAction: r.analyst_next_action ?? null,
+      analystAssessedAt: r.analyst_assessed_at ?? null,
+      analystAssessedBy: r.analyst_assessed_by ?? null,
+      clientTags: parseJsonArray<string>(r.client_tags),
+      aiClientMatches: parseJsonArray<any>(r.ai_client_matches) ?? [],
+      clientMatchDecisions: (() => {
+        try {
+          const value = JSON.parse(r.client_match_decisions || "{}");
+          return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+        } catch {
+          return {};
+        }
+      })(),
+      analystTags: (() => {
+        try {
+          const v = JSON.parse(r.analyst_tags || "[]");
+          return Array.isArray(v) ? v : [];
+        } catch {
+          return [];
+        }
+      })(),
       analystEditedAt: r.analyst_edited_at,
       analystEditedBy: r.analyst_edited_by,
       intelCategory: (r.intel_category as any) ?? null,
@@ -2872,23 +5117,53 @@ export const storage = {
     if (!r) return undefined;
     const src = storage.listOsintSources().find((s) => s.id === r.source_id);
     let iocs: any = {};
-    try { iocs = JSON.parse(r.iocs || "{}"); } catch { iocs = {}; }
+    try {
+      iocs = JSON.parse(r.iocs || "{}");
+    } catch {
+      iocs = {};
+    }
     return {
-      id: r.id, tenantId: r.tenant_id, sourceId: r.source_id,
-      sourceName: src?.name ?? "unknown", sourceCategory: src?.category ?? "unknown",
+      id: r.id,
+      tenantId: r.tenant_id,
+      sourceId: r.source_id,
+      sourceName: src?.name ?? "unknown",
+      sourceCategory: src?.category ?? "unknown",
       sourceFetchedAt: r.source_fetched_at ?? null,
-      title: r.title, url: r.url, publishedAt: r.published_at, severity: r.severity,
+      title: r.title,
+      url: r.url,
+      publishedAt: r.published_at,
+      publishedAtInferred: !!r.published_at_inferred,
+      severity: r.severity,
+      publisherSeverity: r.publisher_severity ?? null,
+      technicalSeverity: r.technical_severity ?? r.severity,
+      clientImpactSeverity: r.client_impact_severity ?? null,
+      analystFinalSeverity: r.analyst_final_severity ?? null,
+      analystSeverityRationale: r.analyst_severity_rationale ?? null,
+      analystSeverityAt: r.analyst_severity_at ?? null,
+      analystSeverityBy: r.analyst_severity_by ?? null,
       cveIds: JSON.parse(r.cve_ids || "[]"),
       affectedTech: JSON.parse(r.affected_tech || "[]"),
       threatActors: JSON.parse(r.threat_actors || "[]"),
       iocs,
-      summary: r.summary, aiSummary: r.ai_summary,
-      aiRelevanceScore: r.ai_relevance_score, aiRecommendation: r.ai_recommendation,
-      aiAnalyzedAt: r.ai_analyzed_at, aiProviderLabel: r.ai_provider_label,
-      draftEmail: r.draft_email, draftEmailAt: r.draft_email_at,
-      status: r.status, createdAt: r.created_at,
+      summary: r.summary,
+      aiSummary: r.ai_summary,
+      aiRelevanceScore: r.ai_relevance_score,
+      aiRecommendation: r.ai_recommendation,
+      aiAnalyzedAt: r.ai_analyzed_at,
+      aiProviderLabel: r.ai_provider_label,
+      draftEmail: r.draft_email,
+      draftEmailAt: r.draft_email_at,
+      status: r.status,
+      createdAt: r.created_at,
       rawSnippet: r.raw_snippet,
-      analystTags: (() => { try { const v = JSON.parse(r.analyst_tags || "[]"); return Array.isArray(v) ? v : []; } catch { return []; } })(),
+      analystTags: (() => {
+        try {
+          const v = JSON.parse(r.analyst_tags || "[]");
+          return Array.isArray(v) ? v : [];
+        } catch {
+          return [];
+        }
+      })(),
       analystEditedAt: r.analyst_edited_at,
       analystEditedBy: r.analyst_edited_by,
       intelCategory: (r.intel_category as any) ?? null,
@@ -2905,10 +5180,20 @@ export const storage = {
     tid: string,
     fid: string,
     patch: {
+      severity?: string;
+      analystFinalSeverity?: string | null;
+      analystSeverityRationale?: string | null;
       status?: string;
       cveIds?: string[];
       iocs?: Record<string, string[]>;
       analystTags?: string[];
+      analystAssessment?: string | null;
+      analystDisposition?: string | null;
+      analystConfidence?: string | null;
+      analystImpact?: string | null;
+      analystNextAction?: string | null;
+      clientTags?: string[];
+      clientMatchDecisions?: Record<string, "ai_assigned" | "approved" | "dismissed">;
       affectedTech?: string[];
       threatActors?: string[];
     },
@@ -2916,53 +5201,189 @@ export const storage = {
   ): OsintFindingDTO | undefined {
     const existing = storage.getOsintFinding(tid, fid);
     if (!existing) return undefined;
+    if (existing.status === "escalated") {
+      throw new Error("Escalated intelligence is immutable until an authorised reopen workflow is completed.");
+    }
     const allowedStatus = new Set(["new", "triaged", "assessed", "dismissed", "escalated"]);
     const sets: string[] = [];
     const params: any[] = [];
+    const allowedSeverity = new Set(["info", "low", "medium", "high", "critical"]);
+    if (typeof patch.severity === "string" && allowedSeverity.has(patch.severity)) {
+      sets.push("technical_severity = COALESCE(technical_severity, ?)");
+      params.push(existing.technicalSeverity ?? existing.severity);
+      sets.push("severity = ?");
+      params.push(patch.severity);
+      sets.push("analyst_final_severity = ?");
+      params.push(patch.severity);
+      sets.push("analyst_severity_at = ?");
+      params.push(now());
+      sets.push("analyst_severity_by = ?");
+      params.push(editedBy);
+    }
+    if (patch.analystFinalSeverity !== undefined) {
+      const finalSeverity = patch.analystFinalSeverity == null ? null : String(patch.analystFinalSeverity);
+      if (finalSeverity === null || allowedSeverity.has(finalSeverity)) {
+        sets.push("technical_severity = COALESCE(technical_severity, ?)");
+        params.push(existing.technicalSeverity ?? existing.severity);
+        sets.push("analyst_final_severity = ?");
+        params.push(finalSeverity);
+        sets.push("severity = COALESCE(?, technical_severity, publisher_severity, severity)");
+        params.push(finalSeverity);
+        sets.push("analyst_severity_at = ?");
+        params.push(finalSeverity ? now() : null);
+        sets.push("analyst_severity_by = ?");
+        params.push(finalSeverity ? editedBy : null);
+      }
+    }
+    if (patch.analystSeverityRationale !== undefined) {
+      const rationale =
+        patch.analystSeverityRationale == null ? null : String(patch.analystSeverityRationale).trim().slice(0, 2000);
+      sets.push("analyst_severity_rationale = ?");
+      params.push(rationale || null);
+    }
     if (typeof patch.status === "string" && allowedStatus.has(patch.status)) {
-      sets.push("status = ?"); params.push(patch.status);
+      sets.push("status = ?");
+      params.push(patch.status);
     }
     if (Array.isArray(patch.cveIds)) {
       const cleaned = Array.from(new Set(patch.cveIds.map((s) => String(s).trim().toUpperCase()).filter(Boolean)));
-      sets.push("cve_ids = ?"); params.push(JSON.stringify(cleaned));
+      sets.push("cve_ids = ?");
+      params.push(JSON.stringify(cleaned));
     }
     if (patch.iocs && typeof patch.iocs === "object") {
       const cleanIocs: Record<string, string[]> = {};
       for (const [k, v] of Object.entries(patch.iocs)) {
-        if (!ALLOWED_IOC_BUCKETS.has(k) || !Array.isArray(v)) continue;
+        if (!Array.isArray(v)) continue;
         const cleaned = Array.from(new Set(v.map((s) => String(s).trim()).filter(Boolean)));
         if (cleaned.length) cleanIocs[k] = cleaned;
       }
-      sets.push("iocs = ?"); params.push(JSON.stringify(cleanIocs));
+      sets.push("iocs = ?");
+      params.push(JSON.stringify(cleanIocs));
     }
     if (Array.isArray(patch.analystTags)) {
       const cleaned = Array.from(new Set(patch.analystTags.map((s) => String(s).trim()).filter(Boolean))).slice(0, 32);
-      sets.push("analyst_tags = ?"); params.push(JSON.stringify(cleaned));
+      sets.push("analyst_tags = ?");
+      params.push(JSON.stringify(cleaned));
+    }
+    if (patch.analystAssessment !== undefined) {
+      const assessment =
+        patch.analystAssessment == null ? null : String(patch.analystAssessment).trim().slice(0, 12000);
+      sets.push("analyst_assessment = ?");
+      params.push(assessment || null);
+    }
+    const assessmentEnums = [
+      [
+        "analystDisposition",
+        "analyst_disposition",
+        new Set(["action_required", "monitor", "informational", "false_positive"]),
+      ],
+      ["analystConfidence", "analyst_confidence", new Set(["low", "medium", "high"])],
+      ["analystImpact", "analyst_impact", new Set(["none", "low", "medium", "high", "critical"])],
+    ] as const;
+    for (const [patchKey, column, allowed] of assessmentEnums) {
+      const value = patch[patchKey];
+      if (value === undefined) continue;
+      const cleaned = value == null ? null : String(value).trim();
+      if (cleaned && !allowed.has(cleaned)) continue;
+      sets.push(`${column} = ?`);
+      params.push(cleaned || null);
+    }
+    if (patch.analystNextAction !== undefined) {
+      const nextAction = patch.analystNextAction == null ? null : String(patch.analystNextAction).trim().slice(0, 2000);
+      sets.push("analyst_next_action = ?");
+      params.push(nextAction || null);
+    }
+    const assessmentTouched =
+      patch.analystAssessment !== undefined ||
+      patch.analystDisposition !== undefined ||
+      patch.analystConfidence !== undefined ||
+      patch.analystImpact !== undefined ||
+      patch.analystNextAction !== undefined;
+    if (assessmentTouched) {
+      const hasAssessment = Boolean(
+        patch.analystAssessment?.trim() ||
+        patch.analystDisposition ||
+        patch.analystConfidence ||
+        patch.analystImpact ||
+        patch.analystNextAction?.trim(),
+      );
+      sets.push("analyst_assessed_at = ?");
+      params.push(hasAssessment ? now() : null);
+      sets.push("analyst_assessed_by = ?");
+      params.push(hasAssessment ? editedBy : null);
+      if (hasAssessment && patch.status === undefined) {
+        sets.push("status = ?");
+        params.push("assessed");
+      }
+    }
+    if (Array.isArray(patch.clientTags)) {
+      const cleaned = Array.from(new Set(patch.clientTags.map((s) => String(s).trim()).filter(Boolean))).slice(0, 32);
+      sets.push("client_tags = ?");
+      params.push(JSON.stringify(cleaned));
+    }
+    if (patch.clientMatchDecisions && typeof patch.clientMatchDecisions === "object") {
+      const validClientIds = new Set(
+        storage.listClientProfiles(tid, { includeArchived: true }).map((profile) => profile.id),
+      );
+      const cleaned: Record<string, "ai_assigned" | "approved" | "dismissed"> = {};
+      for (const [clientId, decision] of Object.entries(patch.clientMatchDecisions)) {
+        if (
+          validClientIds.has(clientId) &&
+          (decision === "ai_assigned" || decision === "approved" || decision === "dismissed")
+        )
+          cleaned[clientId] = decision;
+      }
+      sets.push("client_match_decisions = ?");
+      params.push(JSON.stringify(cleaned));
     }
     if (Array.isArray(patch.affectedTech)) {
       const cleaned = Array.from(new Set(patch.affectedTech.map((s) => String(s).trim()).filter(Boolean)));
-      sets.push("affected_tech = ?"); params.push(JSON.stringify(cleaned));
+      sets.push("affected_tech = ?");
+      params.push(JSON.stringify(cleaned));
     }
     if (Array.isArray(patch.threatActors)) {
       const cleaned = Array.from(new Set(patch.threatActors.map((s) => String(s).trim()).filter(Boolean)));
-      sets.push("threat_actors = ?"); params.push(JSON.stringify(cleaned));
+      sets.push("threat_actors = ?");
+      params.push(JSON.stringify(cleaned));
+    }
+    const triageContentTouched =
+      patch.severity !== undefined ||
+      Array.isArray(patch.cveIds) ||
+      Boolean(patch.iocs) ||
+      Array.isArray(patch.analystTags) ||
+      Array.isArray(patch.clientTags) ||
+      Boolean(patch.clientMatchDecisions) ||
+      Array.isArray(patch.affectedTech) ||
+      Array.isArray(patch.threatActors);
+    if (existing.status === "new" && patch.status === undefined && !assessmentTouched && triageContentTouched) {
+      sets.push("status = ?");
+      params.push("triaged");
     }
     if (sets.length === 0) return existing;
-    sets.push("analyst_edited_at = ?"); params.push(now());
-    sets.push("analyst_edited_by = ?"); params.push(editedBy);
+    sets.push("analyst_edited_at = ?");
+    params.push(now());
+    sets.push("analyst_edited_by = ?");
+    params.push(editedBy);
     params.push(fid, tid);
     sqlite.prepare(`UPDATE osint_findings SET ${sets.join(", ")} WHERE id = ? AND tenant_id = ?`).run(...params);
     // v2.30 — if IoCs / CVEs / sectors / tech changed, attempt cluster (re-)assignment.
     // Idempotent: no-op if cluster_id already set. Errors are swallowed so analyst
     // edits never fail on clustering bugs.
     if (patch.iocs || patch.cveIds || patch.affectedTech) {
-      try { ensureClusterIdPersisted(sqlite, fid); } catch (e) { console.warn("[cluster] analyst-edit assign failed", e); }
+      try {
+        ensureClusterIdPersisted(sqlite, fid);
+      } catch (e) {
+        console.warn("[cluster] analyst-edit assign failed", e);
+      }
     }
     storage.appendAudit(tid, editedBy, "osint.finding.update", fid, { fields: Object.keys(patch) });
     return storage.getOsintFinding(tid, fid);
   },
 
-  async runOsintAnalysis(tid: string, opts: { ids?: string[]; onlyUnanalyzed?: boolean }): Promise<{ count: number; provider: string | null }> {
+  async runOsintAnalysis(
+    tid: string,
+    opts: { ids?: string[]; onlyUnanalyzed?: boolean; jobId?: string },
+  ): Promise<{ count: number; provider: string | null }> {
     const provider = storage.resolveAiProvider(tid, "osint_analysis");
     if (!provider) return { count: 0, provider: null };
     let target: OsintFindingDTO[];
@@ -2972,16 +5393,33 @@ export const storage = {
       target = storage.listOsintFindings(tid);
       if (opts.onlyUnanalyzed) target = target.filter((f) => !f.aiAnalyzedAt);
     }
+    // Escalated intelligence is an integrity-locked record. Batch and direct
+    // AI analysis must respect the same lock enforced by the analyst UI/API.
+    target = target.filter((f) => f.status !== "escalated");
     // v2.13: pre-fetch the source articles in parallel so the AI can read the
     // full intel, not just the feed teaser. Failures degrade gracefully — the
     // analyser still gets the title/summary/CVEs even if the URL is unreachable.
-    const fetched = await fetchSourcesBatch(target.map((f) => f.url), { includeReferences: true, maxReferenceLinks: 5 });
+    const fetched = await fetchSourcesBatch(
+      target.map((f) => f.url),
+      {
+        includeReferences: true,
+        maxReferenceLinks: 24,
+        maxReferenceDepth: 2,
+      },
+    );
     const contentByIdx = new Map<number, string | null>();
     fetched.forEach((r, i) => contentByIdx.set(i, r.content));
 
     let updated = 0;
+    let autoTagged = 0;
+    let autoUntagged = 0;
     let lastError: Error | null = null;
     target.forEach((f, idx) => {
+      if (opts.jobId) {
+        const job = storage.getAiJob(tid, opts.jobId);
+        if (!job || job.status === "cancelled") return;
+        storage.setAiJobHeartbeat(opts.jobId);
+      }
       const sourceContent = contentByIdx.get(idx) ?? null;
       let r: ReturnType<typeof dispatchAi>;
       try {
@@ -2998,7 +5436,7 @@ export const storage = {
               url: f.url,
               sourceContent,
             },
-            clientProfile: BATCH_ONE_AI_CONTEXT,
+            clientProfile: storage.getClientAnalysisScope(tid) ?? BATCH_ONE_AI_CONTEXT,
           },
           provider,
         });
@@ -3007,6 +5445,7 @@ export const storage = {
         // The route handler reports lastError if updated==0.
         lastError = e instanceof Error ? e : new Error(String(e));
         console.warn(`[osint.analyze] finding ${f.id} failed: ${lastError.message}`);
+        if (opts.jobId) storage.setAiJobProgress(opts.jobId, ((idx + 1) / Math.max(1, target.length)) * 100);
         return;
       }
       if (r.task !== "osint_analysis") return;
@@ -3023,10 +5462,17 @@ export const storage = {
       // This fixes "AI re-analysis shows no change" on edited findings whose
       // IoCs were extracted by pre-v2.28 code paths that did not have the
       // global blocklist.
-      const row = sqlite.prepare("SELECT iocs, analyst_tags, analyst_edited_at FROM osint_findings WHERE id = ? AND tenant_id = ?").get(f.id, tid) as any;
+      const row = sqlite
+        .prepare(
+          "SELECT iocs, analyst_tags, client_tags, client_match_decisions, analyst_edited_at FROM osint_findings WHERE id = ? AND tenant_id = ?",
+        )
+        .get(f.id, tid) as any;
       const analystOverrideActive = !!(row && row.analyst_edited_at);
       let mergedIocsJson: string | null = null;
       let mergedTagsJson: string | null = null;
+      let aiClientMatchesJson: string | null = null;
+      let autoClientTagsJson: string | null = null;
+      let clientMatchDecisionsJson: string | null = null;
 
       // ---- IoCs ----
       // Always rebuild the IoC bag through the publisher-blocklist filter.
@@ -3034,14 +5480,23 @@ export const storage = {
       // When override IS active, only run the cleanup pass over the existing
       // stored IoCs (no AI merge).
       let existingIocs: Record<string, string[]> = {};
-      try { const v = JSON.parse(row?.iocs || "{}"); if (v && typeof v === "object") existingIocs = v; } catch { /* ignore */ }
+      try {
+        const v = JSON.parse(row?.iocs || "{}");
+        if (v && typeof v === "object") existingIocs = v;
+      } catch {
+        /* ignore */
+      }
       const aiIocs = analystOverrideActive
         ? ({} as Record<string, string[] | undefined>)
         : ((r.output.iocs || {}) as Record<string, string[] | undefined>);
       const allKeys = new Set<string>([...Object.keys(existingIocs), ...Object.keys(aiIocs)]);
       if (allKeys.size > 0) {
         const isPublisherUrl = (u: string): boolean => {
-          try { return isSecurityPublisherHost(new URL(u).hostname.toLowerCase()); } catch { return false; }
+          try {
+            return isSecurityPublisherHost(new URL(u).hostname.toLowerCase());
+          } catch {
+            return false;
+          }
         };
         const merged: Record<string, string[]> = {};
         let mutatedExisting = false;
@@ -3052,45 +5507,98 @@ export const storage = {
             const s = String(raw).trim();
             if (!s) return;
             const lk = s.toLowerCase();
-            if (seen.has(lk)) { if (fromExisting) mutatedExisting = true; return; }
+            if (seen.has(lk)) {
+              if (fromExisting) mutatedExisting = true;
+              return;
+            }
             // Strip publisher / vendor reference hosts from url + domain buckets.
-            if (k === "url" && isPublisherUrl(s)) { if (fromExisting) mutatedExisting = true; return; }
-            if (k === "domain" && isSecurityPublisherHost(lk)) { if (fromExisting) mutatedExisting = true; return; }
-            seen.add(lk); out.push(s);
+            if (k === "url" && isPublisherUrl(s)) {
+              if (fromExisting) mutatedExisting = true;
+              return;
+            }
+            if (k === "domain" && isSecurityPublisherHost(lk)) {
+              if (fromExisting) mutatedExisting = true;
+              return;
+            }
+            seen.add(lk);
+            out.push(s);
           };
-          for (const v of (existingIocs[k] || [])) pushIfClean(v, true);
-          for (const v of (aiIocs[k] || [])) pushIfClean(v, false);
+          for (const v of existingIocs[k] || []) pushIfClean(v, true);
+          for (const v of aiIocs[k] || []) pushIfClean(v, false);
           if (out.length) merged[k] = out;
           else if ((existingIocs[k] || []).length) mutatedExisting = true; // entire bucket stripped
         }
         // Only write when something actually changed (either an AI merge happened
         // or the publisher filter removed at least one entry).
-        const aiContributed = !analystOverrideActive && Object.keys(aiIocs).some(k => (aiIocs[k] || []).length > 0);
+        const aiContributed = !analystOverrideActive && Object.keys(aiIocs).some((k) => (aiIocs[k] || []).length > 0);
         if (aiContributed || mutatedExisting) {
           mergedIocsJson = JSON.stringify(merged);
         }
       }
 
       // ---- Analyst tags ----
-      // Only merged when analyst override is NOT active (preserves the
-      // analyst's curated tag set the same way as before).
+      // Only merged when analyst override is NOT active, preserving the
+      // analyst's curated taxonomy.
       if (!analystOverrideActive && Array.isArray(r.output.analystTags) && r.output.analystTags.length > 0) {
         let existingTags: string[] = [];
-        try { const v = JSON.parse(row?.analyst_tags || "[]"); if (Array.isArray(v)) existingTags = v; } catch { /* ignore */ }
-        const seen = new Set<string>();
-        const merged: string[] = [];
-        for (const v of existingTags) {
-          const s = String(v).trim(); if (!s) continue;
-          const lk = s.toLowerCase(); if (seen.has(lk)) continue;
-          seen.add(lk); merged.push(s);
+        try {
+          const v = JSON.parse(row?.analyst_tags || "[]");
+          if (Array.isArray(v)) existingTags = v;
+        } catch {
+          /* ignore */
         }
-        for (const v of r.output.analystTags) {
-          const s = String(v).trim(); if (!s) continue;
-          const lk = s.toLowerCase(); if (seen.has(lk)) continue;
-          seen.add(lk); merged.push(s);
-          if (merged.length >= 32) break;
-        }
+        const merged = Array.from(new Set([...existingTags, ...(r.output.analystTags ?? [])])).slice(0, 32);
         mergedTagsJson = JSON.stringify(merged);
+      }
+
+      // ---- Client relevance ----
+      // High-confidence semantic matches become provisional AI-assigned tags.
+      // Analyst approvals and dismissals always win and survive re-analysis.
+      if (Array.isArray(r.output.clientMatches)) {
+        aiClientMatchesJson = JSON.stringify(r.output.clientMatches);
+        const validClientIds = new Set(storage.listClientProfiles(tid).map((profile) => profile.id));
+        const existingClientTags = new Set(parseJsonArray<string>(row?.client_tags));
+        const existingDecisions = (() => {
+          try {
+            const value = JSON.parse(row?.client_match_decisions || "{}");
+            return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+          } catch {
+            return {};
+          }
+        })() as Record<string, "ai_assigned" | "approved" | "dismissed">;
+        const nextDecisions = { ...existingDecisions };
+        let tagsChanged = false;
+        const highConfidenceClientIds = new Set(
+          r.output.clientMatches
+            .filter(
+              (match) =>
+                validClientIds.has(String(match?.clientId || "")) && (Number(match?.relevanceScore) || 0) >= 0.7,
+            )
+            .map((match) => String(match.clientId)),
+        );
+        for (const [clientId, decision] of Object.entries(existingDecisions)) {
+          if (decision !== "ai_assigned" || highConfidenceClientIds.has(clientId)) continue;
+          if (existingClientTags.delete(clientId)) {
+            tagsChanged = true;
+            autoUntagged += 1;
+          }
+          delete nextDecisions[clientId];
+        }
+        for (const match of r.output.clientMatches) {
+          const clientId = String(match?.clientId || "");
+          const relevanceScore = Number(match?.relevanceScore) || 0;
+          if (!validClientIds.has(clientId) || relevanceScore < 0.7 || existingDecisions[clientId] === "dismissed")
+            continue;
+          const wasAlreadyTagged = existingClientTags.has(clientId);
+          if (!wasAlreadyTagged) {
+            existingClientTags.add(clientId);
+            tagsChanged = true;
+            autoTagged += 1;
+          }
+          if (!existingDecisions[clientId]) nextDecisions[clientId] = wasAlreadyTagged ? "approved" : "ai_assigned";
+        }
+        if (tagsChanged) autoClientTagsJson = JSON.stringify(Array.from(existingClientTags).slice(0, 32));
+        clientMatchDecisionsJson = JSON.stringify(nextDecisions);
       }
 
       // v2.26 — dispatcher is now LIVE-ONLY. If the AI call had failed,
@@ -3099,10 +5607,38 @@ export const storage = {
       // here, the response is genuinely from the configured provider.
       const labelToStore = provider.label;
       // Build dynamic UPDATE (only touch iocs/analyst_tags when we have a merged value).
-      const sets = ["ai_summary = ?", "ai_relevance_score = ?", "ai_recommendation = ?", "ai_analyzed_at = ?", "ai_provider_label = ?"];
+      const sets = [
+        "ai_summary = ?",
+        "ai_relevance_score = ?",
+        "ai_recommendation = ?",
+        "ai_analyzed_at = ?",
+        "ai_provider_label = ?",
+      ];
       const params: any[] = [r.output.summary, r.output.relevanceScore, r.output.recommendation, now(), labelToStore];
-      if (mergedIocsJson !== null) { sets.push("iocs = ?"); params.push(mergedIocsJson); }
-      if (mergedTagsJson !== null) { sets.push("analyst_tags = ?"); params.push(mergedTagsJson); }
+      if (sourceContent) {
+        sets.push("source_content = ?", "source_fetched_at = ?");
+        params.push(sourceContent, now());
+      }
+      if (mergedIocsJson !== null) {
+        sets.push("iocs = ?");
+        params.push(mergedIocsJson);
+      }
+      if (mergedTagsJson !== null) {
+        sets.push("analyst_tags = ?");
+        params.push(mergedTagsJson);
+      }
+      if (aiClientMatchesJson !== null) {
+        sets.push("ai_client_matches = ?");
+        params.push(aiClientMatchesJson);
+      }
+      if (autoClientTagsJson !== null) {
+        sets.push("client_tags = ?");
+        params.push(autoClientTagsJson);
+      }
+      if (clientMatchDecisionsJson !== null) {
+        sets.push("client_match_decisions = ?");
+        params.push(clientMatchDecisionsJson);
+      }
       // v2.29 — persist AI categorisation. Always write (overwrites a stale label).
       {
         const cat = (r.output as any).intelCategory;
@@ -3136,7 +5672,12 @@ export const storage = {
         const sec = (r.output as any).sectors;
         if (Array.isArray(sec)) {
           const clean = sec
-            .map((s: any) => String(s || "").trim().toLowerCase().replace(/\s+/g, "_"))
+            .map((s: any) =>
+              String(s || "")
+                .trim()
+                .toLowerCase()
+                .replace(/\s+/g, "_"),
+            )
             .filter((s: string) => /^[a-z][a-z0-9_]{1,30}$/.test(s));
           if (clean.length > 0) {
             sets.push("sectors = ?");
@@ -3148,7 +5689,11 @@ export const storage = {
         const reg = (r.output as any).regions;
         if (Array.isArray(reg)) {
           const clean = reg
-            .map((s: any) => String(s || "").trim().toLowerCase())
+            .map((s: any) =>
+              String(s || "")
+                .trim()
+                .toLowerCase(),
+            )
             .filter((s: string) => /^[a-z][a-z0-9_-]{1,20}$/.test(s));
           if (clean.length > 0) {
             sets.push("regions = ?");
@@ -3160,10 +5705,20 @@ export const storage = {
       sqlite.prepare(`UPDATE osint_findings SET ${sets.join(", ")} WHERE id = ? AND tenant_id = ?`).run(...params);
       // v2.30 — assign cluster_id now that IoCs/sectors/tech are richest.
       // Safe + idempotent + swallow errors so AI batch never aborts on this.
-      try { ensureClusterIdPersisted(sqlite, f.id); } catch (e) { console.warn(`[cluster] analyze assign failed for ${f.id}`, e); }
+      try {
+        ensureClusterIdPersisted(sqlite, f.id);
+      } catch (e) {
+        console.warn(`[cluster] analyze assign failed for ${f.id}`, e);
+      }
       updated += 1;
+      if (opts.jobId) storage.setAiJobProgress(opts.jobId, ((idx + 1) / Math.max(1, target.length)) * 100);
     });
-    storage.appendAudit(tid, "system", "osint.analyze", null, { count: updated, provider: provider.label });
+    storage.appendAudit(tid, "system", "osint.analyze", null, {
+      count: updated,
+      autoTagged,
+      autoUntagged,
+      provider: provider.label,
+    });
     // v2.26 — if every single finding in the batch failed live, surface the
     // last error to the caller so the UI shows what went wrong instead of a
     // silent "0 updated". A partial-batch success still returns 200 with
@@ -3221,23 +5776,42 @@ export const storage = {
     };
   },
 
-  updateOsintAutomationSettings(tid: string, patch: {
-    autoFetchEnabled?: boolean;
-    fetchIntervalMin?: number;
-    autoAnalyzeEnabled?: boolean;
-    analyzeConcurrency?: number;
-    analyzeMaxPerTick?: number;
-  }): ReturnType<typeof storage.getOsintAutomationSettings> {
+  updateOsintAutomationSettings(
+    tid: string,
+    patch: {
+      autoFetchEnabled?: boolean;
+      fetchIntervalMin?: number;
+      autoAnalyzeEnabled?: boolean;
+      analyzeConcurrency?: number;
+      analyzeMaxPerTick?: number;
+    },
+  ): ReturnType<typeof storage.getOsintAutomationSettings> {
     // Ensure row exists.
     storage.getOsintAutomationSettings(tid);
     const sets: string[] = [];
     const params: any[] = [];
-    if (patch.autoFetchEnabled !== undefined) { sets.push("auto_fetch_enabled = ?"); params.push(patch.autoFetchEnabled ? 1 : 0); }
-    if (patch.fetchIntervalMin !== undefined) { sets.push("fetch_interval_min = ?"); params.push(Math.max(15, Math.min(1440, Math.round(patch.fetchIntervalMin)))); }
-    if (patch.autoAnalyzeEnabled !== undefined) { sets.push("auto_analyze_enabled = ?"); params.push(patch.autoAnalyzeEnabled ? 1 : 0); }
-    if (patch.analyzeConcurrency !== undefined) { sets.push("analyze_concurrency = ?"); params.push(Math.max(1, Math.min(8, Math.round(patch.analyzeConcurrency)))); }
-    if (patch.analyzeMaxPerTick !== undefined) { sets.push("analyze_max_per_tick = ?"); params.push(Math.max(1, Math.min(50, Math.round(patch.analyzeMaxPerTick)))); }
-    sets.push("updated_at = ?"); params.push(now());
+    if (patch.autoFetchEnabled !== undefined) {
+      sets.push("auto_fetch_enabled = ?");
+      params.push(patch.autoFetchEnabled ? 1 : 0);
+    }
+    if (patch.fetchIntervalMin !== undefined) {
+      sets.push("fetch_interval_min = ?");
+      params.push(Math.max(15, Math.min(1440, Math.round(patch.fetchIntervalMin))));
+    }
+    if (patch.autoAnalyzeEnabled !== undefined) {
+      sets.push("auto_analyze_enabled = ?");
+      params.push(patch.autoAnalyzeEnabled ? 1 : 0);
+    }
+    if (patch.analyzeConcurrency !== undefined) {
+      sets.push("analyze_concurrency = ?");
+      params.push(Math.max(1, Math.min(8, Math.round(patch.analyzeConcurrency))));
+    }
+    if (patch.analyzeMaxPerTick !== undefined) {
+      sets.push("analyze_max_per_tick = ?");
+      params.push(Math.max(1, Math.min(50, Math.round(patch.analyzeMaxPerTick))));
+    }
+    sets.push("updated_at = ?");
+    params.push(now());
     params.push(tid);
     sqlite.prepare(`UPDATE tenant_osint_settings SET ${sets.join(", ")} WHERE tenant_id = ?`).run(...params);
     return storage.getOsintAutomationSettings(tid);
@@ -3246,12 +5820,17 @@ export const storage = {
   /** Returns every tenant id that currently has a settings row. Used by the
    *  global scheduler to know which tenants to walk each minute. */
   listOsintAutomationTenants(): string[] {
-    return (sqlite.prepare("SELECT tenant_id FROM tenant_osint_settings").all() as Array<{ tenant_id: string }>).map((r) => r.tenant_id);
+    return (sqlite.prepare("SELECT tenant_id FROM tenant_osint_settings").all() as Array<{ tenant_id: string }>).map(
+      (r) => r.tenant_id,
+    );
   },
 
   /** Per-finding deep-dive cache lookup — returns null when no analysis has
    *  been persisted yet. */
-  getOsintFindingCache(tid: string, fid: string): {
+  getOsintFindingCache(
+    tid: string,
+    fid: string,
+  ): {
     sourceContent: string | null;
     sourceFetchedAt: string | null;
     cirtAnalysis: any | null;
@@ -3262,12 +5841,22 @@ export const storage = {
     cirtAttempts: number;
     cirtNextAttemptAt: string | null;
   } | null {
-    const r = sqlite.prepare(`SELECT source_content, source_fetched_at, cirt_analysis,
+    const r = sqlite
+      .prepare(
+        `SELECT source_content, source_fetched_at, cirt_analysis,
       cirt_analyzed_at, cirt_provider_label, cirt_status, cirt_error, cirt_attempts, cirt_next_attempt_at
-      FROM osint_findings WHERE id = ? AND tenant_id = ?`).get(fid, tid) as any;
+      FROM osint_findings WHERE id = ? AND tenant_id = ?`,
+      )
+      .get(fid, tid) as any;
     if (!r) return null;
     let parsed: any = null;
-    if (r.cirt_analysis) { try { parsed = JSON.parse(r.cirt_analysis); } catch { parsed = null; } }
+    if (r.cirt_analysis) {
+      try {
+        parsed = JSON.parse(r.cirt_analysis);
+      } catch {
+        parsed = null;
+      }
+    }
     return {
       sourceContent: r.source_content ?? null,
       sourceFetchedAt: r.source_fetched_at ?? null,
@@ -3283,12 +5872,18 @@ export const storage = {
 
   /** Persist a successful per-intel CIRT analysis (object matches
    *  ChatDeepDivePerFinding). Also persists the source body that fed it. */
-  saveOsintFindingCirt(tid: string, fid: string, payload: {
-    sourceContent: string | null;
-    cirtAnalysis: any;
-    providerLabel: string;
-  }): void {
-    sqlite.prepare(`UPDATE osint_findings SET
+  saveOsintFindingCirt(
+    tid: string,
+    fid: string,
+    payload: {
+      sourceContent: string | null;
+      cirtAnalysis: any;
+      providerLabel: string;
+    },
+  ): void {
+    sqlite
+      .prepare(
+        `UPDATE osint_findings SET
       source_content = COALESCE(?, source_content),
       source_fetched_at = CASE WHEN ? IS NOT NULL THEN ? ELSE source_fetched_at END,
       cirt_analysis = ?,
@@ -3297,10 +5892,17 @@ export const storage = {
       cirt_status = 'done',
       cirt_error = NULL,
       cirt_next_attempt_at = NULL
-      WHERE id = ? AND tenant_id = ?`).run(
-        payload.sourceContent, payload.sourceContent, now(),
+      WHERE id = ? AND tenant_id = ?`,
+      )
+      .run(
+        payload.sourceContent,
+        payload.sourceContent,
+        now(),
         JSON.stringify(payload.cirtAnalysis),
-        now(), payload.providerLabel, fid, tid,
+        now(),
+        payload.providerLabel,
+        fid,
+        tid,
       );
   },
 
@@ -3308,22 +5910,22 @@ export const storage = {
    *  backoff (5min / 30min / 2h). After 3 attempts the row stays in 'failed'
    *  and the scheduler stops picking it up automatically. */
   markOsintFindingCirtFailed(tid: string, fid: string, reason: string): void {
-    const row = sqlite.prepare("SELECT cirt_attempts FROM osint_findings WHERE id = ? AND tenant_id = ?").get(fid, tid) as any;
+    const row = sqlite
+      .prepare("SELECT cirt_attempts FROM osint_findings WHERE id = ? AND tenant_id = ?")
+      .get(fid, tid) as any;
     const attempts = Number(row?.cirt_attempts ?? 0) + 1;
     const backoffMin = attempts === 1 ? 5 : attempts === 2 ? 30 : attempts === 3 ? 120 : 0;
     const nextAttempt = backoffMin > 0 ? new Date(Date.now() + backoffMin * 60_000).toISOString() : null;
-    sqlite.prepare(`UPDATE osint_findings SET
+    sqlite
+      .prepare(
+        `UPDATE osint_findings SET
       cirt_status = ?,
       cirt_error = ?,
       cirt_attempts = ?,
       cirt_next_attempt_at = ?
-      WHERE id = ? AND tenant_id = ?`).run(
-        attempts >= 4 ? "failed" : "pending",
-        String(reason).slice(0, 500),
-        attempts,
-        nextAttempt,
-        fid, tid,
-      );
+      WHERE id = ? AND tenant_id = ?`,
+      )
+      .run(attempts >= 4 ? "failed" : "pending", String(reason).slice(0, 500), attempts, nextAttempt, fid, tid);
   },
 
   /** Pick the next batch of findings due for CIRT analysis. Skips rows whose
@@ -3331,31 +5933,50 @@ export const storage = {
    *  about fresh intel). */
   listOsintCirtQueue(tid: string, limit: number): OsintFindingDTO[] {
     const nowIso = now();
-    const rows = sqlite.prepare(`SELECT * FROM osint_findings
+    const rows = sqlite
+      .prepare(
+        `SELECT * FROM osint_findings
       WHERE tenant_id = ?
         AND cirt_status IN ('pending', 'fetching', 'analyzing')
         AND cirt_attempts < 4
         AND (cirt_next_attempt_at IS NULL OR cirt_next_attempt_at <= ?)
       ORDER BY published_at DESC
-      LIMIT ?`).all(tid, nowIso, Math.max(1, Math.min(50, limit))) as any[];
+      LIMIT ?`,
+      )
+      .all(tid, nowIso, Math.max(1, Math.min(50, limit))) as any[];
     const sourceMap = new Map(storage.listOsintSources().map((s) => [s.id, s]));
     return rows.map((r) => {
       const src = sourceMap.get(r.source_id);
       let iocs: any = {};
-      try { iocs = JSON.parse(r.iocs || "{}"); } catch { iocs = {}; }
+      try {
+        iocs = JSON.parse(r.iocs || "{}");
+      } catch {
+        iocs = {};
+      }
       return {
-        id: r.id, tenantId: r.tenant_id, sourceId: r.source_id,
-        sourceName: src?.name ?? "unknown", sourceCategory: src?.category ?? "unknown",
-        title: r.title, url: r.url, publishedAt: r.published_at, severity: r.severity,
+        id: r.id,
+        tenantId: r.tenant_id,
+        sourceId: r.source_id,
+        sourceName: src?.name ?? "unknown",
+        sourceCategory: src?.category ?? "unknown",
+        title: r.title,
+        url: r.url,
+        publishedAt: r.published_at,
+        severity: r.severity,
         cveIds: JSON.parse(r.cve_ids || "[]"),
         affectedTech: JSON.parse(r.affected_tech || "[]"),
         threatActors: JSON.parse(r.threat_actors || "[]"),
         iocs,
-        summary: r.summary, aiSummary: r.ai_summary,
-        aiRelevanceScore: r.ai_relevance_score, aiRecommendation: r.ai_recommendation,
-        aiAnalyzedAt: r.ai_analyzed_at, aiProviderLabel: r.ai_provider_label,
-        draftEmail: r.draft_email, draftEmailAt: r.draft_email_at,
-        status: r.status, createdAt: r.created_at,
+        summary: r.summary,
+        aiSummary: r.ai_summary,
+        aiRelevanceScore: r.ai_relevance_score,
+        aiRecommendation: r.ai_recommendation,
+        aiAnalyzedAt: r.ai_analyzed_at,
+        aiProviderLabel: r.ai_provider_label,
+        draftEmail: r.draft_email,
+        draftEmailAt: r.draft_email_at,
+        status: r.status,
+        createdAt: r.created_at,
         rawSnippet: r.raw_snippet,
       } as OsintFindingDTO;
     });
@@ -3363,12 +5984,16 @@ export const storage = {
 
   /** Summary numbers for the Settings card — pending / done / failed counts. */
   getOsintCirtQueueStats(tid: string): { pending: number; done: number; failed: number; total: number } {
-    const row = sqlite.prepare(`SELECT
+    const row = sqlite
+      .prepare(
+        `SELECT
       SUM(CASE WHEN cirt_status = 'pending' AND cirt_attempts < 4 THEN 1 ELSE 0 END) AS pending,
       SUM(CASE WHEN cirt_status = 'done' THEN 1 ELSE 0 END) AS done,
       SUM(CASE WHEN cirt_status = 'failed' OR cirt_attempts >= 4 THEN 1 ELSE 0 END) AS failed,
       COUNT(*) AS total
-      FROM osint_findings WHERE tenant_id = ?`).get(tid) as any;
+      FROM osint_findings WHERE tenant_id = ?`,
+      )
+      .get(tid) as any;
     return {
       pending: Number(row?.pending || 0),
       done: Number(row?.done || 0),
@@ -3381,32 +6006,47 @@ export const storage = {
    *  analysis for all" button in Settings. */
   resetOsintCirtCache(tid: string, opts?: { failedOnly?: boolean }): { reset: number } {
     const whereExtra = opts?.failedOnly ? "AND (cirt_status = 'failed' OR cirt_attempts >= 4)" : "";
-    const r = sqlite.prepare(`UPDATE osint_findings SET
+    const r = sqlite
+      .prepare(
+        `UPDATE osint_findings SET
       cirt_analysis = NULL, cirt_analyzed_at = NULL, cirt_provider_label = NULL,
       cirt_status = 'pending', cirt_error = NULL, cirt_attempts = 0, cirt_next_attempt_at = NULL
-      WHERE tenant_id = ? ${whereExtra}`).run(tid);
+      WHERE tenant_id = ? ${whereExtra}`,
+      )
+      .run(tid);
     return { reset: r.changes ?? 0 };
   },
 
   /** Update fetch-result book-keeping after the background fetcher runs. */
   recordOsintAutoFetch(tid: string, opts: { count: number; error: string | null }): void {
     storage.getOsintAutomationSettings(tid);
-    sqlite.prepare(`UPDATE tenant_osint_settings SET
+    sqlite
+      .prepare(
+        `UPDATE tenant_osint_settings SET
       last_fetch_at = ?, last_fetch_count = ?, last_fetch_error = ?, updated_at = ?
-      WHERE tenant_id = ?`).run(now(), opts.count, opts.error?.slice(0, 500) ?? null, now(), tid);
+      WHERE tenant_id = ?`,
+      )
+      .run(now(), opts.count, opts.error?.slice(0, 500) ?? null, now(), tid);
   },
 
   /** Update analysis-result book-keeping after a background tick. */
   recordOsintAutoAnalyze(tid: string, opts: { okCount: number; failCount: number; error: string | null }): void {
     storage.getOsintAutomationSettings(tid);
-    sqlite.prepare(`UPDATE tenant_osint_settings SET
+    sqlite
+      .prepare(
+        `UPDATE tenant_osint_settings SET
       last_analyze_at = ?, last_analyze_ok_count = ?, last_analyze_fail_count = ?,
       last_analyze_error = ?, updated_at = ?
-      WHERE tenant_id = ?`).run(now(), opts.okCount, opts.failCount, opts.error?.slice(0, 500) ?? null, now(), tid);
+      WHERE tenant_id = ?`,
+      )
+      .run(now(), opts.okCount, opts.failCount, opts.error?.slice(0, 500) ?? null, now(), tid);
   },
 
   // ---------- Hunt query generator ----------
-  async generateHuntQueries(tid: string, opts: { findingIds: string[]; languages: string[]; title?: string; createdBy: string }): Promise<HuntQueryDTO> {
+  async generateHuntQueries(
+    tid: string,
+    opts: { findingIds: string[]; languages: string[]; title?: string; createdBy: string },
+  ): Promise<HuntQueryDTO> {
     const provider = storage.resolveAiProvider(tid, "hunt_query");
     if (!provider) throw new Error("No AI provider is configured for hunt query generation.");
     const findings = opts.findingIds.map((id) => storage.getOsintFinding(tid, id)).filter(Boolean) as OsintFindingDTO[];
@@ -3414,14 +6054,24 @@ export const storage = {
 
     // v2.13: pre-fetch each source URL so the AI reads the full article body
     // before drafting hunting queries. Failures degrade to summary-only input.
-    const fetched = await fetchSourcesBatch(findings.map((f) => f.url), { includeReferences: true, maxReferenceLinks: 3 });
+    const fetched = await fetchSourcesBatch(
+      findings.map((f) => f.url),
+      {
+        includeReferences: true,
+        maxReferenceLinks: 24,
+        maxReferenceDepth: 2,
+      },
+    );
     const contentByIdx = new Map<number, string | null>();
-    fetched.forEach((r, i) => contentByIdx.set(i, r.content));
+    fetched.forEach((r, i) =>
+      contentByIdx.set(i, r.content ?? storage.getOsintFindingCache(tid, findings[i].id)?.sourceContent ?? null),
+    );
 
     const aiResult = dispatchAi({
       task: "hunt_query",
       input: {
-        titleInstruction: "Return a top-level English `title` for the hunt package. It must be identifiable, concise, and based on the strongest visible signal, such as the primary CVE, actor, malware/tool, affected product, or source campaign. Avoid generic labels like `OSINT findings`.",
+        titleInstruction:
+          "Return a top-level English `title` for the hunt package. It must be identifiable, concise, and based on the strongest visible signal, such as the primary CVE, actor, malware/tool, affected product, or source campaign. Avoid generic labels like `OSINT findings`.",
         findings: findings.map((f, idx) => ({
           title: f.title,
           cveIds: f.cveIds,
@@ -3431,6 +6081,7 @@ export const storage = {
           rawSnippet: (f as any).rawSnippet ?? null,
           severity: f.severity,
           url: f.url,
+          iocs: f.iocs,
           sourceContent: contentByIdx.get(idx) ?? null,
         })),
         languages: opts.languages,
@@ -3447,43 +6098,150 @@ export const storage = {
       throw new Error(`AI provider did not return hunt queries for: ${missingLanguages.join(", ")}`);
     }
     const hid = id();
-    const title = opts.title ?? (aiTitle || `Hunt — ${affectedTech.slice(0, 2).join(", ") || "OSINT findings"} (${findings.length} signal${findings.length === 1 ? "" : "s"})`);
+    const detectionRuleId = `migrated:${hid}`;
+    const title =
+      opts.title ??
+      (aiTitle ||
+        `Hunt — ${affectedTech.slice(0, 2).join(", ") || "OSINT findings"} (${findings.length} signal${findings.length === 1 ? "" : "s"})`);
     const description = findings.map((f) => `• ${f.title}`).join("\n");
-    sqlite.prepare(`INSERT INTO hunt_queries (
-      id, tenant_id, title, description, source_finding_ids, affected_tech, queries,
-      ai_provider_label, created_at, created_by
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-      hid, tid, title, description, j(opts.findingIds), j(affectedTech), JSON.stringify(queries),
-      provider?.label ?? null, now(), opts.createdBy
-    );
-    storage.appendAudit(tid, opts.createdBy, "hunt.generate", hid, { languages: opts.languages, findings: opts.findingIds.length });
+    const severityRank: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
+    let severity: RuleSeverity = "low";
+    for (const finding of findings) {
+      const candidate = finding.severity === "info" ? "low" : finding.severity;
+      if ((severityRank[candidate] ?? -1) > severityRank[severity]) severity = candidate as RuleSeverity;
+    }
+    const threatActors = Array.from(new Set(findings.flatMap((finding) => finding.threatActors)));
+    const allowedClientIds = new Set(storage.listClientProfiles(tid).map((profile) => profile.id));
+    const clientIds = Array.from(new Set(findings.flatMap((finding) => finding.clientTags ?? [])))
+      .filter((clientId) => allowedClientIds.has(clientId))
+      .slice(0, 32);
+    const mitreById = new Map<string, { id: string; name?: string; tactic?: string }>();
+    for (const technique of findings.flatMap((finding) => finding.attackTechniques ?? [])) {
+      if (technique?.id && !mitreById.has(technique.id)) mitreById.set(technique.id, technique);
+    }
+    let sigmaYaml: string | null = null;
+    const compiledQueries: Record<string, string> = {};
+    for (const [language, value] of Object.entries(queries)) {
+      const flat = Array.isArray(value)
+        ? value.filter((item) => typeof item === "string" && item.trim()).join("\n\n")
+        : String(value ?? "").trim();
+      if (!flat) continue;
+      if (language === "sigma") sigmaYaml = flat;
+      else compiledQueries[language] = flat;
+    }
+    const createdAt = now();
+    sqlite.transaction(() => {
+      sqlite
+        .prepare(
+          `INSERT INTO hunt_queries (
+        id, tenant_id, title, description, source_finding_ids, affected_tech, queries,
+        ai_provider_label, created_at, created_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          hid,
+          tid,
+          title,
+          description,
+          j(opts.findingIds),
+          j(affectedTech),
+          JSON.stringify(queries),
+          provider?.label ?? null,
+          createdAt,
+          opts.createdBy,
+        );
+      sqlite
+        .prepare(
+          `INSERT INTO detection_rules (
+        id, tenant_id, title, description, source_finding_ids, status, severity,
+        mitre_techniques, affected_tech, threat_actors, client_ids, sigma_yaml, queries, notes,
+        version, ai_provider_label, created_at, updated_at, created_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          detectionRuleId,
+          tid,
+          title,
+          description || null,
+          j(opts.findingIds),
+          "draft",
+          severity,
+          JSON.stringify(Array.from(mitreById.values())),
+          j(affectedTech),
+          j(threatActors),
+          j(clientIds),
+          sigmaYaml,
+          JSON.stringify(compiledQueries),
+          `Generated from Intel Inbox hunt workflow. Hunt-query id: ${hid}`,
+          1,
+          provider?.label ?? null,
+          createdAt,
+          createdAt,
+          opts.createdBy,
+        );
+    })();
+    storage.appendAudit(tid, opts.createdBy, "hunt.generate", hid, {
+      languages: opts.languages,
+      findings: opts.findingIds.length,
+    });
+    storage.appendAudit(tid, opts.createdBy, "detection_rule.create", detectionRuleId, {
+      source: "intel_hunt_workflow",
+      huntQueryId: hid,
+      findings: opts.findingIds.length,
+      languages: opts.languages.length,
+    });
     return {
-      id: hid, tenantId: tid, title, description,
-      sourceFindingIds: opts.findingIds, affectedTech, queries,
-      aiProviderLabel: provider?.label ?? null, createdAt: now(), createdBy: opts.createdBy,
+      id: hid,
+      tenantId: tid,
+      title,
+      description,
+      sourceFindingIds: opts.findingIds,
+      affectedTech,
+      queries,
+      aiProviderLabel: provider?.label ?? null,
+      createdAt,
+      createdBy: opts.createdBy,
+      detectionRuleId,
     };
   },
 
   listHuntQueries(tid: string): HuntQueryDTO[] {
-    const rows = sqlite.prepare("SELECT * FROM hunt_queries WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 200").all(tid) as any[];
+    const rows = sqlite
+      .prepare("SELECT * FROM hunt_queries WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 200")
+      .all(tid) as any[];
     return rows.map((r) => ({
-      id: r.id, tenantId: r.tenant_id, title: r.title, description: r.description,
+      id: r.id,
+      tenantId: r.tenant_id,
+      title: r.title,
+      description: r.description,
       sourceFindingIds: JSON.parse(r.source_finding_ids || "[]"),
       affectedTech: JSON.parse(r.affected_tech || "[]"),
       queries: JSON.parse(r.queries || "{}"),
-      aiProviderLabel: r.ai_provider_label, createdAt: r.created_at, createdBy: r.created_by,
+      aiProviderLabel: r.ai_provider_label,
+      createdAt: r.created_at,
+      createdBy: r.created_by,
     }));
   },
 
   // ---------- Detection Rule Studio (v2.30.2) ----------
   /** Hydrate a detection-rule row + its deployments into the wire DTO. */
   _ruleRowToDto(r: any): DetectionRuleDTO {
-    const deps = sqlite.prepare(
-      "SELECT * FROM rule_deployments WHERE tenant_id = ? AND rule_id = ? ORDER BY siem_id"
-    ).all(r.tenant_id, r.id) as any[];
+    const deps = sqlite
+      .prepare("SELECT * FROM rule_deployments WHERE tenant_id = ? AND rule_id = ? ORDER BY siem_id")
+      .all(r.tenant_id, r.id) as any[];
+    const validations = sqlite
+      .prepare(
+        `SELECT * FROM rule_validations
+       WHERE tenant_id = ? AND rule_id = ?
+       ORDER BY updated_at DESC`,
+      )
+      .all(r.tenant_id, r.id) as any[];
     const siemLabel = (sid: string) => SIEM_TARGETS.find((s) => s.id === sid)?.label ?? sid;
+    const version = r.version ?? 1;
     return {
-      id: r.id, tenantId: r.tenant_id, title: r.title,
+      id: r.id,
+      tenantId: r.tenant_id,
+      title: r.title,
       description: r.description ?? null,
       sourceFindingIds: JSON.parse(r.source_finding_ids || "[]"),
       status: (r.status || "draft") as RuleStatus,
@@ -3491,31 +6249,183 @@ export const storage = {
       mitreTechniques: JSON.parse(r.mitre_techniques || "[]"),
       affectedTech: JSON.parse(r.affected_tech || "[]"),
       threatActors: JSON.parse(r.threat_actors || "[]"),
+      clientIds: JSON.parse(r.client_ids || "[]"),
       sigmaYaml: r.sigma_yaml ?? null,
       queries: JSON.parse(r.queries || "{}"),
       notes: r.notes ?? null,
-      version: r.version ?? 1,
+      version,
       aiProviderLabel: r.ai_provider_label ?? null,
-      createdAt: r.created_at, updatedAt: r.updated_at, createdBy: r.created_by,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+      createdBy: r.created_by,
       deployments: deps.map((d) => ({
-        id: d.id, ruleId: d.rule_id, siemId: d.siem_id as SiemTargetId,
+        id: d.id,
+        ruleId: d.rule_id,
+        siemId: d.siem_id as SiemTargetId,
         siemLabel: siemLabel(d.siem_id),
-        mode: d.mode as DeploymentMode, status: d.status as DeploymentStatus,
-        externalId: d.external_id ?? null, message: d.message ?? null,
+        mode: d.mode as DeploymentMode,
+        status: d.status as DeploymentStatus,
+        externalId: d.external_id ?? null,
+        message: d.message ?? null,
         ruleVersion: d.rule_version ?? 1,
-        deployedAt: d.deployed_at ?? null, deployedBy: d.deployed_by ?? null,
+        deployedAt: d.deployed_at ?? null,
+        deployedBy: d.deployed_by ?? null,
         updatedAt: d.updated_at,
+        isStale: (d.rule_version ?? 1) < version,
       })),
+      validations: validations.map((v) => {
+        const syntaxStatus = (v.syntax_status || "not_checked") as RuleSyntaxStatus;
+        const testStatus = (v.test_status || "not_tested") as RuleTestStatus;
+        const isCurrentVersion = (v.rule_version ?? 1) === version;
+        return {
+          id: v.id,
+          ruleId: v.rule_id,
+          clientId: v.client_id,
+          siemId: v.siem_id as SiemTargetId,
+          siemLabel: siemLabel(v.siem_id),
+          ruleVersion: v.rule_version ?? 1,
+          telemetrySources: JSON.parse(v.telemetry_sources || "[]"),
+          syntaxStatus,
+          testStatus,
+          testMethod: v.test_method ?? null,
+          expectedResult: v.expected_result ?? null,
+          observedResult: v.observed_result ?? null,
+          falsePositiveRisk: (v.false_positive_risk || "unknown") as RuleFalsePositiveRisk,
+          externalReference: v.external_reference ?? null,
+          notes: v.notes ?? null,
+          testedAt: v.tested_at ?? null,
+          testedBy: v.tested_by ?? null,
+          createdAt: v.created_at,
+          updatedAt: v.updated_at,
+          isCurrentVersion,
+          passed: isCurrentVersion && syntaxStatus === "passed" && testStatus === "passed",
+        } satisfies RuleValidationDTO;
+      }),
     };
+  },
+
+  getDetectionRuleReadiness(
+    tid: string,
+    rid: string,
+  ): {
+    ready: boolean;
+    missingClientIds: string[];
+  } {
+    const rule = storage.getDetectionRule(tid, rid);
+    if (!rule) return { ready: false, missingClientIds: [] };
+    const passedClients = new Set(
+      rule.validations.filter((validation) => validation.passed).map((validation) => validation.clientId),
+    );
+    if (storage.getTenant(tid)?.operatingMode === "individual") {
+      return {
+        ready: passedClients.has("__workspace__"),
+        missingClientIds: passedClients.has("__workspace__") ? [] : ["__workspace__"],
+      };
+    }
+    const missingClientIds = rule.clientIds.filter((clientId) => !passedClients.has(clientId));
+    return { ready: rule.clientIds.length > 0 && missingClientIds.length === 0, missingClientIds };
+  },
+
+  upsertDetectionRuleValidation(
+    tid: string,
+    rid: string,
+    input: {
+      clientId: string;
+      siemId: SiemTargetId;
+      telemetrySources: string[];
+      syntaxStatus: RuleSyntaxStatus;
+      testStatus: RuleTestStatus;
+      testMethod?: string | null;
+      expectedResult?: string | null;
+      observedResult?: string | null;
+      falsePositiveRisk: RuleFalsePositiveRisk;
+      externalReference?: string | null;
+      notes?: string | null;
+      actor: string;
+    },
+  ): DetectionRuleDTO | undefined {
+    const rule = storage.getDetectionRule(tid, rid);
+    if (!rule) return undefined;
+    const individualMode = storage.getTenant(tid)?.operatingMode === "individual";
+    if (individualMode ? input.clientId !== "__workspace__" : !rule.clientIds.includes(input.clientId)) {
+      throw new Error(
+        individualMode
+          ? "individual-mode validation must use workspace scope"
+          : "validation client must be assigned to this rule",
+      );
+    }
+    const hasTarget = input.siemId === "sigma" ? !!rule.sigmaYaml : !!rule.queries[input.siemId];
+    if (!hasTarget) throw new Error("validation target has no rule content");
+    const recordingPass = input.syntaxStatus === "passed" && input.testStatus === "passed";
+    if (
+      recordingPass &&
+      (!input.testMethod?.trim() || !input.expectedResult?.trim() || !input.observedResult?.trim())
+    ) {
+      throw new Error("passing validation requires test method, expected result, and observed result");
+    }
+    const ts = now();
+    const passed = recordingPass;
+    const existing = sqlite
+      .prepare(
+        `SELECT id FROM rule_validations
+       WHERE tenant_id = ? AND rule_id = ? AND client_id = ? AND siem_id = ? AND rule_version = ?`,
+      )
+      .get(tid, rid, input.clientId, input.siemId, rule.version) as any;
+    const values = [
+      j(Array.from(new Set(input.telemetrySources.map((value) => value.trim()).filter(Boolean)))),
+      input.syntaxStatus,
+      input.testStatus,
+      input.testMethod ?? null,
+      input.expectedResult ?? null,
+      input.observedResult ?? null,
+      input.falsePositiveRisk,
+      input.externalReference ?? null,
+      input.notes ?? null,
+      passed ? ts : null,
+      passed ? input.actor : null,
+      ts,
+    ];
+    if (existing) {
+      sqlite
+        .prepare(
+          `UPDATE rule_validations SET
+        telemetry_sources = ?, syntax_status = ?, test_status = ?, test_method = ?,
+        expected_result = ?, observed_result = ?, false_positive_risk = ?,
+        external_reference = ?, notes = ?, tested_at = ?, tested_by = ?, updated_at = ?
+        WHERE id = ?`,
+        )
+        .run(...values, existing.id);
+    } else {
+      sqlite
+        .prepare(
+          `INSERT INTO rule_validations (
+        id, tenant_id, rule_id, client_id, siem_id, rule_version,
+        telemetry_sources, syntax_status, test_status, test_method,
+        expected_result, observed_result, false_positive_risk,
+        external_reference, notes, tested_at, tested_by, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(id(), tid, rid, input.clientId, input.siemId, rule.version, ...values.slice(0, 11), ts, ts);
+    }
+    storage.appendAudit(tid, input.actor, "detection_rule.validate", rid, {
+      clientId: input.clientId,
+      siemId: input.siemId,
+      ruleVersion: rule.version,
+      passed,
+    });
+    return storage.getDetectionRule(tid, rid);
   },
 
   listDetectionRules(tid: string, filter?: { status?: RuleStatus }): DetectionRuleDTO[] {
     const where: string[] = ["tenant_id = ?"];
     const args: any[] = [tid];
-    if (filter?.status) { where.push("status = ?"); args.push(filter.status); }
-    const rows = sqlite.prepare(
-      `SELECT * FROM detection_rules WHERE ${where.join(" AND ")} ORDER BY updated_at DESC LIMIT 500`
-    ).all(...args) as any[];
+    if (filter?.status) {
+      where.push("status = ?");
+      args.push(filter.status);
+    }
+    const rows = sqlite
+      .prepare(`SELECT * FROM detection_rules WHERE ${where.join(" AND ")} ORDER BY updated_at DESC LIMIT 500`)
+      .all(...args) as any[];
     return rows.map((r) => storage._ruleRowToDto(r));
   },
 
@@ -3528,32 +6438,39 @@ export const storage = {
   /** Create a detection rule. When `generate` is true the AI is invoked to
    *  populate sigmaYaml + queries + MITRE mapping. When false (or no findings)
    *  the rule is created empty so the analyst can author manually. */
-  async createDetectionRule(tid: string, opts: {
-    title?: string;
-    description?: string;
-    findingIds?: string[];
-    languages?: string[];
-    severity?: RuleSeverity;
-    affectedTech?: string[];
-    threatActors?: string[];
-    generate: boolean;
-    createdBy: string;
-  }): Promise<DetectionRuleDTO> {
+  async createDetectionRule(
+    tid: string,
+    opts: {
+      title?: string;
+      description?: string;
+      findingIds?: string[];
+      languages?: string[];
+      severity?: RuleSeverity;
+      affectedTech?: string[];
+      threatActors?: string[];
+      clientIds?: string[];
+      generate: boolean;
+      createdBy: string;
+    },
+  ): Promise<DetectionRuleDTO> {
     const findingIds = opts.findingIds ?? [];
-    const findings = findingIds
-      .map((fid) => storage.getOsintFinding(tid, fid))
-      .filter(Boolean) as OsintFindingDTO[];
-    const langs = (opts.languages && opts.languages.length > 0)
-      ? opts.languages.filter((l) => SIEM_TARGET_IDS.includes(l as any))
-      : (SIEM_TARGET_IDS as readonly string[]).slice();
-    const affectedTech = Array.from(new Set([
-      ...(opts.affectedTech ?? []),
-      ...findings.flatMap((f) => f.affectedTech),
-    ]));
-    const threatActors = Array.from(new Set([
-      ...(opts.threatActors ?? []),
-      ...findings.flatMap((f) => f.threatActors),
-    ]));
+    const findings = findingIds.map((fid) => storage.getOsintFinding(tid, fid)).filter(Boolean) as OsintFindingDTO[];
+    const langs =
+      opts.languages && opts.languages.length > 0
+        ? opts.languages.filter((l) => SIEM_TARGET_IDS.includes(l as any))
+        : (SIEM_TARGET_IDS as readonly string[]).slice();
+    const affectedTech = Array.from(
+      new Set([...(opts.affectedTech ?? []), ...findings.flatMap((f) => f.affectedTech)]),
+    );
+    const threatActors = Array.from(
+      new Set([...(opts.threatActors ?? []), ...findings.flatMap((f) => f.threatActors)]),
+    );
+    const allowedClientIds = new Set(storage.listClientProfiles(tid).map((profile) => profile.id));
+    const clientIds = Array.from(
+      new Set([...(opts.clientIds ?? []), ...findings.flatMap((finding) => finding.clientTags ?? [])]),
+    )
+      .filter((clientId) => allowedClientIds.has(clientId))
+      .slice(0, 32);
 
     let title = opts.title ?? "";
     let description = opts.description ?? "";
@@ -3571,9 +6488,18 @@ export const storage = {
         throw new Error("no AI provider is configured for detection_rule — connect one in AI Setup");
       }
       // Pre-fetch source URLs so the model reads the article body verbatim.
-      const fetched = await fetchSourcesBatch(findings.map((f) => f.url), { includeReferences: true, maxReferenceLinks: 3 });
+      const fetched = await fetchSourcesBatch(
+        findings.map((f) => f.url),
+        {
+          includeReferences: true,
+          maxReferenceLinks: 24,
+          maxReferenceDepth: 2,
+        },
+      );
       const byIdx = new Map<number, string | null>();
-      fetched.forEach((r, i) => byIdx.set(i, r.content));
+      fetched.forEach((r, i) =>
+        byIdx.set(i, r.content ?? storage.getOsintFindingCache(tid, findings[i].id)?.sourceContent ?? null),
+      );
       const result = dispatchAi({
         task: "detection_rule",
         input: {
@@ -3586,6 +6512,7 @@ export const storage = {
             rawSnippet: (f as any).rawSnippet ?? null,
             severity: f.severity,
             url: f.url,
+            iocs: f.iocs,
             sourceContent: byIdx.get(idx) ?? null,
             attackTechniques: f.attackTechniques ?? null,
           })),
@@ -3599,54 +6526,84 @@ export const storage = {
       if (!description) description = out.description;
       severity = out.severity;
       mitreTechniques = out.mitreTechniques;
-      sigmaYaml = out.sigmaYaml || null;
+      const evidenceUrls = findings.flatMap((_finding, idx) => extractFetchedEvidenceUrls(byIdx.get(idx)));
+      sigmaYaml = ensureSigmaEvidenceReferences(out.sigmaYaml, evidenceUrls);
       queries = out.queries || {};
       notes = out.notes || null;
       providerLabel = provider.label;
     }
 
     if (!title) {
-      const topTech = affectedTech[0] || (findings[0]?.cveIds[0]) || "detection rule";
+      const topTech = affectedTech[0] || findings[0]?.cveIds[0] || "detection rule";
       title = `Draft — ${topTech}`;
     }
     const rid = id();
     const ts = now();
-    sqlite.prepare(`INSERT INTO detection_rules (
+    sqlite
+      .prepare(
+        `INSERT INTO detection_rules (
       id, tenant_id, title, description, source_finding_ids, status, severity,
-      mitre_techniques, affected_tech, threat_actors, sigma_yaml, queries, notes,
+      mitre_techniques, affected_tech, threat_actors, client_ids, sigma_yaml, queries, notes,
       version, ai_provider_label, created_at, updated_at, created_by
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-      rid, tid, title, description || null,
-      j(findingIds), "draft", severity,
-      JSON.stringify(mitreTechniques), j(affectedTech), j(threatActors),
-      sigmaYaml, JSON.stringify(queries), notes,
-      1, providerLabel, ts, ts, opts.createdBy,
-    );
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        rid,
+        tid,
+        title,
+        description || null,
+        j(findingIds),
+        "draft",
+        severity,
+        JSON.stringify(mitreTechniques),
+        j(affectedTech),
+        j(threatActors),
+        j(clientIds),
+        sigmaYaml,
+        JSON.stringify(queries),
+        notes,
+        1,
+        providerLabel,
+        ts,
+        ts,
+        opts.createdBy,
+      );
     storage.appendAudit(tid, opts.createdBy, "detection_rule.create", rid, {
-      findings: findingIds.length, generated: shouldGenerate,
+      findings: findingIds.length,
+      generated: shouldGenerate,
       languages: langs.length,
     });
     return storage.getDetectionRule(tid, rid)!;
   },
 
-  updateDetectionRule(tid: string, rid: string, patch: {
-    title?: string;
-    description?: string;
-    status?: RuleStatus;
-    severity?: RuleSeverity;
-    sigmaYaml?: string | null;
-    queries?: Record<string, string>;
-    notes?: string | null;
-    affectedTech?: string[];
-    threatActors?: string[];
-    mitreTechniques?: Array<{ id: string; name?: string; tactic?: string }>;
-    actor: string;
-  }): DetectionRuleDTO | undefined {
-    const existing = sqlite.prepare("SELECT * FROM detection_rules WHERE tenant_id = ? AND id = ?").get(tid, rid) as any;
+  updateDetectionRule(
+    tid: string,
+    rid: string,
+    patch: {
+      title?: string;
+      description?: string;
+      status?: RuleStatus;
+      severity?: RuleSeverity;
+      sigmaYaml?: string | null;
+      queries?: Record<string, string>;
+      notes?: string | null;
+      affectedTech?: string[];
+      threatActors?: string[];
+      clientIds?: string[];
+      mitreTechniques?: Array<{ id: string; name?: string; tactic?: string }>;
+      actor: string;
+    },
+  ): DetectionRuleDTO | undefined {
+    const existing = sqlite
+      .prepare("SELECT * FROM detection_rules WHERE tenant_id = ? AND id = ?")
+      .get(tid, rid) as any;
     if (!existing) return undefined;
     const updates: string[] = [];
     const args: any[] = [];
-    const push = (col: string, val: any) => { updates.push(`${col} = ?`); args.push(val); };
+    const push = (col: string, val: any) => {
+      updates.push(`${col} = ?`);
+      args.push(val);
+    };
     if (patch.title !== undefined) push("title", patch.title);
     if (patch.description !== undefined) push("description", patch.description ?? null);
     if (patch.status !== undefined) push("status", patch.status);
@@ -3656,13 +6613,41 @@ export const storage = {
     if (patch.notes !== undefined) push("notes", patch.notes);
     if (patch.affectedTech !== undefined) push("affected_tech", j(patch.affectedTech));
     if (patch.threatActors !== undefined) push("threat_actors", j(patch.threatActors));
+    if (patch.clientIds !== undefined) {
+      const allowed = new Set(storage.listClientProfiles(tid).map((profile) => profile.id));
+      const clientIds = Array.from(new Set(patch.clientIds))
+        .filter((clientId) => allowed.has(clientId))
+        .slice(0, 32);
+      push("client_ids", j(clientIds));
+    }
     if (patch.mitreTechniques !== undefined) push("mitre_techniques", JSON.stringify(patch.mitreTechniques));
     if (updates.length === 0) return storage.getDetectionRule(tid, rid);
-    push("version", (existing.version ?? 1) + 1);
+    const versionedFields = [
+      "title",
+      "description",
+      "severity",
+      "sigmaYaml",
+      "queries",
+      "affectedTech",
+      "threatActors",
+      "mitreTechniques",
+    ];
+    const changesDetectionContent = versionedFields.some((field) => (patch as any)[field] !== undefined);
+    if (changesDetectionContent) {
+      push("version", (existing.version ?? 1) + 1);
+      const effectiveStatus = patch.status ?? existing.status;
+      if (effectiveStatus === "validated" || effectiveStatus === "approved") {
+        const statusIndex = updates.indexOf("status = ?");
+        if (statusIndex >= 0) args[statusIndex] = "reviewed";
+        else push("status", "reviewed");
+      }
+    }
     push("updated_at", now());
     args.push(tid, rid);
     sqlite.prepare(`UPDATE detection_rules SET ${updates.join(", ")} WHERE tenant_id = ? AND id = ?`).run(...args);
-    storage.appendAudit(tid, patch.actor, "detection_rule.update", rid, { fields: Object.keys(patch).filter((k) => k !== "actor") });
+    storage.appendAudit(tid, patch.actor, "detection_rule.update", rid, {
+      fields: Object.keys(patch).filter((k) => k !== "actor"),
+    });
     return storage.getDetectionRule(tid, rid);
   },
 
@@ -3670,6 +6655,7 @@ export const storage = {
     const r = sqlite.prepare("SELECT id FROM detection_rules WHERE tenant_id = ? AND id = ?").get(tid, rid);
     if (!r) return false;
     sqlite.prepare("DELETE FROM rule_deployments WHERE tenant_id = ? AND rule_id = ?").run(tid, rid);
+    sqlite.prepare("DELETE FROM rule_validations WHERE tenant_id = ? AND rule_id = ?").run(tid, rid);
     sqlite.prepare("DELETE FROM detection_rules WHERE tenant_id = ? AND id = ?").run(tid, rid);
     storage.appendAudit(tid, actor, "detection_rule.delete", rid, {});
     return true;
@@ -3677,21 +6663,46 @@ export const storage = {
 
   /** Upsert a (rule, siem) deployment row. In manual mode we just flip status.
    *  In push mode we call the SIEM integration and record the live result. */
-  deployDetectionRule(tid: string, rid: string, opts: {
-    siemId: SiemTargetId;
-    mode: DeploymentMode;
-    status?: DeploymentStatus;
-    externalId?: string;
-    message?: string;
-    actor: string;
-  }): { deployment: RuleDeploymentDTO; rule: DetectionRuleDTO } | { error: string } {
+  deployDetectionRule(
+    tid: string,
+    rid: string,
+    opts: {
+      siemId: SiemTargetId;
+      mode: DeploymentMode;
+      status?: DeploymentStatus;
+      externalId?: string;
+      message?: string;
+      actor: string;
+    },
+  ): { deployment: RuleDeploymentDTO; rule: DetectionRuleDTO } | { error: string } {
     const rule = storage.getDetectionRule(tid, rid);
     if (!rule) return { error: "rule not found" };
+    const individualMode = storage.getTenant(tid)?.operatingMode === "individual";
+    if (!individualMode && rule.clientIds.length === 0) {
+      return { error: "assign at least one client before recording deployment" };
+    }
+    if (rule.status !== "approved") {
+      return { error: "approve the current rule version before recording deployment" };
+    }
     const target = SIEM_TARGETS.find((s) => s.id === opts.siemId);
     if (!target) return { error: `unknown SIEM target: ${opts.siemId}` };
     const query = rule.queries[opts.siemId];
     if (opts.mode === "push" && !query && opts.siemId !== "sigma") {
       return { error: `no query compiled for ${target.label} — generate or author one before pushing` };
+    }
+    const validatedClients = new Set(
+      rule.validations
+        .filter((validation) => validation.passed && validation.siemId === opts.siemId)
+        .map((validation) => validation.clientId),
+    );
+    const requiredScopes = individualMode ? ["__workspace__"] : rule.clientIds;
+    const missingClients = requiredScopes.filter((clientId) => !validatedClients.has(clientId));
+    if (missingClients.length > 0) {
+      return {
+        error: individualMode
+          ? `current-version ${target.label} workspace validation is required before deployment`
+          : `current-version ${target.label} validation is required for every assigned client before deployment`,
+      };
     }
 
     let finalStatus: DeploymentStatus;
@@ -3707,34 +6718,56 @@ export const storage = {
       finalStatus = opts.status ?? "deployed";
     }
 
-    const existing = sqlite.prepare(
-      "SELECT * FROM rule_deployments WHERE tenant_id = ? AND rule_id = ? AND siem_id = ?"
-    ).get(tid, rid, opts.siemId) as any;
+    const existing = sqlite
+      .prepare("SELECT * FROM rule_deployments WHERE tenant_id = ? AND rule_id = ? AND siem_id = ?")
+      .get(tid, rid, opts.siemId) as any;
     const ts = now();
     if (existing) {
-      sqlite.prepare(`UPDATE rule_deployments SET
+      sqlite
+        .prepare(
+          `UPDATE rule_deployments SET
         mode = ?, status = ?, external_id = ?, message = ?, rule_version = ?,
         deployed_at = ?, deployed_by = ?, updated_at = ?
-        WHERE id = ?`).run(
-        opts.mode, finalStatus, finalExternalId, finalMessage, rule.version,
-        finalStatus === "deployed" ? ts : (existing.deployed_at ?? null),
-        finalStatus === "deployed" ? opts.actor : (existing.deployed_by ?? null),
-        ts, existing.id,
-      );
+        WHERE id = ?`,
+        )
+        .run(
+          opts.mode,
+          finalStatus,
+          finalExternalId,
+          finalMessage,
+          rule.version,
+          finalStatus === "deployed" ? ts : (existing.deployed_at ?? null),
+          finalStatus === "deployed" ? opts.actor : (existing.deployed_by ?? null),
+          ts,
+          existing.id,
+        );
     } else {
-      sqlite.prepare(`INSERT INTO rule_deployments (
+      sqlite
+        .prepare(
+          `INSERT INTO rule_deployments (
         id, tenant_id, rule_id, siem_id, mode, status, external_id, message,
         rule_version, deployed_at, deployed_by, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-        id(), tid, rid, opts.siemId, opts.mode, finalStatus,
-        finalExternalId, finalMessage, rule.version,
-        finalStatus === "deployed" ? ts : null,
-        finalStatus === "deployed" ? opts.actor : null,
-        ts,
-      );
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          id(),
+          tid,
+          rid,
+          opts.siemId,
+          opts.mode,
+          finalStatus,
+          finalExternalId,
+          finalMessage,
+          rule.version,
+          finalStatus === "deployed" ? ts : null,
+          finalStatus === "deployed" ? opts.actor : null,
+          ts,
+        );
     }
     storage.appendAudit(tid, opts.actor, "detection_rule.deploy", rid, {
-      siemId: opts.siemId, mode: opts.mode, status: finalStatus,
+      siemId: opts.siemId,
+      mode: opts.mode,
+      status: finalStatus,
     });
     const refreshed = storage.getDetectionRule(tid, rid)!;
     const dep = refreshed.deployments.find((d) => d.siemId === opts.siemId)!;
@@ -3748,7 +6781,8 @@ export const storage = {
   /** Hydrate a threat_actors row into the DTO shape. */
   _taRowToDto(r: any): ThreatActorDTO {
     return {
-      id: r.id, tenantId: r.tenant_id,
+      id: r.id,
+      tenantId: r.tenant_id,
       profileId: r.profile_id,
       primaryName: r.primary_name,
       mitreGroupId: r.mitre_group_id ?? null,
@@ -3799,14 +6833,18 @@ export const storage = {
       portraitUrl: r.portrait_url ?? null,
       portraitGeneratedAt: r.portrait_generated_at ?? null,
       portraitStatus: (r.portrait_status ?? "idle") as "idle" | "generating" | "ready" | "failed",
-      createdAt: r.created_at, updatedAt: r.updated_at, createdBy: r.created_by,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+      createdBy: r.created_by,
     };
   },
 
   _taTtpRowToDto(r: any): ThreatActorTtpDTO {
     return {
-      id: r.id, actorId: r.actor_id,
-      tactic: r.tactic, techniqueId: r.technique_id,
+      id: r.id,
+      actorId: r.actor_id,
+      tactic: r.tactic,
+      techniqueId: r.technique_id,
       subTechniqueId: r.sub_technique_id ?? null,
       techniqueName: r.technique_name,
       evidence: r.evidence ?? null,
@@ -3817,8 +6855,11 @@ export const storage = {
   },
   _taToolRowToDto(r: any): ThreatActorToolDTO {
     return {
-      id: r.id, actorId: r.actor_id,
-      name: r.name, category: r.category ?? null, purpose: r.purpose ?? null,
+      id: r.id,
+      actorId: r.actor_id,
+      name: r.name,
+      category: r.category ?? null,
+      purpose: r.purpose ?? null,
       variants: JSON.parse(r.variants || "[]"),
       hashOrRule: r.hash_or_rule ?? null,
       confidence: r.confidence as WepConfidence,
@@ -3827,8 +6868,10 @@ export const storage = {
   },
   _taCampaignRowToDto(r: any): ThreatActorCampaignDTO {
     return {
-      id: r.id, actorId: r.actor_id,
-      name: r.name, period: r.period ?? null,
+      id: r.id,
+      actorId: r.actor_id,
+      name: r.name,
+      period: r.period ?? null,
       targetSector: r.target_sector ?? null,
       targetGeography: r.target_geography ?? null,
       initialAccess: r.initial_access ?? null,
@@ -3841,8 +6884,10 @@ export const storage = {
   },
   _taIocRowToDto(r: any): ThreatActorIocDTO {
     return {
-      id: r.id, actorId: r.actor_id,
-      iocType: r.ioc_type as IocType, value: r.value,
+      id: r.id,
+      actorId: r.actor_id,
+      iocType: r.ioc_type as IocType,
+      value: r.value,
       firstSeen: r.first_seen ?? null,
       lastConfirmed: r.last_confirmed ?? null,
       confidence: r.confidence as WepConfidence,
@@ -3855,7 +6900,8 @@ export const storage = {
   },
   _taRefRowToDto(r: any): ThreatActorReferenceDTO {
     return {
-      id: r.id, actorId: r.actor_id,
+      id: r.id,
+      actorId: r.actor_id,
       refNum: r.ref_num,
       sourceType: r.source_type ?? null,
       title: r.title,
@@ -3868,7 +6914,9 @@ export const storage = {
   _taRuleLinkRowToDto(r: any): ThreatActorRuleLinkDTO {
     // r may join detection_rules row when called from listFullThreatActor.
     return {
-      id: r.id, actorId: r.actor_id, ruleId: r.rule_id,
+      id: r.id,
+      actorId: r.actor_id,
+      ruleId: r.rule_id,
       priority: r.priority as DetectionPriority,
       notes: r.notes ?? null,
       ruleTitle: r.rule_title ?? undefined,
@@ -3905,9 +6953,9 @@ export const storage = {
    *  single-process server; if multiple actors are created concurrently the
    *  UNIQUE index on (tenant_id, profile_id) catches collisions. */
   _nextTapProfileId(tid: string): string {
-    const rows = sqlite.prepare(
-      "SELECT profile_id FROM threat_actors WHERE tenant_id = ? AND profile_id LIKE 'TAP-%'"
-    ).all(tid) as any[];
+    const rows = sqlite
+      .prepare("SELECT profile_id FROM threat_actors WHERE tenant_id = ? AND profile_id LIKE 'TAP-%'")
+      .all(tid) as any[];
     let maxN = 0;
     for (const r of rows) {
       const m = /^TAP-(\d+)$/.exec(r.profile_id);
@@ -3922,15 +6970,18 @@ export const storage = {
   listThreatActors(tid: string, filter?: { status?: TapStatus; q?: string }): ThreatActorDTO[] {
     const where: string[] = ["tenant_id = ?"];
     const args: any[] = [tid];
-    if (filter?.status) { where.push("status = ?"); args.push(filter.status); }
+    if (filter?.status) {
+      where.push("status = ?");
+      args.push(filter.status);
+    }
     if (filter?.q && filter.q.trim()) {
       where.push("(LOWER(primary_name) LIKE ? OR LOWER(aliases) LIKE ? OR LOWER(mitre_group_id) LIKE ?)");
       const needle = `%${filter.q.trim().toLowerCase()}%`;
       args.push(needle, needle, needle);
     }
-    const rows = sqlite.prepare(
-      `SELECT * FROM threat_actors WHERE ${where.join(" AND ")} ORDER BY updated_at DESC LIMIT 500`
-    ).all(...args) as any[];
+    const rows = sqlite
+      .prepare(`SELECT * FROM threat_actors WHERE ${where.join(" AND ")} ORDER BY updated_at DESC LIMIT 500`)
+      .all(...args) as any[];
     return rows.map((r) => storage._taRowToDto(r));
   },
 
@@ -3944,15 +6995,15 @@ export const storage = {
   findThreatActorByName(tid: string, name: string): ThreatActorDTO | undefined {
     const needle = name.trim().toLowerCase();
     if (!needle) return undefined;
-    const rows = sqlite.prepare(
-      "SELECT * FROM threat_actors WHERE tenant_id = ?"
-    ).all(tid) as any[];
+    const rows = sqlite.prepare("SELECT * FROM threat_actors WHERE tenant_id = ?").all(tid) as any[];
     for (const r of rows) {
       if (String(r.primary_name).toLowerCase() === needle) return storage._taRowToDto(r);
       try {
         const aliases: string[] = JSON.parse(r.aliases || "[]");
         if (aliases.some((a) => a.toLowerCase() === needle)) return storage._taRowToDto(r);
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
     return undefined;
   },
@@ -3960,18 +7011,44 @@ export const storage = {
   getFullThreatActor(tid: string, aid: string): ThreatActorFullDTO | undefined {
     const head = storage.getThreatActor(tid, aid);
     if (!head) return undefined;
-    const ttps = (sqlite.prepare("SELECT * FROM threat_actor_ttps WHERE tenant_id = ? AND actor_id = ? ORDER BY tactic, technique_id").all(tid, aid) as any[]).map(storage._taTtpRowToDto);
-    const tools = (sqlite.prepare("SELECT * FROM threat_actor_tools WHERE tenant_id = ? AND actor_id = ? ORDER BY name").all(tid, aid) as any[]).map(storage._taToolRowToDto);
-    const campaigns = (sqlite.prepare("SELECT * FROM threat_actor_campaigns WHERE tenant_id = ? AND actor_id = ? ORDER BY period DESC, created_at DESC").all(tid, aid) as any[]).map(storage._taCampaignRowToDto);
-    const iocs = (sqlite.prepare("SELECT * FROM threat_actor_iocs WHERE tenant_id = ? AND actor_id = ? ORDER BY ioc_type, value").all(tid, aid) as any[]).map(storage._taIocRowToDto);
-    const references = (sqlite.prepare("SELECT * FROM threat_actor_references WHERE tenant_id = ? AND actor_id = ? ORDER BY ref_num").all(tid, aid) as any[]).map(storage._taRefRowToDto);
-    const ruleLinks = (sqlite.prepare(
-      `SELECT l.*, dr.title AS rule_title, dr.status AS rule_status, dr.mitre_techniques AS rule_mitre_techniques
+    const ttps = (
+      sqlite
+        .prepare("SELECT * FROM threat_actor_ttps WHERE tenant_id = ? AND actor_id = ? ORDER BY tactic, technique_id")
+        .all(tid, aid) as any[]
+    ).map(storage._taTtpRowToDto);
+    const tools = (
+      sqlite
+        .prepare("SELECT * FROM threat_actor_tools WHERE tenant_id = ? AND actor_id = ? ORDER BY name")
+        .all(tid, aid) as any[]
+    ).map(storage._taToolRowToDto);
+    const campaigns = (
+      sqlite
+        .prepare(
+          "SELECT * FROM threat_actor_campaigns WHERE tenant_id = ? AND actor_id = ? ORDER BY period DESC, created_at DESC",
+        )
+        .all(tid, aid) as any[]
+    ).map(storage._taCampaignRowToDto);
+    const iocs = (
+      sqlite
+        .prepare("SELECT * FROM threat_actor_iocs WHERE tenant_id = ? AND actor_id = ? ORDER BY ioc_type, value")
+        .all(tid, aid) as any[]
+    ).map(storage._taIocRowToDto);
+    const references = (
+      sqlite
+        .prepare("SELECT * FROM threat_actor_references WHERE tenant_id = ? AND actor_id = ? ORDER BY ref_num")
+        .all(tid, aid) as any[]
+    ).map(storage._taRefRowToDto);
+    const ruleLinks = (
+      sqlite
+        .prepare(
+          `SELECT l.*, dr.title AS rule_title, dr.status AS rule_status, dr.mitre_techniques AS rule_mitre_techniques
          FROM threat_actor_detection_rules l
          LEFT JOIN detection_rules dr ON dr.id = l.rule_id AND dr.tenant_id = l.tenant_id
         WHERE l.tenant_id = ? AND l.actor_id = ?
-        ORDER BY l.priority, l.created_at`
-    ).all(tid, aid) as any[]).map(storage._taRuleLinkRowToDto);
+        ORDER BY l.priority, l.created_at`,
+        )
+        .all(tid, aid) as any[]
+    ).map(storage._taRuleLinkRowToDto);
     const relevantTenants = storage.listThreatActorTenants(tid, aid);
     return { ...head, ttps, tools, campaigns, iocs, references, ruleLinks, relevantTenants };
   },
@@ -3981,8 +7058,9 @@ export const storage = {
    *  caller must own the actor (tid). Returns rows for tenants other than
    *  the owner only — the owner tenant is implicit. */
   listThreatActorTenants(tid: string, aid: string): ThreatActorTenantDTO[] {
-    const rows = sqlite.prepare(
-      `SELECT t.*, te.name AS tenant_name,
+    const rows = sqlite
+      .prepare(
+        `SELECT t.*, te.name AS tenant_name,
               ts.industries AS tenant_industries,
               ts.geos AS tenant_geos
          FROM threat_actor_tenants t
@@ -3991,8 +7069,9 @@ export const storage = {
         WHERE t.owner_tenant_id = ? AND t.actor_id = ?
         ORDER BY
           CASE t.relevance WHEN 'targeted' THEN 0 WHEN 'sector-match' THEN 1 ELSE 2 END,
-          t.created_at DESC`
-    ).all(tid, aid) as any[];
+          t.created_at DESC`,
+      )
+      .all(tid, aid) as any[];
     return rows.map((r) => {
       // Pick first industry / geo as a short pill label.
       let sector: string | null = null;
@@ -4000,11 +7079,15 @@ export const storage = {
       try {
         const inds: string[] = JSON.parse(r.tenant_industries || "[]");
         if (Array.isArray(inds) && inds.length > 0) sector = inds[0];
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
       try {
         const geos: string[] = JSON.parse(r.tenant_geos || "[]");
         if (Array.isArray(geos) && geos.length > 0) region = geos[0];
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
       return storage._taTenantRowToDto({ ...r, tenant_sector: sector, tenant_region: region });
     });
   },
@@ -4012,70 +7095,88 @@ export const storage = {
   /** Add (or upsert relevance/rationale on) a tenant tag for an actor.
    *  Idempotent: re-tagging the same (actor, tenant) pair updates the row. */
   addThreatActorTenant(
-    tid: string, aid: string,
+    tid: string,
+    aid: string,
     input: { tenantId: string; relevance?: TenantRelevance; rationale?: string | null },
-    by: { taggedBy: string | null; taggedByAi: boolean }
+    by: { taggedBy: string | null; taggedByAi: boolean },
   ): ThreatActorTenantDTO {
     const now = new Date().toISOString();
-    const existing = sqlite.prepare(
-      "SELECT id FROM threat_actor_tenants WHERE owner_tenant_id = ? AND actor_id = ? AND tenant_id = ?"
-    ).get(tid, aid, input.tenantId) as any;
+    const existing = sqlite
+      .prepare("SELECT id FROM threat_actor_tenants WHERE owner_tenant_id = ? AND actor_id = ? AND tenant_id = ?")
+      .get(tid, aid, input.tenantId) as any;
     if (existing) {
-      sqlite.prepare(
-        `UPDATE threat_actor_tenants
+      sqlite
+        .prepare(
+          `UPDATE threat_actor_tenants
             SET relevance = ?, rationale = ?, tagged_by = ?, tagged_by_ai = ?
-          WHERE id = ?`
-      ).run(
-        input.relevance ?? "watching",
-        input.rationale ?? null,
-        by.taggedBy ?? null,
-        by.taggedByAi ? 1 : 0,
-        existing.id,
-      );
+          WHERE id = ?`,
+        )
+        .run(
+          input.relevance ?? "watching",
+          input.rationale ?? null,
+          by.taggedBy ?? null,
+          by.taggedByAi ? 1 : 0,
+          existing.id,
+        );
       const list = storage.listThreatActorTenants(tid, aid);
       const hit = list.find((t) => t.id === existing.id);
       if (hit) return hit;
     }
     const id = randomUUID();
-    sqlite.prepare(
-      `INSERT INTO threat_actor_tenants
+    sqlite
+      .prepare(
+        `INSERT INTO threat_actor_tenants
          (id, owner_tenant_id, actor_id, tenant_id, relevance, rationale, tagged_by, tagged_by_ai, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      id, tid, aid, input.tenantId,
-      input.relevance ?? "watching",
-      input.rationale ?? null,
-      by.taggedBy ?? null,
-      by.taggedByAi ? 1 : 0,
-      now,
-    );
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        tid,
+        aid,
+        input.tenantId,
+        input.relevance ?? "watching",
+        input.rationale ?? null,
+        by.taggedBy ?? null,
+        by.taggedByAi ? 1 : 0,
+        now,
+      );
     const list = storage.listThreatActorTenants(tid, aid);
     return list.find((t) => t.id === id)!;
   },
 
   patchThreatActorTenant(
-    tid: string, aid: string, tagId: string,
+    tid: string,
+    aid: string,
+    tagId: string,
     patch: { relevance?: TenantRelevance; rationale?: string | null },
   ): ThreatActorTenantDTO | undefined {
     const sets: string[] = [];
     const args: any[] = [];
-    if (patch.relevance !== undefined) { sets.push("relevance = ?"); args.push(patch.relevance); }
-    if (patch.rationale !== undefined) { sets.push("rationale = ?"); args.push(patch.rationale); }
+    if (patch.relevance !== undefined) {
+      sets.push("relevance = ?");
+      args.push(patch.relevance);
+    }
+    if (patch.rationale !== undefined) {
+      sets.push("rationale = ?");
+      args.push(patch.rationale);
+    }
     if (sets.length === 0) {
       return storage.listThreatActorTenants(tid, aid).find((t) => t.id === tagId);
     }
     args.push(tid, aid, tagId);
-    const res = sqlite.prepare(
-      `UPDATE threat_actor_tenants SET ${sets.join(", ")} WHERE owner_tenant_id = ? AND actor_id = ? AND id = ?`
-    ).run(...args);
+    const res = sqlite
+      .prepare(
+        `UPDATE threat_actor_tenants SET ${sets.join(", ")} WHERE owner_tenant_id = ? AND actor_id = ? AND id = ?`,
+      )
+      .run(...args);
     if (res.changes === 0) return undefined;
     return storage.listThreatActorTenants(tid, aid).find((t) => t.id === tagId);
   },
 
   removeThreatActorTenant(tid: string, aid: string, tagId: string): boolean {
-    const res = sqlite.prepare(
-      "DELETE FROM threat_actor_tenants WHERE owner_tenant_id = ? AND actor_id = ? AND id = ?"
-    ).run(tid, aid, tagId);
+    const res = sqlite
+      .prepare("DELETE FROM threat_actor_tenants WHERE owner_tenant_id = ? AND actor_id = ? AND id = ?")
+      .run(tid, aid, tagId);
     return res.changes > 0;
   },
 
@@ -4084,8 +7185,9 @@ export const storage = {
    *  tenant chips on cards and to group the kanban by client without making
    *  N+1 calls. */
   listAllThreatActorTenants(tid: string): ThreatActorTenantDTO[] {
-    const rows = sqlite.prepare(
-      `SELECT t.*, te.name AS tenant_name,
+    const rows = sqlite
+      .prepare(
+        `SELECT t.*, te.name AS tenant_name,
               ts.industries AS tenant_industries,
               ts.geos AS tenant_geos
          FROM threat_actor_tenants t
@@ -4094,19 +7196,24 @@ export const storage = {
         WHERE t.owner_tenant_id = ?
         ORDER BY t.actor_id,
           CASE t.relevance WHEN 'targeted' THEN 0 WHEN 'sector-match' THEN 1 ELSE 2 END,
-          t.created_at DESC`
-    ).all(tid) as any[];
+          t.created_at DESC`,
+      )
+      .all(tid) as any[];
     return rows.map((r) => {
       let sector: string | null = null;
       let region: string | null = null;
       try {
         const inds: string[] = JSON.parse(r.tenant_industries || "[]");
         if (Array.isArray(inds) && inds.length > 0) sector = inds[0];
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
       try {
         const geos: string[] = JSON.parse(r.tenant_geos || "[]");
         if (Array.isArray(geos) && geos.length > 0) region = geos[0];
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
       return storage._taTenantRowToDto({ ...r, tenant_sector: sector, tenant_region: region });
     });
   },
@@ -4114,21 +7221,40 @@ export const storage = {
   /** All tenants visible to the owner so the AI / UI can suggest candidates.
    *  In single-org deployments this returns just the owner tenant; in MSSP
    *  mode the admin can list more. */
-  listAvailableTenantsForTagging(_tid: string): Array<{ id: string; name: string; sector: string | null; region: string | null; orgSize: string | null }> {
-    const rows = sqlite.prepare(
-      `SELECT te.id, te.name,
+  listAvailableTenantsForTagging(
+    _tid: string,
+  ): Array<{ id: string; name: string; sector: string | null; region: string | null; orgSize: string | null }> {
+    const rows = sqlite
+      .prepare(
+        `SELECT te.id, te.name,
               ts.industries AS industries, ts.geos AS geos, ts.client_types AS client_types
          FROM tenants te
          LEFT JOIN tenant_scopes ts ON ts.tenant_id = te.id
-        ORDER BY te.name`
-    ).all() as any[];
+        ORDER BY te.name`,
+      )
+      .all() as any[];
     return rows.map((r) => {
       let sector: string | null = null;
       let region: string | null = null;
       let orgSize: string | null = null;
-      try { const v: string[] = JSON.parse(r.industries || "[]"); if (v.length) sector = v.join(", "); } catch { /* ignore */ }
-      try { const v: string[] = JSON.parse(r.geos || "[]"); if (v.length) region = v.join(", "); } catch { /* ignore */ }
-      try { const v: string[] = JSON.parse(r.client_types || "[]"); if (v.length) orgSize = v.join(", "); } catch { /* ignore */ }
+      try {
+        const v: string[] = JSON.parse(r.industries || "[]");
+        if (v.length) sector = v.join(", ");
+      } catch {
+        /* ignore */
+      }
+      try {
+        const v: string[] = JSON.parse(r.geos || "[]");
+        if (v.length) region = v.join(", ");
+      } catch {
+        /* ignore */
+      }
+      try {
+        const v: string[] = JSON.parse(r.client_types || "[]");
+        if (v.length) orgSize = v.join(", ");
+      } catch {
+        /* ignore */
+      }
       return { id: r.id, name: r.name, sector, region, orgSize };
     });
   },
@@ -4137,70 +7263,112 @@ export const storage = {
    *  freshly-inserted header DTO. When `enrich` is true the caller is expected
    *  to call enrichThreatActor() separately so the long DeepSeek call doesn't
    *  block the HTTP write. */
-  createThreatActor(tid: string, opts: {
-    primaryName: string;
-    aliases?: string[];
-    actorType?: ActorType;
-    sponsorship?: SponsorshipLevel;
-    mitreGroupId?: string | null;
-    motivation?: string[];
-    tlp?: TlpLevel;
-    createdBy: string;
-  }): ThreatActorDTO {
+  createThreatActor(
+    tid: string,
+    opts: {
+      primaryName: string;
+      aliases?: string[];
+      actorType?: ActorType;
+      sponsorship?: SponsorshipLevel;
+      mitreGroupId?: string | null;
+      motivation?: string[];
+      tlp?: TlpLevel;
+      createdBy: string;
+    },
+  ): ThreatActorDTO {
     // Reuse existing actor if same name already exists (idempotent backfill).
     const existing = storage.findThreatActorByName(tid, opts.primaryName);
     if (existing) return existing;
     const aid = id();
     const ts = now();
     const profileId = storage._nextTapProfileId(tid);
-    sqlite.prepare(`INSERT INTO threat_actors (
+    sqlite
+      .prepare(
+        `INSERT INTO threat_actors (
       id, tenant_id, profile_id, primary_name, mitre_group_id,
       aliases, vendor_names, actor_type, sponsorship,
       motivation, tlp,
       status, version, created_at, updated_at, created_by
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-      aid, tid, profileId, opts.primaryName.trim(),
-      opts.mitreGroupId ?? null,
-      j(opts.aliases ?? []), JSON.stringify({}),
-      opts.actorType ?? "Unknown", opts.sponsorship ?? "Unknown",
-      j(opts.motivation ?? []), opts.tlp ?? "AMBER",
-      "draft", 1, ts, ts, opts.createdBy,
-    );
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        aid,
+        tid,
+        profileId,
+        opts.primaryName.trim(),
+        opts.mitreGroupId ?? null,
+        j(opts.aliases ?? []),
+        JSON.stringify({}),
+        opts.actorType ?? "Unknown",
+        opts.sponsorship ?? "Unknown",
+        j(opts.motivation ?? []),
+        opts.tlp ?? "AMBER",
+        "draft",
+        1,
+        ts,
+        ts,
+        opts.createdBy,
+      );
     storage.appendAudit(tid, opts.createdBy, "threat_actor.create", aid, {
-      profileId, primaryName: opts.primaryName,
+      profileId,
+      primaryName: opts.primaryName,
     });
     return storage.getThreatActor(tid, aid)!;
   },
 
-  updateThreatActor(tid: string, aid: string, patch: Record<string, any> & { actor?: string }): ThreatActorDTO | undefined {
+  updateThreatActor(
+    tid: string,
+    aid: string,
+    patch: Record<string, any> & { actor?: string },
+  ): ThreatActorDTO | undefined {
     const actor = patch.actor ?? "system";
     const row = sqlite.prepare("SELECT * FROM threat_actors WHERE tenant_id = ? AND id = ?").get(tid, aid) as any;
     if (!row) return undefined;
     const map: Record<string, string> = {
-      primaryName: "primary_name", mitreGroupId: "mitre_group_id",
-      assessedOrigin: "assessed_origin", originConfidence: "origin_confidence",
-      sponsoringEntity: "sponsoring_entity", activeSince: "active_since",
-      sophistication: "sophistication", tlp: "tlp",
-      admiraltySource: "admiralty_source", admiraltyInfo: "admiralty_info",
+      primaryName: "primary_name",
+      mitreGroupId: "mitre_group_id",
+      assessedOrigin: "assessed_origin",
+      originConfidence: "origin_confidence",
+      sponsoringEntity: "sponsoring_entity",
+      activeSince: "active_since",
+      sophistication: "sophistication",
+      tlp: "tlp",
+      admiraltySource: "admiralty_source",
+      admiraltyInfo: "admiralty_info",
       wepConfidence: "wep_confidence",
-      orgSizePreference: "org_size_preference", intentProximity: "intent_proximity",
+      orgSizePreference: "org_size_preference",
+      intentProximity: "intent_proximity",
       relevanceRating: "relevance_rating",
-      execWhat: "exec_what", execSoWhat: "exec_so_what", execWhatNow: "exec_what_now",
-      threatLevel: "threat_level", threatLevelRationale: "threat_level_rationale",
-      forecast: "forecast", bodyMd: "body_md", status: "status",
-      cutoffDate: "cutoff_date", preparedBy: "prepared_by",
-      actorType: "actor_type", sponsorship: "sponsorship",
+      execWhat: "exec_what",
+      execSoWhat: "exec_so_what",
+      execWhatNow: "exec_what_now",
+      threatLevel: "threat_level",
+      threatLevelRationale: "threat_level_rationale",
+      forecast: "forecast",
+      bodyMd: "body_md",
+      status: "status",
+      cutoffDate: "cutoff_date",
+      preparedBy: "prepared_by",
+      actorType: "actor_type",
+      sponsorship: "sponsorship",
     };
     const jsonMap: Record<string, string> = {
-      aliases: "aliases", vendorNames: "vendor_names", motivation: "motivation",
-      targetSectors: "target_sectors", targetRegions: "target_regions",
+      aliases: "aliases",
+      vendorNames: "vendor_names",
+      motivation: "motivation",
+      targetSectors: "target_sectors",
+      targetRegions: "target_regions",
       targetTechStack: "target_tech_stack",
-      diamondAdversary: "diamond_adversary", diamondCapability: "diamond_capability",
+      diamondAdversary: "diamond_adversary",
+      diamondCapability: "diamond_capability",
       diamondInfrastructure: "diamond_infrastructure",
-      diamondVictim: "diamond_victim", diamondMeta: "diamond_meta",
-      businessImpact: "business_impact", capabilityProfile: "capability_profile",
+      diamondVictim: "diamond_victim",
+      diamondMeta: "diamond_meta",
+      businessImpact: "business_impact",
+      capabilityProfile: "capability_profile",
       infrastructureProfile: "infrastructure_profile",
-      irActions: "ir_actions", countermeasures: "countermeasures",
+      irActions: "ir_actions",
+      countermeasures: "countermeasures",
       extortionTactics: "extortion_tactics",
     };
     const sets: string[] = [];
@@ -4237,26 +7405,28 @@ export const storage = {
   // because portrait fields are server-managed, not analyst-editable, and
   // shouldn't bump version or trigger an audit event).
   setThreatActorPortrait(tid: string, aid: string, url: string): void {
-    sqlite.prepare(
-      `UPDATE threat_actors
+    sqlite
+      .prepare(
+        `UPDATE threat_actors
           SET portrait_url = ?, portrait_generated_at = ?, portrait_status = 'ready'
-        WHERE tenant_id = ? AND id = ?`
-    ).run(url, new Date().toISOString(), tid, aid);
+        WHERE tenant_id = ? AND id = ?`,
+      )
+      .run(url, new Date().toISOString(), tid, aid);
   },
   setThreatActorPortraitStatus(tid: string, aid: string, status: "idle" | "generating" | "ready" | "failed"): void {
-    sqlite.prepare(
-      `UPDATE threat_actors SET portrait_status = ? WHERE tenant_id = ? AND id = ?`
-    ).run(status, tid, aid);
+    sqlite.prepare(`UPDATE threat_actors SET portrait_status = ? WHERE tenant_id = ? AND id = ?`).run(status, tid, aid);
   },
   /** Clear the portrait fields (analyst removed an uploaded or AI-generated image).
    *  Resets status to 'idle' so the lazy-fire IntersectionObserver may re-fire on the
    *  next viewport entry — uploads are explicit user actions and don't suppress that. */
   clearThreatActorPortrait(tid: string, aid: string): void {
-    sqlite.prepare(
-      `UPDATE threat_actors
+    sqlite
+      .prepare(
+        `UPDATE threat_actors
           SET portrait_url = NULL, portrait_generated_at = NULL, portrait_status = 'idle'
-        WHERE tenant_id = ? AND id = ?`
-    ).run(tid, aid);
+        WHERE tenant_id = ? AND id = ?`,
+      )
+      .run(tid, aid);
   },
 
   deleteThreatActor(tid: string, aid: string, actor: string): boolean {
@@ -4278,127 +7448,218 @@ export const storage = {
   addThreatActorTtp(tid: string, aid: string, body: any, actor: string): ThreatActorTtpDTO {
     const tid_ = id();
     const ts = now();
-    sqlite.prepare(`INSERT INTO threat_actor_ttps (
+    sqlite
+      .prepare(
+        `INSERT INTO threat_actor_ttps (
       id, tenant_id, actor_id, tactic, technique_id, sub_technique_id,
       technique_name, evidence, status, detection_priority, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-      tid_, tid, aid, body.tactic, body.techniqueId, body.subTechniqueId ?? null,
-      body.techniqueName, body.evidence ?? null,
-      body.status ?? "suspected", body.detectionPriority ?? "P3", ts,
-    );
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        tid_,
+        tid,
+        aid,
+        body.tactic,
+        body.techniqueId,
+        body.subTechniqueId ?? null,
+        body.techniqueName,
+        body.evidence ?? null,
+        body.status ?? "suspected",
+        body.detectionPriority ?? "P3",
+        ts,
+      );
     storage.appendAudit(tid, actor, "threat_actor.ttp.add", aid, { ttpId: tid_, techniqueId: body.techniqueId });
     return storage._taTtpRowToDto(sqlite.prepare("SELECT * FROM threat_actor_ttps WHERE id = ?").get(tid_));
   },
   deleteThreatActorTtp(tid: string, aid: string, ttpId: string, actor: string): boolean {
-    const res = sqlite.prepare("DELETE FROM threat_actor_ttps WHERE tenant_id = ? AND actor_id = ? AND id = ?").run(tid, aid, ttpId);
+    const res = sqlite
+      .prepare("DELETE FROM threat_actor_ttps WHERE tenant_id = ? AND actor_id = ? AND id = ?")
+      .run(tid, aid, ttpId);
     if (res.changes > 0) storage.appendAudit(tid, actor, "threat_actor.ttp.delete", aid, { ttpId });
     return res.changes > 0;
   },
 
   // ---- Tools ----
   addThreatActorTool(tid: string, aid: string, body: any, actor: string): ThreatActorToolDTO {
-    const tid_ = id(); const ts = now();
-    sqlite.prepare(`INSERT INTO threat_actor_tools (
+    const tid_ = id();
+    const ts = now();
+    sqlite
+      .prepare(
+        `INSERT INTO threat_actor_tools (
       id, tenant_id, actor_id, name, category, purpose, variants, hash_or_rule, confidence, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-      tid_, tid, aid, body.name, body.category ?? null, body.purpose ?? null,
-      j(body.variants ?? []), body.hashOrRule ?? null, body.confidence ?? "Likely", ts,
-    );
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        tid_,
+        tid,
+        aid,
+        body.name,
+        body.category ?? null,
+        body.purpose ?? null,
+        j(body.variants ?? []),
+        body.hashOrRule ?? null,
+        body.confidence ?? "Likely",
+        ts,
+      );
     storage.appendAudit(tid, actor, "threat_actor.tool.add", aid, { toolId: tid_, name: body.name });
     return storage._taToolRowToDto(sqlite.prepare("SELECT * FROM threat_actor_tools WHERE id = ?").get(tid_));
   },
   deleteThreatActorTool(tid: string, aid: string, toolId: string, actor: string): boolean {
-    const res = sqlite.prepare("DELETE FROM threat_actor_tools WHERE tenant_id = ? AND actor_id = ? AND id = ?").run(tid, aid, toolId);
+    const res = sqlite
+      .prepare("DELETE FROM threat_actor_tools WHERE tenant_id = ? AND actor_id = ? AND id = ?")
+      .run(tid, aid, toolId);
     if (res.changes > 0) storage.appendAudit(tid, actor, "threat_actor.tool.delete", aid, { toolId });
     return res.changes > 0;
   },
 
   // ---- Campaigns ----
   addThreatActorCampaign(tid: string, aid: string, body: any, actor: string): ThreatActorCampaignDTO {
-    const cid = id(); const ts = now();
-    sqlite.prepare(`INSERT INTO threat_actor_campaigns (
+    const cid = id();
+    const ts = now();
+    sqlite
+      .prepare(
+        `INSERT INTO threat_actor_campaigns (
       id, tenant_id, actor_id, name, period, target_sector, target_geography,
       initial_access, outcome, source_url, finding_ids, rule_ids, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-      cid, tid, aid, body.name, body.period ?? null,
-      body.targetSector ?? null, body.targetGeography ?? null,
-      body.initialAccess ?? null, body.outcome ?? null, body.sourceUrl ?? null,
-      j(body.findingIds ?? []), j(body.ruleIds ?? []), ts,
-    );
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        cid,
+        tid,
+        aid,
+        body.name,
+        body.period ?? null,
+        body.targetSector ?? null,
+        body.targetGeography ?? null,
+        body.initialAccess ?? null,
+        body.outcome ?? null,
+        body.sourceUrl ?? null,
+        j(body.findingIds ?? []),
+        j(body.ruleIds ?? []),
+        ts,
+      );
     storage.appendAudit(tid, actor, "threat_actor.campaign.add", aid, { campaignId: cid, name: body.name });
     return storage._taCampaignRowToDto(sqlite.prepare("SELECT * FROM threat_actor_campaigns WHERE id = ?").get(cid));
   },
   deleteThreatActorCampaign(tid: string, aid: string, cid: string, actor: string): boolean {
-    const res = sqlite.prepare("DELETE FROM threat_actor_campaigns WHERE tenant_id = ? AND actor_id = ? AND id = ?").run(tid, aid, cid);
+    const res = sqlite
+      .prepare("DELETE FROM threat_actor_campaigns WHERE tenant_id = ? AND actor_id = ? AND id = ?")
+      .run(tid, aid, cid);
     if (res.changes > 0) storage.appendAudit(tid, actor, "threat_actor.campaign.delete", aid, { campaignId: cid });
     return res.changes > 0;
   },
 
   // ---- IoCs ----
   addThreatActorIoc(tid: string, aid: string, body: any, actor: string): ThreatActorIocDTO {
-    const iid = id(); const ts = now();
-    sqlite.prepare(`INSERT INTO threat_actor_iocs (
+    const iid = id();
+    const ts = now();
+    sqlite
+      .prepare(
+        `INSERT INTO threat_actor_iocs (
       id, tenant_id, actor_id, ioc_type, value, first_seen, last_confirmed,
       confidence, tlp, source, mitre_ttps, recommended_action, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-      iid, tid, aid, body.iocType, body.value,
-      body.firstSeen ?? null, body.lastConfirmed ?? null,
-      body.confidence ?? "Likely", body.tlp ?? "AMBER",
-      body.source ?? null, j(body.mitreTtps ?? []),
-      body.recommendedAction ?? null, ts,
-    );
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        iid,
+        tid,
+        aid,
+        body.iocType,
+        body.value,
+        body.firstSeen ?? null,
+        body.lastConfirmed ?? null,
+        body.confidence ?? "Likely",
+        body.tlp ?? "AMBER",
+        body.source ?? null,
+        j(body.mitreTtps ?? []),
+        body.recommendedAction ?? null,
+        ts,
+      );
     storage.appendAudit(tid, actor, "threat_actor.ioc.add", aid, { iocId: iid, iocType: body.iocType });
     return storage._taIocRowToDto(sqlite.prepare("SELECT * FROM threat_actor_iocs WHERE id = ?").get(iid));
   },
   deleteThreatActorIoc(tid: string, aid: string, iid: string, actor: string): boolean {
-    const res = sqlite.prepare("DELETE FROM threat_actor_iocs WHERE tenant_id = ? AND actor_id = ? AND id = ?").run(tid, aid, iid);
+    const res = sqlite
+      .prepare("DELETE FROM threat_actor_iocs WHERE tenant_id = ? AND actor_id = ? AND id = ?")
+      .run(tid, aid, iid);
     if (res.changes > 0) storage.appendAudit(tid, actor, "threat_actor.ioc.delete", aid, { iocId: iid });
     return res.changes > 0;
   },
 
   // ---- References ----
   addThreatActorReference(tid: string, aid: string, body: any, actor: string): ThreatActorReferenceDTO {
-    const rid = id(); const ts = now();
+    const rid = id();
+    const ts = now();
     // Auto-number when caller doesn't pass refNum.
     let refNum = body.refNum;
     if (!refNum) {
-      const cur = sqlite.prepare("SELECT COALESCE(MAX(ref_num), 0) AS m FROM threat_actor_references WHERE tenant_id = ? AND actor_id = ?").get(tid, aid) as any;
+      const cur = sqlite
+        .prepare(
+          "SELECT COALESCE(MAX(ref_num), 0) AS m FROM threat_actor_references WHERE tenant_id = ? AND actor_id = ?",
+        )
+        .get(tid, aid) as any;
       refNum = (cur?.m ?? 0) + 1;
     }
-    sqlite.prepare(`INSERT INTO threat_actor_references (
+    sqlite
+      .prepare(
+        `INSERT INTO threat_actor_references (
       id, tenant_id, actor_id, ref_num, source_type, title, date, url, archive_url, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-      rid, tid, aid, refNum, body.sourceType ?? null, body.title,
-      body.date ?? null, body.url ?? null, body.archiveUrl ?? null, ts,
-    );
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        rid,
+        tid,
+        aid,
+        refNum,
+        body.sourceType ?? null,
+        body.title,
+        body.date ?? null,
+        body.url ?? null,
+        body.archiveUrl ?? null,
+        ts,
+      );
     storage.appendAudit(tid, actor, "threat_actor.reference.add", aid, { refId: rid, refNum });
     return storage._taRefRowToDto(sqlite.prepare("SELECT * FROM threat_actor_references WHERE id = ?").get(rid));
   },
   deleteThreatActorReference(tid: string, aid: string, rid: string, actor: string): boolean {
-    const res = sqlite.prepare("DELETE FROM threat_actor_references WHERE tenant_id = ? AND actor_id = ? AND id = ?").run(tid, aid, rid);
+    const res = sqlite
+      .prepare("DELETE FROM threat_actor_references WHERE tenant_id = ? AND actor_id = ? AND id = ?")
+      .run(tid, aid, rid);
     if (res.changes > 0) storage.appendAudit(tid, actor, "threat_actor.reference.delete", aid, { refId: rid });
     return res.changes > 0;
   },
 
   // ---- Rule links ----
-  linkThreatActorDetectionRule(tid: string, aid: string, body: { ruleId: string; priority?: DetectionPriority; notes?: string | null }, actor: string): ThreatActorRuleLinkDTO {
-    const lid = id(); const ts = now();
-    sqlite.prepare(`INSERT OR IGNORE INTO threat_actor_detection_rules (
+  linkThreatActorDetectionRule(
+    tid: string,
+    aid: string,
+    body: { ruleId: string; priority?: DetectionPriority; notes?: string | null },
+    actor: string,
+  ): ThreatActorRuleLinkDTO {
+    const lid = id();
+    const ts = now();
+    sqlite
+      .prepare(
+        `INSERT OR IGNORE INTO threat_actor_detection_rules (
       id, tenant_id, actor_id, rule_id, priority, notes, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
-      lid, tid, aid, body.ruleId, body.priority ?? "P3", body.notes ?? null, ts,
-    );
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(lid, tid, aid, body.ruleId, body.priority ?? "P3", body.notes ?? null, ts);
     storage.appendAudit(tid, actor, "threat_actor.rule.link", aid, { ruleId: body.ruleId });
-    const row = sqlite.prepare(
-      `SELECT l.*, dr.title AS rule_title, dr.status AS rule_status, dr.mitre_techniques AS rule_mitre_techniques
+    const row = sqlite
+      .prepare(
+        `SELECT l.*, dr.title AS rule_title, dr.status AS rule_status, dr.mitre_techniques AS rule_mitre_techniques
          FROM threat_actor_detection_rules l
          LEFT JOIN detection_rules dr ON dr.id = l.rule_id AND dr.tenant_id = l.tenant_id
-        WHERE l.tenant_id = ? AND l.actor_id = ? AND l.rule_id = ?`
-    ).get(tid, aid, body.ruleId) as any;
+        WHERE l.tenant_id = ? AND l.actor_id = ? AND l.rule_id = ?`,
+      )
+      .get(tid, aid, body.ruleId) as any;
     return storage._taRuleLinkRowToDto(row);
   },
   unlinkThreatActorDetectionRule(tid: string, aid: string, ruleId: string, actor: string): boolean {
-    const res = sqlite.prepare("DELETE FROM threat_actor_detection_rules WHERE tenant_id = ? AND actor_id = ? AND rule_id = ?").run(tid, aid, ruleId);
+    const res = sqlite
+      .prepare("DELETE FROM threat_actor_detection_rules WHERE tenant_id = ? AND actor_id = ? AND rule_id = ?")
+      .run(tid, aid, ruleId);
     if (res.changes > 0) storage.appendAudit(tid, actor, "threat_actor.rule.unlink", aid, { ruleId });
     return res.changes > 0;
   },
@@ -4406,17 +7667,24 @@ export const storage = {
   /** Run AI-backed enrichment and persist everything in one shot.
    *  Sub-resource tables are wiped + repopulated; the header row is updated
    *  in-place. Throws on AI failure so the route can surface real errors. */
-  async enrichThreatActor(tid: string, aid: string, opts: { force?: boolean; actor: string; providerId?: string | null }): Promise<ThreatActorFullDTO> {
+  async enrichThreatActor(
+    tid: string,
+    aid: string,
+    opts: { force?: boolean; actor: string; providerId?: string | null },
+  ): Promise<ThreatActorFullDTO> {
     const head = storage.getThreatActor(tid, aid);
     if (!head) throw new Error(`threat actor not found: ${aid}`);
     // v2.30.6 — one-off provider override (from the TAP detail sheet picker)
     // wins over the tenant default resolver.
     let provider: AiProvider | undefined;
     if (opts.providerId) {
-      provider = db.select().from(aiProviders)
+      provider = db
+        .select()
+        .from(aiProviders)
         .where(and(eq(aiProviders.id, opts.providerId), eq(aiProviders.tenantId, tid)))
         .get();
-      if (provider && (!provider.enabled || !aiProviderHasSecret(provider) || provider.lastTestOk !== 1)) provider = undefined;
+      if (provider && (!provider.enabled || !aiProviderHasSecret(provider) || provider.lastTestOk !== 1))
+        provider = undefined;
       provider = hydrateAiProviderSecret(provider);
     }
     if (!provider) provider = storage.resolveAiProvider(tid, "threat_actor_enrichment");
@@ -4440,7 +7708,9 @@ export const storage = {
     const out = result.output;
     const ts = now();
     // Update header
-    sqlite.prepare(`UPDATE threat_actors SET
+    sqlite
+      .prepare(
+        `UPDATE threat_actors SET
       mitre_group_id = ?, aliases = ?, vendor_names = ?,
       actor_type = ?, sponsorship = ?,
       assessed_origin = ?, origin_confidence = ?, sponsoring_entity = ?,
@@ -4455,27 +7725,53 @@ export const storage = {
       business_impact = ?, capability_profile = ?, infrastructure_profile = ?,
       ir_actions = ?, countermeasures = ?, forecast = ?, extortion_tactics = ?,
       body_md = ?, ai_provider_label = ?, version = version + 1, updated_at = ?
-     WHERE tenant_id = ? AND id = ?`).run(
-      out.mitreGroupId,
-      JSON.stringify(out.aliases), JSON.stringify(out.vendorNames),
-      out.actorType, out.sponsorship,
-      out.assessedOrigin, out.originConfidence, out.sponsoringEntity,
-      JSON.stringify(out.motivation), out.activeSince, out.sophistication,
-      out.tlp, out.admiraltySource, out.admiraltyInfo, out.wepConfidence,
-      JSON.stringify(out.targetSectors), JSON.stringify(out.targetRegions),
-      JSON.stringify(out.targetTechStack),
-      out.orgSizePreference, out.intentProximity,
-      out.execWhat, out.execSoWhat, out.execWhatNow,
-      out.threatLevel, out.threatLevelRationale, out.sectorActivelyTargeted ? 1 : 0,
-      JSON.stringify(out.diamondAdversary), JSON.stringify(out.diamondCapability),
-      JSON.stringify(out.diamondInfrastructure),
-      JSON.stringify(out.diamondVictim), JSON.stringify(out.diamondMeta),
-      JSON.stringify(out.businessImpact), JSON.stringify(out.capabilityProfile),
-      JSON.stringify(out.infrastructureProfile),
-      JSON.stringify(out.irActions), JSON.stringify(out.countermeasures),
-      out.forecast, JSON.stringify(out.extortionTactics),
-      out.bodyMd, provider.label, ts, tid, aid,
-    );
+     WHERE tenant_id = ? AND id = ?`,
+      )
+      .run(
+        out.mitreGroupId,
+        JSON.stringify(out.aliases),
+        JSON.stringify(out.vendorNames),
+        out.actorType,
+        out.sponsorship,
+        out.assessedOrigin,
+        out.originConfidence,
+        out.sponsoringEntity,
+        JSON.stringify(out.motivation),
+        out.activeSince,
+        out.sophistication,
+        out.tlp,
+        out.admiraltySource,
+        out.admiraltyInfo,
+        out.wepConfidence,
+        JSON.stringify(out.targetSectors),
+        JSON.stringify(out.targetRegions),
+        JSON.stringify(out.targetTechStack),
+        out.orgSizePreference,
+        out.intentProximity,
+        out.execWhat,
+        out.execSoWhat,
+        out.execWhatNow,
+        out.threatLevel,
+        out.threatLevelRationale,
+        out.sectorActivelyTargeted ? 1 : 0,
+        JSON.stringify(out.diamondAdversary),
+        JSON.stringify(out.diamondCapability),
+        JSON.stringify(out.diamondInfrastructure),
+        JSON.stringify(out.diamondVictim),
+        JSON.stringify(out.diamondMeta),
+        JSON.stringify(out.businessImpact),
+        JSON.stringify(out.capabilityProfile),
+        JSON.stringify(out.infrastructureProfile),
+        JSON.stringify(out.irActions),
+        JSON.stringify(out.countermeasures),
+        out.forecast,
+        JSON.stringify(out.extortionTactics),
+        out.bodyMd,
+        provider.label,
+        ts,
+        tid,
+        aid,
+      );
     // Wipe + replace sub-resources
     sqlite.prepare("DELETE FROM threat_actor_ttps WHERE tenant_id = ? AND actor_id = ?").run(tid, aid);
     sqlite.prepare("DELETE FROM threat_actor_tools WHERE tenant_id = ? AND actor_id = ?").run(tid, aid);
@@ -4483,54 +7779,115 @@ export const storage = {
     sqlite.prepare("DELETE FROM threat_actor_iocs WHERE tenant_id = ? AND actor_id = ?").run(tid, aid);
     sqlite.prepare("DELETE FROM threat_actor_references WHERE tenant_id = ? AND actor_id = ?").run(tid, aid);
     for (const t of out.ttps) {
-      sqlite.prepare(`INSERT INTO threat_actor_ttps (
+      sqlite
+        .prepare(
+          `INSERT INTO threat_actor_ttps (
         id, tenant_id, actor_id, tactic, technique_id, sub_technique_id,
         technique_name, evidence, status, detection_priority, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-        id(), tid, aid, t.tactic, t.techniqueId, t.subTechniqueId ?? null,
-        t.techniqueName, t.evidence ?? null,
-        t.status ?? "suspected", t.detectionPriority ?? "P3", ts,
-      );
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          id(),
+          tid,
+          aid,
+          t.tactic,
+          t.techniqueId,
+          t.subTechniqueId ?? null,
+          t.techniqueName,
+          t.evidence ?? null,
+          t.status ?? "suspected",
+          t.detectionPriority ?? "P3",
+          ts,
+        );
     }
     for (const t of out.tools) {
-      sqlite.prepare(`INSERT INTO threat_actor_tools (
+      sqlite
+        .prepare(
+          `INSERT INTO threat_actor_tools (
         id, tenant_id, actor_id, name, category, purpose, variants, hash_or_rule, confidence, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-        id(), tid, aid, t.name, t.category ?? null, t.purpose ?? null,
-        j(t.variants ?? []), t.hashOrRule ?? null, t.confidence ?? "Likely", ts,
-      );
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          id(),
+          tid,
+          aid,
+          t.name,
+          t.category ?? null,
+          t.purpose ?? null,
+          j(t.variants ?? []),
+          t.hashOrRule ?? null,
+          t.confidence ?? "Likely",
+          ts,
+        );
     }
     for (const c of out.campaigns) {
-      sqlite.prepare(`INSERT INTO threat_actor_campaigns (
+      sqlite
+        .prepare(
+          `INSERT INTO threat_actor_campaigns (
         id, tenant_id, actor_id, name, period, target_sector, target_geography,
         initial_access, outcome, source_url, finding_ids, rule_ids, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-        id(), tid, aid, c.name, c.period ?? null,
-        c.targetSector ?? null, c.targetGeography ?? null,
-        c.initialAccess ?? null, c.outcome ?? null, c.sourceUrl ?? null,
-        "[]", "[]", ts,
-      );
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          id(),
+          tid,
+          aid,
+          c.name,
+          c.period ?? null,
+          c.targetSector ?? null,
+          c.targetGeography ?? null,
+          c.initialAccess ?? null,
+          c.outcome ?? null,
+          c.sourceUrl ?? null,
+          "[]",
+          "[]",
+          ts,
+        );
     }
     for (const i of out.iocs) {
-      sqlite.prepare(`INSERT INTO threat_actor_iocs (
+      sqlite
+        .prepare(
+          `INSERT INTO threat_actor_iocs (
         id, tenant_id, actor_id, ioc_type, value, first_seen, last_confirmed,
         confidence, tlp, source, mitre_ttps, recommended_action, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-        id(), tid, aid, i.iocType, i.value,
-        i.firstSeen ?? null, i.lastConfirmed ?? null,
-        i.confidence ?? "Likely", i.tlp ?? "AMBER",
-        i.source ?? null, j(i.mitreTtps ?? []),
-        i.recommendedAction ?? null, ts,
-      );
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          id(),
+          tid,
+          aid,
+          i.iocType,
+          i.value,
+          i.firstSeen ?? null,
+          i.lastConfirmed ?? null,
+          i.confidence ?? "Likely",
+          i.tlp ?? "AMBER",
+          i.source ?? null,
+          j(i.mitreTtps ?? []),
+          i.recommendedAction ?? null,
+          ts,
+        );
     }
     let refIdx = 1;
     for (const r of out.references) {
-      sqlite.prepare(`INSERT INTO threat_actor_references (
+      sqlite
+        .prepare(
+          `INSERT INTO threat_actor_references (
         id, tenant_id, actor_id, ref_num, source_type, title, date, url, archive_url, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-        id(), tid, aid, r.refNum ?? refIdx, r.sourceType ?? null, r.title,
-        r.date ?? null, r.url ?? null, r.archiveUrl ?? null, ts,
-      );
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          id(),
+          tid,
+          aid,
+          r.refNum ?? refIdx,
+          r.sourceType ?? null,
+          r.title,
+          r.date ?? null,
+          r.url ?? null,
+          r.archiveUrl ?? null,
+          ts,
+        );
       refIdx += 1;
     }
     // v2.30.5 — persist AI-suggested tenant relevance tags. We only insert
@@ -4540,23 +7897,28 @@ export const storage = {
     if (aiTags.length > 0) {
       // Wipe previous AI-tagged rows for this actor so we don't accumulate
       // stale suggestions across re-runs.
-      sqlite.prepare(
-        "DELETE FROM threat_actor_tenants WHERE owner_tenant_id = ? AND actor_id = ? AND tagged_by_ai = 1"
-      ).run(tid, aid);
+      sqlite
+        .prepare("DELETE FROM threat_actor_tenants WHERE owner_tenant_id = ? AND actor_id = ? AND tagged_by_ai = 1")
+        .run(tid, aid);
       for (const t of aiTags) {
         try {
           storage.addThreatActorTenant(
-            tid, aid,
+            tid,
+            aid,
             { tenantId: t.tenantId, relevance: t.relevance, rationale: t.rationale ?? null },
             { taggedBy: "ai", taggedByAi: true },
           );
-        } catch { /* ignore individual tag errors */ }
+        } catch {
+          /* ignore individual tag errors */
+        }
       }
     }
     storage.appendAudit(tid, opts.actor, "threat_actor.enrich", aid, {
       provider: provider.label,
-      ttps: out.ttps.length, tools: out.tools.length,
-      campaigns: out.campaigns.length, iocs: out.iocs.length,
+      ttps: out.ttps.length,
+      tools: out.tools.length,
+      campaigns: out.campaigns.length,
+      iocs: out.iocs.length,
       references: out.references.length,
       tenantTags: aiTags.length,
     });
@@ -4568,13 +7930,15 @@ export const storage = {
    *  number of new actors inserted. Safe to call on every boot; idempotent. */
   backfillThreatActorsFromExistingData(tid: string, opts?: { createdBy?: string }): number {
     const createdBy = opts?.createdBy ?? "system";
-    const currentCatalog = sqlite.prepare(
-      "SELECT COUNT(DISTINCT primary_name) AS n FROM threat_actors WHERE tenant_id = ?"
-    ).get(tid) as { n: number };
+    const currentCatalog = sqlite
+      .prepare("SELECT COUNT(DISTINCT primary_name) AS n FROM threat_actors WHERE tenant_id = ?")
+      .get(tid) as { n: number };
     if ((currentCatalog?.n ?? 0) >= 100) return 0;
-    const curated = sqlite.prepare(
-      "SELECT COUNT(*) AS n FROM threat_actors WHERE tenant_id = ? AND prepared_by = 'OptraSight research seed'"
-    ).get(tid) as { n: number };
+    const curated = sqlite
+      .prepare(
+        "SELECT COUNT(*) AS n FROM threat_actors WHERE tenant_id = ? AND prepared_by = 'OptraSight research seed'",
+      )
+      .get(tid) as { n: number };
     if ((curated?.n ?? 0) >= 50) return 0;
     const names = new Set<string>();
     const fRows = sqlite.prepare("SELECT threat_actors FROM osint_findings WHERE tenant_id = ?").all(tid) as any[];
@@ -4582,14 +7946,18 @@ export const storage = {
       try {
         const arr = JSON.parse(r.threat_actors || "[]");
         if (Array.isArray(arr)) for (const n of arr) if (typeof n === "string" && n.trim()) names.add(n.trim());
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
     const dRows = sqlite.prepare("SELECT threat_actors FROM detection_rules WHERE tenant_id = ?").all(tid) as any[];
     for (const r of dRows) {
       try {
         const arr = JSON.parse(r.threat_actors || "[]");
         if (Array.isArray(arr)) for (const n of arr) if (typeof n === "string" && n.trim()) names.add(n.trim());
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
     let created = 0;
     for (const name of names) {
@@ -4606,7 +7974,9 @@ export const storage = {
     const provider = storage.resolveAiProvider(tid, "threat_landscape");
     const recent = storage.listOsintFindings(tid).slice(0, 30);
     const tlid = id();
-    const prevVersions = sqlite.prepare("SELECT MAX(version) as v FROM threat_landscapes WHERE tenant_id = ?").get(tid) as any;
+    const prevVersions = sqlite
+      .prepare("SELECT MAX(version) as v FROM threat_landscapes WHERE tenant_id = ?")
+      .get(tid) as any;
     const version = (prevVersions?.v ?? 0) + 1;
     const title = opts.title ?? `Threat landscape — ${tenant?.name ?? "client"} v${version}`;
     if (!provider) throw new Error("No AI provider is configured for threat landscape generation.");
@@ -4621,7 +7991,10 @@ export const storage = {
           monitoredTechnologies: BATCH_ONE_WORKSPACE_PROFILE.monitoredTechnologies,
         },
         recentSignals: recent.slice(0, 15).map((f) => ({
-          title: f.title, severity: f.severity, affectedTech: f.affectedTech, threatActors: f.threatActors,
+          title: f.title,
+          severity: f.severity,
+          affectedTech: f.affectedTech,
+          threatActors: f.threatActors,
         })),
       },
       provider,
@@ -4631,24 +8004,43 @@ export const storage = {
     }
     const bodyMd = r.output.bodyMd;
     const stats = r.output.stats && typeof r.output.stats === "object" ? r.output.stats : {};
-    sqlite.prepare(`INSERT INTO threat_landscapes (
+    sqlite
+      .prepare(
+        `INSERT INTO threat_landscapes (
       id, tenant_id, version, title, status, body_md, stats, ai_provider_label, created_at, created_by
-    ) VALUES (?, ?, ?, ?, 'ready', ?, ?, ?, ?, ?)`).run(
-      tlid, tid, version, title, bodyMd, JSON.stringify(stats), provider?.label ?? null, now(), opts.createdBy
-    );
+    ) VALUES (?, ?, ?, ?, 'ready', ?, ?, ?, ?, ?)`,
+      )
+      .run(tlid, tid, version, title, bodyMd, JSON.stringify(stats), provider?.label ?? null, now(), opts.createdBy);
     storage.appendAudit(tid, opts.createdBy, "threat_landscape.generate", tlid, { version });
     return {
-      id: tlid, tenantId: tid, version, title, status: "ready", bodyMd, stats,
-      aiProviderLabel: provider?.label ?? null, createdAt: now(), createdBy: opts.createdBy,
+      id: tlid,
+      tenantId: tid,
+      version,
+      title,
+      status: "ready",
+      bodyMd,
+      stats,
+      aiProviderLabel: provider?.label ?? null,
+      createdAt: now(),
+      createdBy: opts.createdBy,
     };
   },
 
   listThreatLandscapes(tid: string): ThreatLandscapeDTO[] {
-    const rows = sqlite.prepare("SELECT * FROM threat_landscapes WHERE tenant_id = ? ORDER BY version DESC LIMIT 30").all(tid) as any[];
+    const rows = sqlite
+      .prepare("SELECT * FROM threat_landscapes WHERE tenant_id = ? ORDER BY version DESC LIMIT 30")
+      .all(tid) as any[];
     return rows.map((r) => ({
-      id: r.id, tenantId: r.tenant_id, version: r.version, title: r.title, status: r.status,
-      bodyMd: r.body_md, stats: JSON.parse(r.stats || "{}"),
-      aiProviderLabel: r.ai_provider_label, createdAt: r.created_at, createdBy: r.created_by,
+      id: r.id,
+      tenantId: r.tenant_id,
+      version: r.version,
+      title: r.title,
+      status: r.status,
+      bodyMd: r.body_md,
+      stats: JSON.parse(r.stats || "{}"),
+      aiProviderLabel: r.ai_provider_label,
+      createdAt: r.created_at,
+      createdBy: r.created_by,
     }));
   },
 
@@ -4656,9 +8048,16 @@ export const storage = {
     const r = sqlite.prepare("SELECT * FROM threat_landscapes WHERE id = ? AND tenant_id = ?").get(lid, tid) as any;
     if (!r) return undefined;
     return {
-      id: r.id, tenantId: r.tenant_id, version: r.version, title: r.title, status: r.status,
-      bodyMd: r.body_md, stats: JSON.parse(r.stats || "{}"),
-      aiProviderLabel: r.ai_provider_label, createdAt: r.created_at, createdBy: r.created_by,
+      id: r.id,
+      tenantId: r.tenant_id,
+      version: r.version,
+      title: r.title,
+      status: r.status,
+      bodyMd: r.body_md,
+      stats: JSON.parse(r.stats || "{}"),
+      aiProviderLabel: r.ai_provider_label,
+      createdAt: r.created_at,
+      createdBy: r.created_by,
     };
   },
 
@@ -4669,31 +8068,75 @@ export const storage = {
     const global = !!opts?.global && opts.role === "admin";
     const tenantClause = global ? "1=1" : "tenant_id = ?";
     const baseParams = global ? [] : [tid];
-    const tenantsById = new Map((sqlite.prepare("SELECT id, name FROM tenants").all() as any[]).map((t) => [t.id, t.name]));
+    const tenantsById = new Map(
+      (sqlite.prepare("SELECT id, name FROM tenants").all() as any[]).map((t) => [t.id, t.name]),
+    );
     const out: SearchResultDTO[] = [];
-    const push = (r: SearchResultDTO) => { if (out.length < 40) out.push(r); };
-    for (const r of sqlite.prepare(`SELECT id, tenant_id, title, severity, status, source_id, cve_ids, threat_actors FROM osint_findings WHERE ${tenantClause} AND (title LIKE ? OR COALESCE(summary,'') LIKE ? OR cve_ids LIKE ? OR threat_actors LIKE ?) ORDER BY published_at DESC LIMIT 10`).all(...baseParams, likeQ, likeQ, likeQ, likeQ) as any[]) {
-      push({ id: r.id, type: "Intel finding", title: r.title, subtitle: `${p<string[]>(r.cve_ids, []).slice(0, 2).join(", ") || r.source_id}`, href: `#/osint?finding=${r.id}`, severity: r.severity, status: r.status, tenantName: tenantsById.get(r.tenant_id) ?? null, action: "generate_detection" });
+    const push = (r: SearchResultDTO) => {
+      if (out.length < 40) out.push(r);
+    };
+    for (const r of sqlite
+      .prepare(
+        `SELECT id, tenant_id, title, severity, status, source_id, cve_ids, threat_actors FROM osint_findings WHERE ${tenantClause} AND (title LIKE ? OR COALESCE(summary,'') LIKE ? OR cve_ids LIKE ? OR threat_actors LIKE ?) ORDER BY published_at DESC LIMIT 10`,
+      )
+      .all(...baseParams, likeQ, likeQ, likeQ, likeQ) as any[]) {
+      push({
+        id: r.id,
+        type: "Intel finding",
+        title: r.title,
+        subtitle: `${p<string[]>(r.cve_ids, []).slice(0, 2).join(", ") || r.source_id}`,
+        href: `#/osint?finding=${r.id}`,
+        severity: r.severity,
+        status: r.status,
+        tenantName: tenantsById.get(r.tenant_id) ?? null,
+        action: "generate_detection",
+      });
     }
-    for (const r of sqlite.prepare(`SELECT id, tenant_id, profile_id, primary_name, threat_level, status FROM threat_actors WHERE ${tenantClause} AND (primary_name LIKE ? OR aliases LIKE ? OR COALESCE(mitre_group_id,'') LIKE ?) ORDER BY updated_at DESC LIMIT 8`).all(...baseParams, likeQ, likeQ, likeQ) as any[]) {
-      push({ id: r.id, type: "Threat actor", title: r.primary_name, subtitle: `${r.profile_id} · ${r.threat_level}`, href: `#/threat-actors?actor=${r.id}`, severity: r.threat_level, status: r.status, tenantName: tenantsById.get(r.tenant_id) ?? null, action: "open" });
+    for (const r of sqlite
+      .prepare(
+        `SELECT id, tenant_id, profile_id, primary_name, threat_level, status FROM threat_actors WHERE ${tenantClause} AND (primary_name LIKE ? OR aliases LIKE ? OR COALESCE(mitre_group_id,'') LIKE ?) ORDER BY updated_at DESC LIMIT 8`,
+      )
+      .all(...baseParams, likeQ, likeQ, likeQ) as any[]) {
+      push({
+        id: r.id,
+        type: "Threat actor",
+        title: r.primary_name,
+        subtitle: `${r.profile_id} · ${r.threat_level}`,
+        href: `#/threat-actors?actor=${r.id}`,
+        severity: r.threat_level,
+        status: r.status,
+        tenantName: tenantsById.get(r.tenant_id) ?? null,
+        action: "open",
+      });
     }
     return { results: out };
   },
 
   // ---------- Audit log ----------
   appendAudit(tid: string, actor: string, action: string, target: string | null, detail: Record<string, any>): void {
-    sqlite.prepare("INSERT INTO audit_log (id, tenant_id, actor, action, target, detail, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    sqlite
+      .prepare(
+        "INSERT INTO audit_log (id, tenant_id, actor, action, target, detail, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      )
       .run(id(), tid, actor, action, target, JSON.stringify(detail || {}), now());
   },
   listAudit(tid: string, opts?: { limit?: number } | number): AuditLogEntry[] {
     const limit = typeof opts === "number" ? opts : (opts?.limit ?? 200);
-    return db.select().from(auditLogTbl).where(eq(auditLogTbl.tenantId, tid))
-      .orderBy(desc(auditLogTbl.createdAt)).limit(limit).all();
+    return db
+      .select()
+      .from(auditLogTbl)
+      .where(eq(auditLogTbl.tenantId, tid))
+      .orderBy(desc(auditLogTbl.createdAt))
+      .limit(limit)
+      .all();
   },
 
   listOperationsJobs(tid: string, opts?: { max?: number }): any[] {
-    try { storage.reaperAiJobs(); } catch { /* list should still render if cleanup fails */ }
+    try {
+      storage.reaperAiJobs();
+    } catch {
+      /* list should still render if cleanup fails */
+    }
     const max = Math.max(20, Math.min(300, opts?.max ?? 120));
     const activeStatuses = new Set(["queued", "running"]);
     const terminalSuccessStatuses = new Set(["completed", "done", "succeeded"]);
@@ -4701,21 +8144,26 @@ export const storage = {
       if (terminalSuccessStatuses.has(status)) return 100;
       return Math.max(0, Math.min(100, Math.round(Number(pct ?? 0))));
     };
-    const aiRows = sqlite.prepare(
-      `SELECT id, tenant_id, kind, status, progress_pct, provider_label, created_by, created_at,
-              started_at, completed_at, target_label, target_url, heartbeat_at, error_json, result_json
+    const aiRows = sqlite
+      .prepare(
+        `SELECT id, tenant_id, kind, status, progress_pct, provider_label, created_by, created_at,
+              started_at, completed_at, target_label, target_url, heartbeat_at, error_json,
+              length(CAST(COALESCE(result_json, '') AS BLOB)) AS result_bytes
          FROM ai_jobs
         WHERE tenant_id = ?
         ORDER BY CASE WHEN status IN ('queued','running') THEN 0 ELSE 1 END, COALESCE(started_at, created_at) DESC
         LIMIT ?`,
-    ).all(tid, max) as any[];
-    const reRows = sqlite.prepare(
-      `SELECT id, tenant_id, status, total_count, done_count, fail_count, started_at, finished_at, error
+      )
+      .all(tid, max) as any[];
+    const reRows = sqlite
+      .prepare(
+        `SELECT id, tenant_id, status, total_count, done_count, fail_count, started_at, finished_at, error
          FROM osint_reanalyze_jobs
         WHERE tenant_id = ?
         ORDER BY CASE WHEN status IN ('queued','running') THEN 0 ELSE 1 END, started_at DESC
         LIMIT ?`,
-    ).all(tid, max) as any[];
+      )
+      .all(tid, max) as any[];
 
     const jobs = [
       ...aiRows.map((r) => {
@@ -4737,7 +8185,7 @@ export const storage = {
           target: r.target_label || null,
           targetUrl: r.target_url || null,
           errorMessage: error?.message ?? null,
-          resultBytes: r.result_json ? Buffer.byteLength(r.result_json, "utf8") : 0,
+          resultBytes: Number(r.result_bytes || 0),
           cancellable: activeStatuses.has(r.status),
         };
       }),
@@ -4775,19 +8223,27 @@ export const storage = {
         const aw = activeStatuses.has(a.status) ? 0 : 1;
         const bw = activeStatuses.has(b.status) ? 0 : 1;
         if (aw !== bw) return aw - bw;
-        return new Date(b.startedAt || b.createdAt || 0).getTime() - new Date(a.startedAt || a.createdAt || 0).getTime();
+        return (
+          new Date(b.startedAt || b.createdAt || 0).getTime() - new Date(a.startedAt || a.createdAt || 0).getTime()
+        );
       })
       .slice(0, max);
   },
 
-  cancelOperationsJob(tid: string, source: string, jobId: string, actor?: string | null): { ok: boolean; status: string; message?: string } {
+  cancelOperationsJob(
+    tid: string,
+    source: string,
+    jobId: string,
+    actor?: string | null,
+  ): { ok: boolean; status: string; message?: string } {
     if (source === "ai_job") return storage.cancelAiJob(tid, jobId, actor);
     if (source === "osint_reanalyze") return storage.cancelOsintReanalyzeJob(tid, jobId, actor);
     return { ok: false, status: "not_supported", message: `Cannot cancel ${source}.` };
   },
 
   cancelAllOperationsJobs(tid: string, actor?: string | null): any[] {
-    return storage.listOperationsJobs(tid, { max: 300 })
+    return storage
+      .listOperationsJobs(tid, { max: 300 })
       .filter((job: any) => job.cancellable)
       .map((job: any) => ({
         source: job.source,
@@ -4814,10 +8270,16 @@ export const storage = {
     const scopeLabel = tenant?.name ?? "BatchOne workspace";
     const rows = storage.listOsintFindings(opts.tid, { category: opts.category, severity: opts.severity });
     const findingsForAi = rows.slice(0, 60).map((f) => ({
-      title: f.title, severity: f.severity, sourceCategory: f.sourceCategory,
-      affectedTech: f.affectedTech, cveIds: f.cveIds, threatActors: f.threatActors,
-      summary: f.summary, rawSnippet: (f as any).rawSnippet ?? null,
-      publishedAt: f.publishedAt, tenantName: tenant?.name,
+      title: f.title,
+      severity: f.severity,
+      sourceCategory: f.sourceCategory,
+      affectedTech: f.affectedTech,
+      cveIds: f.cveIds,
+      threatActors: f.threatActors,
+      summary: f.summary,
+      rawSnippet: (f as any).rawSnippet ?? null,
+      publishedAt: f.publishedAt,
+      tenantName: tenant?.name,
     }));
 
     const provider = storage.resolveAiProvider(opts.tid, "osint_overview");
@@ -4837,9 +8299,14 @@ export const storage = {
       },
       provider,
     });
-    const output = aiResult.task === "osint_overview" ? aiResult.output : { summary: "", keyTakeaways: [], recommendations: [] };
+    const output =
+      aiResult.task === "osint_overview" ? aiResult.output : { summary: "", keyTakeaways: [], recommendations: [] };
 
-    storage.appendAudit(opts.tid, "system", "osint.overview", null, { persona: opts.persona, scope: "client", count: findingsForAi.length });
+    storage.appendAudit(opts.tid, "system", "osint.overview", null, {
+      persona: opts.persona,
+      scope: "client",
+      count: findingsForAi.length,
+    });
 
     return {
       persona: opts.persona,
@@ -4864,79 +8331,124 @@ export const storage = {
    * /api/v1/osint/ai-jobs/:id every few seconds until status is terminal.
    */
   createAiJob(opts: {
-    tenantId: string; kind: string; payload: any; createdBy?: string | null;
+    tenantId: string;
+    kind: string;
+    payload: any;
+    createdBy?: string | null;
     // v2.30.5 — optional human-readable label + deep-link for the notification tray.
     targetLabel?: string | null;
     targetUrl?: string | null;
   }): string {
-    const id = (globalThis as any).crypto?.randomUUID?.() ?? `ajb-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-    sqlite.prepare(
-      "INSERT INTO ai_jobs (id, tenant_id, kind, status, payload_json, created_by, created_at, progress_pct, target_label, target_url, heartbeat_at) VALUES (?, ?, ?, 'queued', ?, ?, ?, 0, ?, ?, ?)",
-    ).run(
-      id, opts.tenantId, opts.kind,
-      JSON.stringify(opts.payload ?? {}),
-      opts.createdBy ?? null,
-      new Date().toISOString(),
-      opts.targetLabel ?? null,
-      opts.targetUrl ?? null,
-      new Date().toISOString(),
-    );
+    const id =
+      (globalThis as any).crypto?.randomUUID?.() ?? `ajb-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    sqlite
+      .prepare(
+        "INSERT INTO ai_jobs (id, tenant_id, kind, status, payload_json, created_by, created_at, progress_pct, target_label, target_url, heartbeat_at) VALUES (?, ?, ?, 'queued', ?, ?, ?, 0, ?, ?, ?)",
+      )
+      .run(
+        id,
+        opts.tenantId,
+        opts.kind,
+        JSON.stringify(opts.payload ?? {}),
+        opts.createdBy ?? null,
+        new Date().toISOString(),
+        opts.targetLabel ?? null,
+        opts.targetUrl ?? null,
+        new Date().toISOString(),
+      );
     return id;
   },
   /** Touch the heartbeat so the reaper doesn't kill long-running jobs that
    *  are making progress. Call from inside the worker periodically. */
   setAiJobHeartbeat(id: string): void {
-    sqlite.prepare("UPDATE ai_jobs SET heartbeat_at = ? WHERE id = ?")
-      .run(new Date().toISOString(), id);
+    sqlite.prepare("UPDATE ai_jobs SET heartbeat_at = ? WHERE id = ?").run(new Date().toISOString(), id);
   },
   updateAiJobTarget(id: string, target: { targetLabel?: string | null; targetUrl?: string | null }): void {
-    sqlite.prepare("UPDATE ai_jobs SET target_label = COALESCE(?, target_label), target_url = COALESCE(?, target_url) WHERE id = ?")
+    sqlite
+      .prepare(
+        "UPDATE ai_jobs SET target_label = COALESCE(?, target_label), target_url = COALESCE(?, target_url) WHERE id = ?",
+      )
       .run(target.targetLabel ?? null, target.targetUrl ?? null, id);
   },
   markAiJobRunning(id: string): void {
-    sqlite.prepare("UPDATE ai_jobs SET status = 'running', started_at = ? WHERE id = ? AND status IN ('queued','running')")
+    sqlite
+      .prepare("UPDATE ai_jobs SET status = 'running', started_at = ? WHERE id = ? AND status IN ('queued','running')")
       .run(new Date().toISOString(), id);
   },
   setAiJobProgress(id: string, pct: number): void {
-    sqlite.prepare("UPDATE ai_jobs SET progress_pct = ? WHERE id = ? AND status != 'cancelled'").run(Math.max(0, Math.min(100, Math.round(pct))), id);
+    sqlite
+      .prepare("UPDATE ai_jobs SET progress_pct = ? WHERE id = ? AND status != 'cancelled'")
+      .run(Math.max(0, Math.min(100, Math.round(pct))), id);
+  },
+  setAiJobProgressDetail(id: string, pct: number, detail: Record<string, unknown>): void {
+    sqlite
+      .prepare(
+        "UPDATE ai_jobs SET progress_pct = ?, result_json = ?, heartbeat_at = ? WHERE id = ? AND status != 'cancelled'",
+      )
+      .run(
+        Math.max(0, Math.min(99, Math.round(pct))),
+        JSON.stringify({ progressDetail: detail }),
+        new Date().toISOString(),
+        id,
+      );
   },
   updateAiJobProgress(id: string, pct: number): void {
-    sqlite.prepare("UPDATE ai_jobs SET progress_pct = ? WHERE id = ? AND status != 'cancelled'").run(Math.max(0, Math.min(100, Math.round(pct))), id);
+    sqlite
+      .prepare("UPDATE ai_jobs SET progress_pct = ? WHERE id = ? AND status != 'cancelled'")
+      .run(Math.max(0, Math.min(100, Math.round(pct))), id);
   },
   completeAiJob(id: string, result: any, providerLabel?: string | null): void {
-    sqlite.prepare(
-      "UPDATE ai_jobs SET status = 'completed', result_json = ?, provider_label = ?, completed_at = ?, progress_pct = 100 WHERE id = ? AND status != 'cancelled'",
-    ).run(JSON.stringify(result ?? null), providerLabel ?? null, new Date().toISOString(), id);
+    sqlite
+      .prepare(
+        "UPDATE ai_jobs SET status = 'completed', result_json = ?, provider_label = ?, completed_at = ?, progress_pct = 100 WHERE id = ? AND status != 'cancelled'",
+      )
+      .run(JSON.stringify(result ?? null), providerLabel ?? null, new Date().toISOString(), id);
   },
   failAiJob(id: string, err: any): void {
-    const payload = (err && typeof err === "object")
-      ? { name: err.name || "Error", message: String(err.message ?? err), aiDiagnostic: (err as any).diagnostic ?? null, providerLabel: (err as any).providerLabel ?? null }
-      : { name: "Error", message: String(err) };
+    const payload =
+      err && typeof err === "object"
+        ? {
+            name: err.name || "Error",
+            message: String(err.message ?? err),
+            aiDiagnostic: (err as any).diagnostic ?? null,
+            providerLabel: (err as any).providerLabel ?? null,
+            code: (err as any).code ?? null,
+            retryable: (err as any).retryable === true,
+            retryAfterSeconds: Number.isFinite((err as any).retryAfterSeconds)
+              ? Math.max(0, Math.round((err as any).retryAfterSeconds))
+              : null,
+          }
+        : { name: "Error", message: String(err) };
     const providerLabel = (payload as any).providerLabel ?? null;
-    sqlite.prepare(
-      "UPDATE ai_jobs SET status = 'failed', error_json = ?, provider_label = COALESCE(?, provider_label), completed_at = ? WHERE id = ? AND status != 'cancelled'",
-    ).run(JSON.stringify(payload), providerLabel, new Date().toISOString(), id);
+    sqlite
+      .prepare(
+        "UPDATE ai_jobs SET status = 'failed', error_json = ?, provider_label = COALESCE(?, provider_label), completed_at = ? WHERE id = ? AND status != 'cancelled'",
+      )
+      .run(JSON.stringify(payload), providerLabel, new Date().toISOString(), id);
   },
   cancelAiJob(tenantId: string, id: string, actor?: string | null): { ok: boolean; status: string; message?: string } {
-    const row = sqlite.prepare("SELECT id, status FROM ai_jobs WHERE id = ? AND tenant_id = ?")
-      .get(id, tenantId) as { id: string; status: string } | undefined;
+    const row = sqlite.prepare("SELECT id, status FROM ai_jobs WHERE id = ? AND tenant_id = ?").get(id, tenantId) as
+      | { id: string; status: string }
+      | undefined;
     if (!row) return { ok: false, status: "not_found", message: "AI job not found for this tenant." };
     if (row.status !== "queued" && row.status !== "running") {
       return { ok: false, status: row.status, message: `AI job already ${row.status}.` };
     }
-    sqlite.prepare(
-      `UPDATE ai_jobs
+    sqlite
+      .prepare(
+        `UPDATE ai_jobs
          SET status = 'cancelled',
              error_json = ?,
              completed_at = ?,
              progress_pct = CASE WHEN progress_pct > 0 THEN progress_pct ELSE 0 END
        WHERE id = ? AND tenant_id = ? AND status IN ('queued','running')`,
-    ).run(
-      JSON.stringify({ name: "AiJobCancelled", message: `Cancelled by ${actor || "operator"}.` }),
-      new Date().toISOString(),
-      id,
-      tenantId,
-    );
+      )
+      .run(
+        JSON.stringify({ name: "AiJobCancelled", message: `Cancelled by ${actor || "operator"}.` }),
+        new Date().toISOString(),
+        id,
+        tenantId,
+      );
     return { ok: true, status: "cancelled" };
   },
   /** Read a single job. Returns undefined when the id is unknown or scoped to another tenant.
@@ -4945,7 +8457,11 @@ export const storage = {
    *  omitted so the polling endpoint can stay cheap. The dedicated /full route
    *  in routes.ts uses includeResult=true to stream the entire payload. */
   getAiJob(tenantId: string, id: string, opts?: { includeResult?: boolean }): any | undefined {
-    try { storage.reaperAiJobs(); } catch { /* keep polling endpoint available */ }
+    try {
+      storage.reaperAiJobs();
+    } catch {
+      /* keep polling endpoint available */
+    }
     const r = sqlite.prepare("SELECT * FROM ai_jobs WHERE id = ? AND tenant_id = ?").get(id, tenantId) as any;
     if (!r) return undefined;
     const includeResult = opts?.includeResult !== false;
@@ -4954,7 +8470,11 @@ export const storage = {
     if (r.result_json) {
       resultBytes = Buffer.byteLength(r.result_json, "utf8");
       if (includeResult) {
-        try { result = JSON.parse(r.result_json); } catch { result = null; }
+        try {
+          result = JSON.parse(r.result_json);
+        } catch {
+          result = null;
+        }
       }
     }
     return {
@@ -4976,23 +8496,58 @@ export const storage = {
       heartbeatAt: r.heartbeat_at || null,
     };
   },
+  getLatestAiJobByKind(tenantId: string, kind: string): any | undefined {
+    const row = sqlite
+      .prepare("SELECT id FROM ai_jobs WHERE tenant_id = ? AND kind = ? ORDER BY created_at DESC LIMIT 1")
+      .get(tenantId, kind) as { id: string } | undefined;
+    return row ? storage.getAiJob(tenantId, row.id, { includeResult: true }) : undefined;
+  },
+  getActiveAiJobByKindAndPayload(
+    tenantId: string,
+    kind: string,
+    expectedPayload: Record<string, unknown>,
+  ): any | undefined {
+    const rows = sqlite
+      .prepare(
+        "SELECT id, payload_json FROM ai_jobs WHERE tenant_id = ? AND kind = ? AND status IN ('queued','running') ORDER BY created_at DESC",
+      )
+      .all(tenantId, kind) as Array<{ id: string; payload_json: string | null }>;
+    const row = rows.find((candidate) => {
+      try {
+        const payload = candidate.payload_json ? JSON.parse(candidate.payload_json) : {};
+        return Object.entries(expectedPayload).every(([key, value]) => payload?.[key] === value);
+      } catch {
+        return false;
+      }
+    });
+    return row ? storage.getAiJob(tenantId, row.id, { includeResult: false }) : undefined;
+  },
   /** v2.30.5 — list AI jobs for the notification tray. Returns all currently
    *  running/queued jobs plus the last N completed/failed jobs in the lookback
    *  window so the user can be notified about recently-finished work without
    *  loading every historical job. */
   listActiveAiJobs(tenantId: string, opts?: { lookbackMinutes?: number; max?: number }): any[] {
-    try { storage.reaperAiJobs(); } catch { /* tray can still show the last known state */ }
+    try {
+      storage.reaperAiJobs();
+    } catch {
+      /* tray can still show the last known state */
+    }
     const lookback = opts?.lookbackMinutes ?? 30;
     const max = Math.min(50, opts?.max ?? 20);
     const cutoff = new Date(Date.now() - lookback * 60 * 1000).toISOString();
-    const rows = sqlite.prepare(
-      `SELECT * FROM ai_jobs
+    const rows = sqlite
+      .prepare(
+        `SELECT id, kind, status, progress_pct, provider_label, created_by, created_at,
+              started_at, completed_at, target_label, target_url, heartbeat_at, error_json,
+              length(CAST(COALESCE(result_json, '') AS BLOB)) AS result_bytes
+         FROM ai_jobs
         WHERE tenant_id = ?
           AND (status IN ('queued','running') OR completed_at >= ? OR created_at >= ?)
         ORDER BY CASE WHEN status IN ('queued','running') THEN 0 ELSE 1 END,
                  COALESCE(started_at, created_at) DESC
         LIMIT ?`,
-    ).all(tenantId, cutoff, cutoff, max) as any[];
+      )
+      .all(tenantId, cutoff, cutoff, max) as any[];
     return rows.map((r) => ({
       id: r.id,
       kind: r.kind,
@@ -5006,28 +8561,49 @@ export const storage = {
       targetLabel: r.target_label || null,
       targetUrl: r.target_url || null,
       heartbeatAt: r.heartbeat_at || null,
-      errorMessage: r.error_json ? (() => { try { return JSON.parse(r.error_json).message ?? null; } catch { return null; } })() : null,
+      errorMessage: r.error_json
+        ? (() => {
+            try {
+              return JSON.parse(r.error_json).message ?? null;
+            } catch {
+              return null;
+            }
+          })()
+        : null,
       // size-only — the tray never needs the whole payload
-      resultBytes: r.result_json ? Buffer.byteLength(r.result_json, "utf8") : 0,
+      resultBytes: Number(r.result_bytes || 0),
     }));
   },
   /** Historical CIRT result list for the OSINT panel. Summaries only; callers
    *  fetch /api/v1/ai-jobs/:id/full when the analyst opens a preview. */
   listCirtAiJobs(tenantId: string, opts?: { max?: number }): any[] {
     const max = Math.max(1, Math.min(100, opts?.max ?? 20));
-    const rows = sqlite.prepare(
-      `SELECT * FROM ai_jobs
+    const rows = sqlite
+      .prepare(
+        `SELECT id, kind, status, payload_json, provider_label, created_by, created_at,
+              started_at, completed_at, target_label, target_url, error_json,
+              length(CAST(COALESCE(result_json, '') AS BLOB)) AS result_bytes
+         FROM ai_jobs
         WHERE tenant_id = ?
           AND kind IN ('chat_triage', 'chat_deep_dive')
           AND status IN ('completed', 'failed')
         ORDER BY COALESCE(completed_at, created_at) DESC
         LIMIT ?`,
-    ).all(tenantId, max) as any[];
+      )
+      .all(tenantId, max) as any[];
     return rows.map((r) => {
       let payload: any = {};
       let errorMessage: string | null = null;
-      try { payload = r.payload_json ? JSON.parse(r.payload_json) : {}; } catch { payload = {}; }
-      try { errorMessage = r.error_json ? JSON.parse(r.error_json).message ?? null : null; } catch { errorMessage = null; }
+      try {
+        payload = r.payload_json ? JSON.parse(r.payload_json) : {};
+      } catch {
+        payload = {};
+      }
+      try {
+        errorMessage = r.error_json ? (JSON.parse(r.error_json).message ?? null) : null;
+      } catch {
+        errorMessage = null;
+      }
       return {
         id: r.id,
         kind: r.kind,
@@ -5041,7 +8617,7 @@ export const storage = {
         targetLabel: r.target_label || null,
         targetUrl: r.target_url || null,
         errorMessage,
-        resultBytes: r.result_json ? Buffer.byteLength(r.result_json, "utf8") : 0,
+        resultBytes: Number(r.result_bytes || 0),
       };
     });
   },
@@ -5053,57 +8629,66 @@ export const storage = {
   reaperAiJobs(maxRuntimeMs = 15 * 60 * 1000): number {
     const cutoff = new Date(Date.now() - maxRuntimeMs).toISOString();
     const nowIso = new Date().toISOString();
-    const errored = sqlite.prepare(
-      `UPDATE ai_jobs SET status = 'failed', completed_at = COALESCE(completed_at, ?)
+    const errored = sqlite
+      .prepare(
+        `UPDATE ai_jobs SET status = 'failed', completed_at = COALESCE(completed_at, ?)
         WHERE status IN ('queued','running')
           AND error_json IS NOT NULL`,
-    ).run(nowIso);
+      )
+      .run(nowIso);
     // v2.30.5 — only reap jobs that have NOT sent a heartbeat in the cutoff
     // window. Long-running enrichments now ping the heartbeat periodically so
     // legitimate work isn't killed prematurely.
-    const r = sqlite.prepare(
-      `UPDATE ai_jobs SET status = 'failed', error_json = ?, completed_at = ?
+    const r = sqlite
+      .prepare(
+        `UPDATE ai_jobs SET status = 'failed', error_json = ?, completed_at = ?
         WHERE status IN ('queued','running')
           AND (started_at IS NULL OR started_at < ?)
           AND created_at < ?
           AND (heartbeat_at IS NULL OR heartbeat_at < ?)`,
-    ).run(
-      JSON.stringify({ name: "AiJobAborted", message: "Job exceeded the server-side runtime budget. Re-run to try again." }),
-      nowIso,
-      cutoff,
-      cutoff,
-      cutoff,
-    );
+      )
+      .run(
+        JSON.stringify({
+          name: "AiJobAborted",
+          message: "Job exceeded the server-side runtime budget. Re-run to try again.",
+        }),
+        nowIso,
+        cutoff,
+        cutoff,
+        cutoff,
+      );
     return (errored.changes || 0) + (r.changes || 0);
   },
   failInterruptedAiJobsOnBoot(): number {
     const bootIso = new Date().toISOString();
-    const r = sqlite.prepare(
-      `UPDATE ai_jobs
+    const r = sqlite
+      .prepare(
+        `UPDATE ai_jobs
           SET status = 'failed',
               error_json = ?,
               completed_at = ?,
               progress_pct = CASE WHEN progress_pct > 0 THEN progress_pct ELSE 0 END
         WHERE status IN ('queued','running')
           AND created_at < ?`,
-    ).run(
-      JSON.stringify({
-        name: "AiJobInterrupted",
-        message: "Job was interrupted by a server restart before it could finish. Re-run to try again.",
-      }),
-      bootIso,
-      bootIso,
-    );
+      )
+      .run(
+        JSON.stringify({
+          name: "AiJobInterrupted",
+          message: "Job was interrupted by a server restart before it could finish. Re-run to try again.",
+        }),
+        bootIso,
+        bootIso,
+      );
     return r.changes || 0;
   },
-
 };
 
 function aiProviderToSummary(p: AiProvider): AiProviderSummary {
   return {
     id: p.id,
     provider: p.provider as AiProviderKind,
-    label: p.label, model: p.model,
+    label: p.label,
+    model: p.model,
     baseUrl: p.baseUrl ?? null,
     enabled: !!p.enabled,
     isDefault: !!p.isDefault,

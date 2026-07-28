@@ -21,6 +21,23 @@ export function resolveAssetUrl(path: string | null | undefined): string | null 
 // Auth context updates it via setAuthToken / setOnUnauthorized.
 let authToken: string | null = null;
 let onUnauthorized: (() => void) | null = null;
+
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+    readonly retryable = false,
+    readonly retryAfterSeconds?: number,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+export function isMfaChallengeError(error: unknown): boolean {
+  return error instanceof ApiError && error.code === "MFA_REQUIRED";
+}
 export function setAuthToken(t: string | null) {
   authToken = t;
 }
@@ -42,7 +59,24 @@ async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     if (res.status === 401 && onUnauthorized) onUnauthorized();
     const text = (await res.text()) || res.statusText;
-    throw new Error(`${res.status}: ${text}`);
+    try {
+      const body = JSON.parse(text) as {
+        detail?: string;
+        code?: string;
+        retryable?: boolean;
+        retryAfterSeconds?: number;
+      };
+      throw new ApiError(
+        body.detail || res.statusText,
+        res.status,
+        body.code,
+        body.retryable === true,
+        body.retryAfterSeconds,
+      );
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(text, res.status);
+    }
   }
 }
 

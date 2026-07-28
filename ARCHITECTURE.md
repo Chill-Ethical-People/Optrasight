@@ -21,12 +21,13 @@ flowchart LR
 - The server is Express 5 with synchronous `better-sqlite3` access through Drizzle and focused raw SQL where analytics need it.
 - API keys live in a separate secret database under `data/secrets/`; public CTI/TAP data stays separate from secrets.
 - Long AI operations use the async job pattern. Chat-style converse remains synchronous.
+- Provider calls for OSINT analysis, CIRT triage/deep-dive, detection generation, and TAP enrichment run in isolated child workers. Their synchronous provider adapters therefore cannot block the Express request loop.
 
 ## BatchOne Surfaces
 
 | Surface | Route | Purpose |
 |---|---|---|
-| Login and account security | `/#/` | Credentialed sign-in, temporary-password rotation, MFA enrollment |
+| Login and account security | `/#/`, `/#/account-security` | Credentialed sign-in, temporary-password rotation, MFA enrollment, and per-session MFA assurance |
 | Intel Inbox | `/#/osint` | Source review, finding triage, hunting-query review, CIRT-style analysis |
 | Actor Observatory | `/#/threat-actors` | Threat actor profile cards, detail dossiers, portrait handling |
 | AI Setup | `/#/ai-setup` | Provider key storage, provider status, BatchOne task routing |
@@ -47,9 +48,16 @@ BatchOne intentionally exposes only the routes listed above. Workflows outside t
 | `server/osintFetcher.ts` | Curated source ingestion and finding extraction |
 | `server/osintSeed.ts` | Parseable OSINT source catalog |
 | `server/osintChat.ts` | CIRT triage and deep-dive async jobs |
+| `server/aiWorkWorker.ts` | Isolated detection-generation, TAP-enrichment, and CIRT deep-dive execution |
+| `server/osintAnalysisWorker.ts` | Isolated per-finding OSINT AI analysis execution |
+| `server/chatTriageWorker.ts` | Isolated CIRT triage and client-impact draft execution |
 | `server/aiClient.ts` | AI task dispatch and provider selection |
 | `server/aiLive.ts` | Provider HTTP plumbing |
+| `server/promptRegistry.ts` | Central JSON prompt tuning by task, provider, and exact model |
 | `server/sourceFetch.ts` | Source URL fetching with SSRF guardrails |
+| `server/clientDigestTemplateUpload.ts` | Validated Word-template placeholder extraction for Client Briefs |
+| `shared/clientMatchingScope.ts` | Deterministic TI, managed-security, hybrid, and advisory matching policy |
+| `shared/clientProfileBulk.ts` | Browser-safe CSV parsing and bulk Client Profile import contract |
 | `server/tapPortrait.ts` | TAP portrait generation and upload handling |
 | `server/tapDocx.ts` | TAP dossier export |
 | `server/httpClient.ts` | Shared outbound HTTP wrapper |

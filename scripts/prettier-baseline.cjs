@@ -8,11 +8,9 @@ const trackedFiles = execFileSync("git", ["ls-files", "-z"], { encoding: "buffer
   .split("\0")
   .filter(Boolean);
 
-const result = spawnSync(
-  process.platform === "win32" ? "npx.cmd" : "npx",
-  ["prettier", "--check", ...trackedFiles],
-  { encoding: "utf8" },
-);
+const result = spawnSync(process.platform === "win32" ? "npx.cmd" : "npx", ["prettier", "--check", ...trackedFiles], {
+  encoding: "utf8",
+});
 const output = `${result.stdout || ""}${result.stderr || ""}`;
 const filesNeedingFormat = (output.match(/^\[warn\] .+$/gm) || []).filter(
   (line) => !line.includes("Code style issues found"),

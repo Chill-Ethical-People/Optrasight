@@ -15,6 +15,10 @@ import {
   BrainCircuit,
   RadioTower,
   Users,
+  ShieldCheck,
+  KeyRound,
+  MailCheck,
+  Settings2,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { AiJobsTray } from "@/components/AiJobsTray";
@@ -35,6 +39,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 /** Legacy sentinel retained only so old global-mode guards stay compile-time inert in BatchOne. */
 export const GLOBAL_TENANT_ID = "__global__";
 
+const CEP_MARK_SRC = `${import.meta.env.BASE_URL}brand/cep-mark-on-light.svg?v=20260719d`;
+const CEP_MARK_DARK_SRC = `${import.meta.env.BASE_URL}brand/cep-mark-on-dark.svg?v=20260719d`;
+
 // Grouped navigation — collapsible sections keep the rail scannable.
 // Group ids are stable so collapse-state survives re-renders.
 type NavItem = { href: string; label: string; icon: typeof LayoutDashboard; adminOnly?: boolean };
@@ -47,12 +54,16 @@ const navGroups: NavGroup[] = [
     items: [
       { href: "/osint", label: "Intel Inbox", icon: RadioTower },
       { href: "/threat-actors", label: "Actor Observatory", icon: Fingerprint },
+      { href: "/detection-rules", label: "Detection Rules", icon: ShieldCheck },
     ],
   },
   {
     id: "admin",
     label: "Operations",
     items: [
+      { href: "/client-profile", label: "Client Profile", icon: Building2 },
+      { href: "/client-briefs", label: "Client Briefs", icon: MailCheck },
+      { href: "/workspace-setup", label: "Workspace Setup", icon: Settings2, adminOnly: true },
       { href: "/ai-setup", label: "AI Setup", icon: BrainCircuit },
       { href: "/operations-audit", label: "Job Control", icon: ListChecks },
       { href: "/platform-users", label: "Platform Users", icon: Users, adminOnly: true },
@@ -97,6 +108,33 @@ function ThemeToggle() {
         </Button>
       </TooltipTrigger>
       <TooltipContent>Switch to {next} mode</TooltipContent>
+    </Tooltip>
+  );
+}
+
+export function CreatorBrand({ showLabel = false, side = "bottom" }: { showLabel?: boolean; side?: "left" | "right" | "top" | "bottom" }) {
+  const { theme } = useUiState();
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <a
+          href="https://github.com/Chill-Ethical-People"
+          target="_blank"
+          rel="noreferrer"
+          className={`group flex h-9 items-center gap-2 rounded-md px-1.5 text-muted-foreground outline-none transition-colors duration-200 hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary ${showLabel ? "w-full" : "w-9 justify-center"}`}
+          aria-label="Chill Ethical People on GitHub"
+          data-testid="link-creator-brand"
+        >
+          <img
+            src={theme === "dark" ? CEP_MARK_DARK_SRC : CEP_MARK_SRC}
+            alt=""
+            className="h-7 w-7 shrink-0 object-contain opacity-60 transition-opacity duration-200 group-hover:opacity-90"
+            draggable={false}
+          />
+          {showLabel ? <span className="truncate text-[10px] font-medium">Chill Ethical People</span> : null}
+        </a>
+      </TooltipTrigger>
+      <TooltipContent side={side}>Created by Chill Ethical People</TooltipContent>
     </Tooltip>
   );
 }
@@ -237,7 +275,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       ...group,
       items: group.items.filter((item) => {
         if (item.adminOnly && user?.role !== "admin") return false;
-        if (reviewOnly && !["/osint", "/threat-actors"].includes(item.href)) return false;
+        if (user?.tenant.operatingMode !== "mss" && ["/client-profile", "/client-briefs"].includes(item.href)) return false;
+        if (reviewOnly && !["/osint", "/threat-actors", "/detection-rules"].includes(item.href)) return false;
         return true;
       }),
     }))
@@ -322,33 +361,67 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           )}
           {collapsed ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className={`h-10 w-10 mx-auto flex ${signOutDisabled ? "cursor-not-allowed opacity-55 hover:opacity-70" : ""}`}
-                  onClick={handleSignOut}
-                  data-testid="button-logout"
-                  aria-label={signOutLabel}
-                >
-                  <LogOut size={16} />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="right">{signOutLabel}</TooltipContent>
-            </Tooltip>
+            <div className="space-y-1">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    asChild
+                    variant="ghost"
+                    size="icon"
+                    className="h-10 w-10 mx-auto flex"
+                  >
+                    <Link
+                      href="/account-security"
+                      data-testid="button-account-security"
+                      aria-label="Account security and MFA"
+                    >
+                      <KeyRound size={16} />
+                    </Link>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right">Account security and MFA</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className={`h-10 w-10 mx-auto flex ${signOutDisabled ? "cursor-not-allowed opacity-55 hover:opacity-70" : ""}`}
+                    onClick={handleSignOut}
+                    data-testid="button-logout"
+                    aria-label={signOutLabel}
+                  >
+                    <LogOut size={16} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right">{signOutLabel}</TooltipContent>
+              </Tooltip>
+            </div>
           ) : (
-            <Button
-              variant="ghost"
-              size="sm"
-              className={`w-full justify-start text-muted-foreground ${signOutDisabled ? "cursor-not-allowed opacity-55 hover:opacity-70" : ""}`}
-              onClick={handleSignOut}
-              data-testid="button-logout"
-              title={signOutLabel}
-            >
-              <LogOut size={14} className="mr-2" />
-              Sign out
-            </Button>
+            <div className="space-y-1">
+              <Button
+                asChild
+                variant="ghost"
+                size="sm"
+                className="w-full justify-start text-muted-foreground"
+              >
+                <Link href="/account-security" data-testid="button-account-security">
+                  <KeyRound size={14} className="mr-2" />
+                  Account security
+                </Link>
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className={`w-full justify-start text-muted-foreground ${signOutDisabled ? "cursor-not-allowed opacity-55 hover:opacity-70" : ""}`}
+                onClick={handleSignOut}
+                data-testid="button-logout"
+                title={signOutLabel}
+              >
+                <LogOut size={14} className="mr-2" />
+                Sign out
+              </Button>
+            </div>
           )}
         </div>
       </aside>
@@ -388,6 +461,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                     <NavGroupSection key={group.id} group={group} location={location} collapsed={false} />
                   ))}
                 </nav>
+                <div className="border-t border-sidebar-border px-4 py-2">
+                  <CreatorBrand showLabel side="right" />
+                </div>
                 {user && (
                   <div className="border-t border-sidebar-border p-3">
                     <div className="flex items-center gap-2.5 mb-2 px-1.5">
@@ -407,6 +483,17 @@ export function AppShell({ children }: { children: ReactNode }) {
                         </span>
                       </div>
                     </div>
+                    <Button
+                      asChild
+                      variant="ghost"
+                      size="sm"
+                      className="w-full justify-start text-muted-foreground"
+                    >
+                      <Link href="/account-security" data-testid="button-account-security-mobile">
+                        <KeyRound size={14} className="mr-2" />
+                        Account security
+                      </Link>
+                    </Button>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -440,6 +527,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             <GlobalCommandPalette />
             <ThemeToggle />
             <AiJobsTray />
+          </div>
+          <div className="hidden h-8 shrink-0 items-center border-l border-border pl-2 sm:flex">
+            <CreatorBrand side="bottom" />
           </div>
           {!BATCH_ONE_RELEASE && (
             <div className="hidden sm:block shrink-0">

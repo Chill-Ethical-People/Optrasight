@@ -16,10 +16,11 @@
 
 import { execFile } from "node:child_process";
 import { mkdirSync, existsSync, writeFileSync } from "node:fs";
-import { basename, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import type { ThreatActorDTO } from "@shared/schema";
 import { storage } from "./storage";
+import { resolveAiPrompt } from "./promptRegistry";
 import { liveGenerateImage } from "./aiLive";
 
 const execFileP = promisify(execFile);
@@ -27,21 +28,6 @@ const execFileP = promisify(execFile);
 // data/portraits lives next to the SQLite DB so a single backup snapshot
 // captures both the DB and the rendered images.
 const PORTRAITS_DIR = resolve(process.cwd(), "data", "portraits");
-const PORTRAITS_ROOT = `${PORTRAITS_DIR}/`;
-
-function safeActorFileBase(actorId: string): string {
-  if (!/^[A-Za-z0-9_-]{1,96}$/.test(actorId)) throw new Error("invalid threat actor id");
-  return actorId;
-}
-
-function portraitPath(actorId: string): string {
-  const base = safeActorFileBase(actorId);
-  const target = resolve(PORTRAITS_DIR, `${base}.png`);
-  if (!target.startsWith(PORTRAITS_ROOT) || basename(target) !== `${base}.png`) {
-    throw new Error("invalid portrait path");
-  }
-  return target;
-}
 function ensureDir() {
   if (!existsSync(PORTRAITS_DIR)) {
     mkdirSync(PORTRAITS_DIR, { recursive: true });
@@ -51,7 +37,7 @@ function ensureDir() {
 export class PortraitGeneratorUnavailableError extends Error {
   name = "PortraitGeneratorUnavailableError";
   tool = "asi-generate-image";
-  installHint = "Install or expose the asi-generate-image command on PATH, or upload/import generated portrait PNGs manually.";
+  installHint = "Install or expose the asi-generate-image command on PATH, or provision a curated portrait asset through the release process.";
   constructor(message = "AI portrait generator is unavailable: asi-generate-image is not installed or not on PATH.") {
     super(message);
   }
@@ -128,7 +114,7 @@ export function buildPortraitPrompt(a: ThreatActorDTO): string {
  *  via `cwd` so the output lands where we want it. */
 async function runImageGen(prompt: string, baseName: string): Promise<string> {
   ensureDir();
-  const filename = safeActorFileBase(baseName);
+  const filename = baseName;
   const payload = JSON.stringify({
     prompt,
     filename,
@@ -159,13 +145,10 @@ async function runImageGen(prompt: string, baseName: string): Promise<string> {
   // The CLI may print either an absolute path or a relative one rooted at cwd.
   // Try to find the file deterministically — first by expected filename, then
   // by parsing stdout for a *.png reference.
-  const expected = portraitPath(filename);
+  const expected = join(PORTRAITS_DIR, `${filename}.png`);
   if (existsSync(expected)) return expected;
   // Try generated_assets/<filename>.png in cwd (CLI default convention).
-  const fallback = resolve(PORTRAITS_DIR, "generated_assets", `${filename}.png`);
-  if (!fallback.startsWith(PORTRAITS_ROOT) || basename(fallback) !== `${filename}.png`) {
-    throw new Error("invalid generated portrait path");
-  }
+  const fallback = join(PORTRAITS_DIR, "generated_assets", `${filename}.png`);
   if (existsSync(fallback)) return fallback;
   // Last resort — parse stdout for the absolute PNG path the CLI prints.
   // The CLI line looks like:  "Image saved to /home/user/workspace/<file>.png (N bytes)"
@@ -237,24 +220,25 @@ export async function generateActorPortrait(
 
     storage.setThreatActorPortraitStatus(tenantId, actorId, "generating");
     try {
-      const prompt = buildPortraitPrompt(actor);
+      const basePrompt = buildPortraitPrompt(actor);
       let absPath: string;
       const provider = storage.resolveAiPortraitProvider(tenantId);
       if (provider && isTapPortraitProvider(provider)) {
+        const prompt = resolveAiPrompt("tap_portrait", provider, basePrompt);
         const generated = liveGenerateImage(provider, prompt, { timeoutSeconds: 300 });
         if (!generated.ok || !generated.data) {
           throw new Error(generated.message || "AI provider did not return portrait image data");
         }
         ensureDir();
-        absPath = portraitPath(actorId);
+        absPath = join(PORTRAITS_DIR, `${actorId}.png`);
         writeFileSync(absPath, generated.data);
       } else {
-        absPath = await runImageGen(prompt, actorId);
+        absPath = await runImageGen(basePrompt, actorId);
       }
 
       // Normalize: ensure the file is at PORTRAITS_DIR/<actorId>.png so the
       // public URL is stable and predictable.
-      const canonical = portraitPath(actorId);
+      const canonical = join(PORTRAITS_DIR, `${actorId}.png`);
       if (absPath !== canonical) {
         try {
           // Copy bytes (handles cross-dir moves where rename would EXDEV).

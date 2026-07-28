@@ -6,10 +6,11 @@ export interface AuthUser {
   id: string;
   email: string;
   role: string;
-  tenant: { id: string; name: string; slug: string; plan: string };
+  tenant: { id: string; name: string; slug: string; plan: string; operatingMode: "mss" | "individual" | null };
   passwordMustChange?: boolean;
   mfaEnabled?: boolean;
   mfaVerifiedAt?: string | null;
+  mfaSessionVerifiedAt?: string | null;
   access_mode?: "credentialed" | "guest";
   capabilities?: string[];
 }
@@ -27,6 +28,7 @@ interface AuthCtx {
 
 const Ctx = createContext<AuthCtx | null>(null);
 const HISTORY_AUTH_KEY = "__optrasightAuth";
+const TEST_AUTH_BYPASS = import.meta.env.VITE_OPTRASIGHT_TEST_AUTH_BYPASS === "1";
 let historyAuthPatchInstalled = false;
 
 type HistoryAuthState = {
@@ -104,6 +106,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setActiveTenantId(activeTid);
   }, [activeTid]);
 
+  // Manual-test only: when launched with VITE_OPTRASIGHT_TEST_AUTH_BYPASS=1,
+  // ask the server for a short-lived test session and skip the login page.
+  useEffect(() => {
+    if (STATIC_DEMO_MODE || !TEST_AUTH_BYPASS || readHistoryAuthToken()) return;
+    let cancelled = false;
+    setLoading(true);
+    apiRequest("GET", "/api/v1/auth/test-session")
+      .then((r) => r.json())
+      .then(async (data) => {
+        if (cancelled || !data?.access_token) return;
+        setTok(data.access_token);
+        setAuthToken(data.access_token);
+        writeHistoryAuthToken(data.access_token);
+        const me = await apiRequest("GET", "/api/v1/me");
+        if (!me.ok || cancelled) return;
+        const u = await me.json();
+        setUser(u);
+        setActiveTid(u.tenant?.id ?? null);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        writeHistoryAuthToken(null);
+        setTok(null);
+        setUser(null);
+        setActiveTid(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Rehydrate a still-valid server session after refresh or duplicated tab.
   // This deliberately avoids localStorage/sessionStorage/IndexedDB/cookies.
   useEffect(() => {
@@ -150,21 +186,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = async (email: string, password: string, mfaCode?: string) => {
-    setLoading(true);
-    try {
-      const r = await apiRequest("POST", "/api/v1/auth/login", { email, password, mfaCode });
-      const data = await r.json();
-      setTok(data.access_token);
-      setAuthToken(data.access_token);
-      writeHistoryAuthToken(data.access_token);
-      const me = await apiRequest("GET", "/api/v1/me");
-      if (me.ok) {
-        const u = await me.json();
-        setUser(u);
-        setActiveTid(u.tenant?.id ?? null);
-      }
-    } finally {
-      setLoading(false);
+    // Do not toggle the provider's boot-time `loading` flag here. Doing so
+    // unmounts <Login> while a 401 MFA challenge is in flight, which discards
+    // the component's credentials -> MFA step transition.
+    const r = await apiRequest("POST", "/api/v1/auth/login", { email, password, mfaCode });
+    const data = await r.json();
+    setTok(data.access_token);
+    setAuthToken(data.access_token);
+    writeHistoryAuthToken(data.access_token);
+    const me = await apiRequest("GET", "/api/v1/me");
+    if (me.ok) {
+      const u = await me.json();
+      setUser(u);
+      setActiveTid(u.tenant?.id ?? null);
     }
   };
 

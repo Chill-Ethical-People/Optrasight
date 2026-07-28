@@ -1,7 +1,7 @@
 {
-  "name": "OptraSight",
+  "name": "OptraSight Batch Two",
   "short_name": "OptraSight",
-  "description": "Evidence-led signal intelligence for MSSP threat operations.",
+  "description": "Evidence-led threat intelligence operations for client-aware triage, detection engineering, and brief delivery.",
   "icons": [
     {
       "src": "/brand/optrasight-smooth-mark-light-256.png",
