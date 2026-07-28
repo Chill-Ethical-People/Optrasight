@@ -94,6 +94,28 @@ service, so it does not depend on NSSM or another unsigned third-party executabl
 The launcher rotates stdout/stderr at 50 MB, preserves one prior file, and records each
 process restart. The separate health task records failed probes and restarts the backend.
 
+## Local LLM TLS
+
+Local Ollama connectivity is opt-in. Add the following to the service `.env`, then restart
+OptraSight:
+
+```dotenv
+OPTRASIGHT_ALLOW_LOCAL_AI=1
+OPTRASIGHT_LOCAL_AI_CA_CERT=/absolute/path/to/local-ai-ca.pem
+```
+
+On Windows, use an absolute Windows path such as
+`D:\OptraSight\certificates\local-ai-ca.pem`. Grant the OptraSight service identity read
+access to that file. The CA bundle may contain one or more PEM certificates and must be no
+larger than 1 MB. Configure the Ollama base URL with a hostname or IP address present in the
+server certificate's subject alternative names.
+
+The local-network exception is limited to the Ollama connector and recognizes loopback,
+RFC1918 IPv4, IPv6 ULA, and reserved local hostnames. Link-local metadata addresses remain
+blocked. Omitting `OPTRASIGHT_LOCAL_AI_CA_CERT` uses the operating system trust store. Do
+not set `NODE_TLS_REJECT_UNAUTHORIZED=0` and do not add curl `--insecure`; both would turn a
+local certificate problem into a platform-wide interception risk.
+
 ## Dockerfile
 
 A starter `Dockerfile` ships at the repo root. Build:

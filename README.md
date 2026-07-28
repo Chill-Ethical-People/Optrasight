@@ -173,13 +173,15 @@ diagnostic, and non-interactive commands.
 
 ### 5. Add your AI provider key
 
-Open `/#/ai-setup` and add your own AI provider key. OptraSight supports live routing for DeepSeek, OpenAI, Anthropic, Google Gemini, and Kimi.
+Open `/#/ai-setup` and add your own AI provider key. OptraSight supports live routing for DeepSeek, OpenAI, Anthropic, Google Gemini, Kimi, and self-hosted Ollama.
 
 Provider- and exact-model prompt tuning is centralized in `server/prompts/ai-prompts.json`. The registry applies auditable global and per-task overlays while each task keeps its validation and security baseline next to the implementation.
 
 The provider editor shows curated current defaults for new connections and queries the configured account for its available models when editing an existing connection. Model changes are explicit and must pass a live connection test before they can be routed to production AI tasks; OptraSight does not silently upgrade an assigned model.
 
 AI provider keys are stored separately from public seed data. They are not bundled with the repository and are not restored from the public seed data. When strict mode is enabled, unavailable or misconfigured providers return real setup errors instead of silent mock output.
+
+Local Ollama access is disabled by default. To connect an administrator-approved loopback or private-network model host, set `OPTRASIGHT_ALLOW_LOCAL_AI=1`. HTTPS endpoints issued by a private CA can additionally use `OPTRASIGHT_LOCAL_AI_CA_CERT` with an absolute path to the CA PEM bundle. OptraSight passes that bundle only to the local Ollama transport and continues to verify the certificate chain and hostname; it never disables TLS verification globally. See [DEPLOYMENT.md](./DEPLOYMENT.md#local-llm-tls).
 
 ## What Ships In Git
 

@@ -28,6 +28,12 @@ OptraSight Batch One release is an MSSP **back-office** tool. It is assumed to r
 * An authentication boundary (the dashboard's own login is a baseline; a corporate SSO/SAML layer in front is recommended for production deployments).
 * A private network — port 5000 must **never** be exposed directly to the public internet.
 
+Local Ollama access is additionally gated by `OPTRASIGHT_ALLOW_LOCAL_AI=1`. Its private CA
+support uses a bounded, operator-controlled PEM bundle from
+`OPTRASIGHT_LOCAL_AI_CA_CERT`; certificate-chain and hostname checks remain enabled. The
+application must never use global TLS bypasses such as `NODE_TLS_REJECT_UNAUTHORIZED=0` or
+curl `--insecure`.
+
 The internal authn model is intentionally simple but production-hardened enough for a private back-office deployment:
 
 1. **Passwords are hashed on login** — legacy plaintext seeded rows are transparently rehashed to `scrypt:v1` after the first successful login. New password-management UI should write the same format.

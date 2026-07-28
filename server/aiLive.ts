@@ -20,7 +20,7 @@ import { createDecipheriv, createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { AiProvider, AiProviderKind } from "@shared/schema";
-import { aiProviderBaseUrlSyncFailure } from "./aiProviderSecurity";
+import { aiProviderBaseUrlSyncFailure, resolveLocalAiTlsConfig } from "./aiProviderSecurity";
 import { aiProviderProtocolArgs, curlRequestSync, type CurlHttpResult } from "./httpClient";
 
 const GEMINI_SAFE_FALLBACK_MODEL = "gemini-3.6-flash";
@@ -98,7 +98,7 @@ function curlPost(
   headers: Record<string, string>,
   body: string,
   timeoutSeconds?: number,
-  opts?: { httpVersion?: "1.1" | "auto"; protocolGuard?: boolean },
+  opts?: { httpVersion?: "1.1" | "auto"; protocolGuard?: boolean; providerKind?: AiProviderKind },
 ): CurlResult {
   const t = Math.max(1, Math.min(MAX_TIMEOUT_SECONDS, timeoutSeconds ?? TIMEOUT_SECONDS));
   const { latencyMs: _latencyMs, ...result } = curlRequestSync({
@@ -109,9 +109,10 @@ function curlPost(
     timeoutSeconds: t,
     maxTimeoutSeconds: MAX_TIMEOUT_SECONDS,
     contentType: "application/json",
-    protocolArgs: opts?.protocolGuard === false ? undefined : aiProviderProtocolArgs(url),
+    protocolArgs: opts?.protocolGuard === false ? undefined : aiProviderProtocolArgs(url, opts?.providerKind),
     statusMarker: "__BG_HTTP_STATUS__",
     httpVersion: opts?.httpVersion,
+    providerKind: opts?.providerKind,
   });
   return result;
 }
@@ -256,6 +257,7 @@ function curlPostStreaming(
   headers: Record<string, string>,
   body: string,
   timeoutSeconds?: number,
+  opts?: { providerKind?: AiProviderKind },
 ): CurlResult {
   const t = Math.max(1, Math.min(MAX_TIMEOUT_SECONDS, timeoutSeconds ?? TIMEOUT_SECONDS));
   const { latencyMs: _latencyMs, ...r } = curlRequestSync({
@@ -267,10 +269,11 @@ function curlPostStreaming(
     maxTimeoutSeconds: MAX_TIMEOUT_SECONDS,
     contentType: "application/json",
     accept: "text/event-stream",
-    protocolArgs: aiProviderProtocolArgs(url),
+    protocolArgs: aiProviderProtocolArgs(url, opts?.providerKind),
     noBuffer: true,
     maxBuffer: 64 * 1024 * 1024,
     statusMarker: "__BG_HTTP_STATUS__",
+    providerKind: opts?.providerKind,
   });
   const status = r.status;
   const stream = r.body;
@@ -330,18 +333,25 @@ function curlPostStreaming(
 function curlGet(
   url: string,
   headers: Record<string, string>,
-  opts?: { httpVersion?: "1.1" | "auto"; protocolGuard?: boolean },
+  opts?: { httpVersion?: "1.1" | "auto"; protocolGuard?: boolean; providerKind?: AiProviderKind },
 ): CurlResult {
   const { latencyMs: _latencyMs, ...result } = curlRequestSync({
     method: "GET",
     url,
     headers,
     timeoutSeconds: TIMEOUT_SECONDS,
-    protocolArgs: opts?.protocolGuard === false ? undefined : aiProviderProtocolArgs(url),
+    protocolArgs: opts?.protocolGuard === false ? undefined : aiProviderProtocolArgs(url, opts?.providerKind),
     statusMarker: "__BG_HTTP_STATUS__",
     httpVersion: opts?.httpVersion,
+    providerKind: opts?.providerKind,
   });
   return result;
+}
+
+function providerTransportConfigurationFailure(kind: AiProviderKind, baseUrl: string): string | null {
+  const baseUrlFailure = aiProviderBaseUrlSyncFailure(baseUrl, kind);
+  if (baseUrlFailure) return baseUrlFailure;
+  return resolveLocalAiTlsConfig(kind, baseUrl).error ?? null;
 }
 
 // ---------- per-provider base URL resolution ----------
@@ -647,7 +657,7 @@ export function liveChatJsonDiagnostic(provider: AiProvider, opts: LiveChatOptio
   // Ollama is the only family that can run keyless; everyone else needs a key.
   if (!apiKey && kind !== "ollama") return out("missing API key on configured provider");
   if (!base) return out("provider has no base URL");
-  const baseUrlFailure = aiProviderBaseUrlSyncFailure(base);
+  const baseUrlFailure = providerTransportConfigurationFailure(kind, base);
   if (baseUrlFailure) return out(baseUrlFailure);
   if (!model) return out("provider has no model configured");
 
@@ -719,16 +729,16 @@ export function liveChatJsonDiagnostic(provider: AiProvider, opts: LiveChatOptio
           kind === "kimi");
       if (useStreaming) requestBody.stream = true;
       let r = useStreaming
-        ? curlPostStreaming(url, headers, JSON.stringify(requestBody), timeoutSeconds)
-        : curlPost(url, headers, JSON.stringify(requestBody), timeoutSeconds);
+        ? curlPostStreaming(url, headers, JSON.stringify(requestBody), timeoutSeconds, { providerKind: kind })
+        : curlPost(url, headers, JSON.stringify(requestBody), timeoutSeconds, { providerKind: kind });
       if (kind === "deepseek" && !r.ok && r.status === 400 && requestBody.response_format) {
         // DeepSeek is strict about JSON mode. If the provider rejects
         // response_format for a model/region-specific reason, retry once with
         // explicit JSON instructions and parse the returned content ourselves.
         delete requestBody.response_format;
         r = useStreaming
-          ? curlPostStreaming(url, headers, JSON.stringify(requestBody), timeoutSeconds)
-          : curlPost(url, headers, JSON.stringify(requestBody), timeoutSeconds);
+          ? curlPostStreaming(url, headers, JSON.stringify(requestBody), timeoutSeconds, { providerKind: kind })
+          : curlPost(url, headers, JSON.stringify(requestBody), timeoutSeconds, { providerKind: kind });
       }
       const preview = (r.body || "").slice(0, 400);
       if (!r.ok) return out(`HTTP ${r.status || "network"}${r.error ? " — " + r.error : ""}`, r.status, preview);
@@ -817,7 +827,7 @@ export function liveChatJsonDiagnostic(provider: AiProvider, opts: LiveChatOptio
         messages: [{ role: "user", content: anthropicUserContent }],
         temperature,
       };
-      const r = curlPost(url, headers, JSON.stringify(requestBody), timeoutSeconds);
+      const r = curlPost(url, headers, JSON.stringify(requestBody), timeoutSeconds, { providerKind: kind });
       const preview = (r.body || "").slice(0, 400);
       if (!r.ok) return out(`HTTP ${r.status || "network"}${r.error ? " — " + r.error : ""}`, r.status, preview);
       const parsed = tryParseJsonObject(r.body);
@@ -862,7 +872,10 @@ export function liveChatJsonDiagnostic(provider: AiProvider, opts: LiveChatOptio
         generationConfig,
       };
       if (canUseUrlContext) requestBody.tools = [{ url_context: {} }];
-      let r = curlPost(url, headers, JSON.stringify(requestBody), timeoutSeconds, { httpVersion: "auto" });
+      let r = curlPost(url, headers, JSON.stringify(requestBody), timeoutSeconds, {
+        httpVersion: "auto",
+        providerKind: kind,
+      });
       if (!r.ok && isRetryableGeminiTransportFailure(r)) {
         const retryModel = geminiFallbackModel(effectiveModel);
         if (!retryModel) {
@@ -870,7 +883,10 @@ export function liveChatJsonDiagnostic(provider: AiProvider, opts: LiveChatOptio
           return out(`HTTP ${r.status || "network"}${r.error ? " — " + r.error : ""}`, r.status, preview);
         }
         const retryUrl = `${base}/v1beta/models/${encodeURIComponent(retryModel)}:generateContent`;
-        r = curlPost(retryUrl, headers, JSON.stringify(requestBody), timeoutSeconds, { httpVersion: "auto" });
+        r = curlPost(retryUrl, headers, JSON.stringify(requestBody), timeoutSeconds, {
+          httpVersion: "auto",
+          providerKind: kind,
+        });
       }
       const preview = (r.body || "").slice(0, 400);
       if (!r.ok) return out(`HTTP ${r.status || "network"}${r.error ? " — " + r.error : ""}`, r.status, preview);
@@ -934,7 +950,7 @@ export function liveListModels(provider: AiProvider): LiveModelListResult {
 
   if (!apiKey && kind !== "ollama") return result(false, `${provider.label}: missing API key`);
   if (!base) return result(false, `${provider.label}: missing base URL`);
-  const baseUrlFailure = aiProviderBaseUrlSyncFailure(base);
+  const baseUrlFailure = providerTransportConfigurationFailure(kind, base);
   if (baseUrlFailure) return result(false, `${provider.label}: ${baseUrlFailure}`);
 
   let url = "";
@@ -961,7 +977,7 @@ export function liveListModels(provider: AiProvider): LiveModelListResult {
     return result(false, `${provider.label}: model discovery is not available for this connector`);
   }
 
-  const response = curlGet(url, headers);
+  const response = curlGet(url, headers, { providerKind: kind });
   if (!response.ok) {
     return result(
       false,
@@ -1006,7 +1022,7 @@ export function livePing(provider: AiProvider): LivePingResult {
   if (!base) {
     return { ok: false, latencyMs: 0, message: `${provider.label}: missing base URL` };
   }
-  const baseUrlFailure = aiProviderBaseUrlSyncFailure(base);
+  const baseUrlFailure = providerTransportConfigurationFailure(kind, base);
   if (baseUrlFailure) {
     return { ok: false, latencyMs: 0, message: `${provider.label}: ${baseUrlFailure}` };
   }
@@ -1033,6 +1049,8 @@ export function livePing(provider: AiProvider): LivePingResult {
             messages: [{ role: "user", content: "Reply with ok." }],
             ...(openAiUsesCompletionTokenParam(kind, selectedModel) ? { max_completion_tokens: 8 } : { max_tokens: 8 }),
           }),
+          undefined,
+          { providerKind: kind },
         );
         const latencyMs = Date.now() - t0;
         if (probe.ok) {
@@ -1061,7 +1079,7 @@ export function livePing(provider: AiProvider): LivePingResult {
       const url = modelsUrl(kind, base);
       const headers: Record<string, string> = {};
       if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
-      const r = curlGet(url, headers);
+      const r = curlGet(url, headers, { providerKind: kind });
       const latencyMs = Date.now() - t0;
       if (r.ok) {
         return { ok: true, latencyMs, message: `${provider.label} (${provider.model}) — connected` };
@@ -1084,7 +1102,7 @@ export function livePing(provider: AiProvider): LivePingResult {
         max_tokens: 1,
         messages: [{ role: "user", content: "ping" }],
       });
-      const r = curlPost(url, headers, body);
+      const r = curlPost(url, headers, body, undefined, { providerKind: kind });
       const latencyMs = Date.now() - t0;
       if (r.ok) return { ok: true, latencyMs, message: `${provider.label} (${provider.model}) — connected` };
       return {
@@ -1109,7 +1127,10 @@ export function livePing(provider: AiProvider): LivePingResult {
       let lastFailure: CurlResult | null = null;
       for (const attemptModel of modelAttempts) {
         const url = `${base}/v1beta/models/${encodeURIComponent(attemptModel)}:generateContent`;
-        const r = curlPost(url, { "X-goog-api-key": apiKey || "" }, body, 18, { httpVersion: "auto" });
+        const r = curlPost(url, { "X-goog-api-key": apiKey || "" }, body, 18, {
+          httpVersion: "auto",
+          providerKind: kind,
+        });
         const latencyMs = Date.now() - t0;
         if (r.ok) {
           const parsed = tryParseJsonObject(r.body);
@@ -1203,7 +1224,7 @@ export function liveGenerateImage(
   const timeoutSeconds = opts?.timeoutSeconds ?? 300;
 
   if (!apiKey) return { ok: false, message: `${provider.label}: missing API key` };
-  const baseUrlFailure = aiProviderBaseUrlSyncFailure(base);
+  const baseUrlFailure = providerTransportConfigurationFailure(kind, base);
   if (baseUrlFailure) return { ok: false, message: `${provider.label}: ${baseUrlFailure}` };
 
   if (kind === "openai" || kind === "azure-openai") {
@@ -1222,6 +1243,7 @@ export function liveGenerateImage(
         quality: "medium",
       }),
       timeoutSeconds,
+      { providerKind: kind },
     );
     const preview = (r.body || "").slice(0, 400);
     if (!r.ok)
@@ -1261,7 +1283,7 @@ export function liveGenerateImage(
           },
         }),
         timeoutSeconds,
-        { httpVersion: "auto" },
+        { httpVersion: "auto", providerKind: kind },
       );
       last = r;
       const parsed = tryParseJsonObject(r.body);
