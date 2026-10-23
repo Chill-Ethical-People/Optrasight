@@ -2,6 +2,11 @@
 
 OptraSight is a single-process Node.js app. The server binds to one port and serves both the JSON API (`/api/*`) and the static client bundle.
 
+Use Node.js **22.23.4 or a later stable 22.x release**. Both container stages pin
+22.23.4; rebuilding with an old cached image or only replacing application files
+does not patch an already running Node process. Read the
+[runtime security upgrade checklist](docs/NODE_RUNTIME_SECURITY.md) before rollout.
+
 ## Recommended target
 
 * **Docker container** behind **Cloudflare Tunnel** (or any TLS-terminating reverse proxy).

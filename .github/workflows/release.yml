@@ -20,7 +20,7 @@ jobs:
       fail-fast: false
       matrix:
         node-version:
-          - "20.x"
+          - "22.23.4"
           - "22.x"
 
     steps:
@@ -31,6 +31,7 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node-version }}
+          check-latest: true
           cache: npm
 
       - name: Install dependencies
@@ -41,6 +42,21 @@ jobs:
 
       - name: Build production bundle
         run: npm run build
+
+      - name: Smoke-test production runtime with disposable data
+        run: npm run test:runtime
+
+  container:
+    name: Patched Node production container
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+      - name: Build patched container
+        run: docker build --pull -t optrasight-runtime-check .
+      - name: Smoke-test isolated container without external network access
+        run: docker run --rm --network none -i --entrypoint node optrasight-runtime-check - < scripts/smoke-node-runtime.cjs
 
   snyk:
     name: Snyk dependency security
@@ -55,7 +71,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: "22.x"
+          node-version-file: .nvmrc
           cache: npm
 
       - name: Install dependencies
@@ -86,6 +102,7 @@ jobs:
     needs:
       - quality
       - snyk
+      - container
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -98,7 +115,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: "22.x"
+          node-version-file: .nvmrc
           cache: npm
 
       - name: Install dependencies
@@ -125,7 +142,9 @@ jobs:
             cp data/secrets/*.template.db "${RELEASE_DIR}/data/secrets/" 2>/dev/null || true
           fi
           cp -R scripts "${RELEASE_DIR}/scripts"
-          cp package.json package-lock.json .env.example "${RELEASE_DIR}/"
+          cp package.json package-lock.json .env.example .npmrc .nvmrc "${RELEASE_DIR}/"
+          mkdir -p "${RELEASE_DIR}/docs"
+          cp docs/NODE_RUNTIME_SECURITY.md "${RELEASE_DIR}/docs/"
           cp README.md LICENSE SECURITY.md VERIFYING.md DEPLOYMENT.md CONTRIBUTING.md ARCHITECTURE.md "${RELEASE_DIR}/"
 
           if [ -d signing/keys ]; then
@@ -135,6 +154,9 @@ jobs:
 
           cat > "${RELEASE_DIR}/RUNNING_RELEASE.md" <<'EOF'
           # Running An OptraSight Release Archive
+
+          Install Node.js 22.23.4 or a later stable 22.x release first.
+          See docs/NODE_RUNTIME_SECURITY.md for upgrades and verification.
 
           ```bash
           npm ci --omit=dev
