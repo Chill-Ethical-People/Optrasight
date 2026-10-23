@@ -7,20 +7,21 @@
 # =====================================================================
 
 # ---------- Stage 1: build ----------
-FROM node:20-alpine AS builder
+FROM node:22.23.4-alpine AS builder
 WORKDIR /app
 
 # native deps (better-sqlite3 needs python + build-base on alpine)
 RUN apk add --no-cache python3 make g++
 
-COPY package.json package-lock.json* ./
+COPY package.json package-lock.json .npmrc .nvmrc ./
+COPY scripts/check-node-version.cjs ./scripts/check-node-version.cjs
 RUN npm ci
 
 COPY . .
 RUN npm run build
 
 # ---------- Stage 2: runtime ----------
-FROM node:20-alpine
+FROM node:22.23.4-alpine
 WORKDIR /app
 
 ENV NODE_ENV=production
@@ -31,6 +32,7 @@ ENV OPTRASIGHT_STRICT=1
 # Bring only what the runtime needs.
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/package.json ./
+COPY --from=builder /app/scripts/check-node-version.cjs ./scripts/check-node-version.cjs
 COPY --from=builder /app/node_modules ./node_modules
 
 # Persist SQLite + portrait uploads outside the container.

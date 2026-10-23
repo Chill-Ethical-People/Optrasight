@@ -1,3 +1,4 @@
+import "../scripts/check-node-version.cjs";
 import "dotenv/config";
 import express, { Response, NextFunction } from 'express';
 import type { Request } from 'express';
